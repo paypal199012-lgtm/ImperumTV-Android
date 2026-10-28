@@ -5,7 +5,9 @@ set -e
 OUT=build-project
 rm -rf "$OUT"
 mkdir -p "$OUT/app/src/main/java/tv/imperum/app" \
-         "$OUT/app/src/main/res/drawable" \
+         "$OUT/app/src/main/res/drawable-xhdpi" \
+         "$OUT/app/src/main/res/drawable-xxhdpi" \
+         "$OUT/app/src/main/res/drawable-xxxhdpi" \
          "$OUT/app/src/main/assets/www/css" \
          "$OUT/app/src/main/assets/www/js" \
          "$OUT/app/src/main/assets/www/img"
@@ -14,7 +16,11 @@ cp settings.gradle.kts build.gradle.kts gradle.properties imperum.keystore "$OUT
 cp app.build.gradle.kts "$OUT/app/build.gradle.kts"
 cp AndroidManifest.xml "$OUT/app/src/main/AndroidManifest.xml"
 cp MainActivity.kt "$OUT/app/src/main/java/tv/imperum/app/MainActivity.kt"
-cp ic_launcher.png banner.png "$OUT/app/src/main/res/drawable/"
+cp Recorder.kt "$OUT/app/src/main/java/tv/imperum/app/Recorder.kt"
+# Bilder in der richtigen Auflösung, damit sie auf dem Fernseher scharf und mittig sind
+cp banner.png "$OUT/app/src/main/res/drawable-xhdpi/banner.png"
+cp banner-2x.png "$OUT/app/src/main/res/drawable-xxhdpi/banner.png"
+cp ic_launcher.png "$OUT/app/src/main/res/drawable-xxxhdpi/ic_launcher.png"
 
 cp index.html "$OUT/app/src/main/assets/www/index.html"
 cp style.css "$OUT/app/src/main/assets/www/css/style.css"

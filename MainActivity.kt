@@ -32,6 +32,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -90,7 +91,7 @@ class MainActivity : Activity() {
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(20_000)
         player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(http))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, http)))
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -146,22 +147,48 @@ class MainActivity : Activity() {
             settings.allowFileAccessFromFileURLs = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            settings.useWideViewPort = false
-            settings.loadWithOverviewMode = false
+            // Die Oberfläche ist für 1920 x 1080 gebaut: so groß anlegen und aufs Display einpassen
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            settings.textZoom = 100
             settings.setSupportZoom(false)
             settings.builtInZoomControls = false
             isFocusable = true
             isFocusableInTouchMode = true
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    fitToScreen()
+                }
+            }
             webChromeClient = WebChromeClient()
             addJavascriptInterface(Bridge(), "AndroidBridge")
         }
         root.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
+        // Bildschirmgröße ändert sich (Start, Drehen, Fernseher meldet die Größe erst später): neu einpassen
+        root.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) fitToScreen()
+        }
+
         setContentView(root)
         webView.loadUrl("file:///android_asset/www/index.html")
+
+        // Geplante Aufnahmen: Wecker neu stellen, verpasste Starts nachholen
+        try { Recorder.armAll(this) } catch (e: Exception) { }
+        // Android 13+: Erlaubnis für die Benachrichtigung während einer Aufnahme
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            try { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7) } catch (e: Exception) { }
+        }
         webView.requestFocus()
         handler.post(ticker)
+    }
+
+    /** Oberfläche neu an die Displaygröße anpassen */
+    private fun fitToScreen() {
+        handler.postDelayed({
+            webView.evaluateJavascript("window.dispatchEvent(new Event('resize'))", null)
+        }, 100)
     }
 
     // ---------- Tasten der Fernbedienung ----------
@@ -370,6 +397,16 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun duration(): Double = cachedDuration
 
+        /** Zu einer festen Stelle springen (für "Weiterschauen") */
+        @JavascriptInterface
+        fun seekTo(seconds: Double) {
+            handler.post {
+                if (!player.isCurrentMediaItemLive || player.isCurrentMediaItemSeekable) {
+                    player.seekTo((seconds * 1000).toLong().coerceAtLeast(0))
+                }
+            }
+        }
+
         @JavascriptInterface
         fun seekBy(seconds: Double) {
             handler.post {
@@ -456,6 +493,36 @@ class MainActivity : Activity() {
                     // Kein Browser auf dem Gerät (z. B. manche Fire-TV-Sticks): einfach nichts tun
                 }
             }
+        }
+
+        // ---------- Aufnahmen ----------
+
+        /** Aufnahme planen. Rückgabe: Nummer oder "!Fehlertext" */
+        @JavascriptInterface
+        fun recSchedule(json: String): String =
+            try { Recorder.schedule(this@MainActivity, json) } catch (e: Exception) { "!" + (e.message ?: "Fehler") }
+
+        /** Alle Aufnahmen als JSON-Liste */
+        @JavascriptInterface
+        fun recList(): String = Recorder.all(this@MainActivity).toString()
+
+        /** Geplante Aufnahme absagen bzw. laufende stoppen */
+        @JavascriptInterface
+        fun recCancel(id: String) { Recorder.cancel(this@MainActivity, id) }
+
+        /** Aufnahme samt Datei löschen */
+        @JavascriptInterface
+        fun recDelete(id: String) { Recorder.delete(this@MainActivity, id) }
+
+        /** Freier Speicher für Aufnahmen */
+        @JavascriptInterface
+        fun recStorage(): String = Recorder.storageJson(this@MainActivity)
+
+        /** Adresse zum Abspielen einer fertigen Aufnahme */
+        @JavascriptInterface
+        fun recFileUrl(id: String): String {
+            val path = Recorder.find(this@MainActivity, id)?.optString("file") ?: return ""
+            return if (path.isBlank()) "" else Uri.fromFile(java.io.File(path)).toString()
         }
 
         @JavascriptInterface
