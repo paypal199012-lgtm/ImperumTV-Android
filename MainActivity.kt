@@ -146,22 +146,40 @@ class MainActivity : Activity() {
             settings.allowFileAccessFromFileURLs = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            settings.useWideViewPort = false
-            settings.loadWithOverviewMode = false
+            // Die Oberfläche ist für 1920 x 1080 gebaut: so groß anlegen und aufs Display einpassen
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            settings.textZoom = 100
             settings.setSupportZoom(false)
             settings.builtInZoomControls = false
             isFocusable = true
             isFocusableInTouchMode = true
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    fitToScreen()
+                }
+            }
             webChromeClient = WebChromeClient()
             addJavascriptInterface(Bridge(), "AndroidBridge")
         }
         root.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
+        // Bildschirmgröße ändert sich (Start, Drehen, Fernseher meldet die Größe erst später): neu einpassen
+        root.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) fitToScreen()
+        }
+
         setContentView(root)
         webView.loadUrl("file:///android_asset/www/index.html")
         webView.requestFocus()
         handler.post(ticker)
+    }
+
+    /** Oberfläche neu an die Displaygröße anpassen */
+    private fun fitToScreen() {
+        handler.postDelayed({
+            webView.evaluateJavascript("window.dispatchEvent(new Event('resize'))", null)
+        }, 100)
     }
 
     // ---------- Tasten der Fernbedienung ----------
