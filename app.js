@@ -88,8 +88,16 @@
     // =====================================================================
 
     var scale = 1, offX = 0, offY = 0;
+    function viewportSize() {
+        var de = document.documentElement;
+        var w = window.innerWidth || (de && de.clientWidth) || 0;
+        var hh = window.innerHeight || (de && de.clientHeight) || 0;
+        // Größe noch unbekannt (manche Fernseher melden sie erst später): vorerst Full HD annehmen
+        if (w < 100 || hh < 100) { w = 1920; hh = 1080; }
+        return { w: w, h: hh };
+    }
     function applyScale() {
-        var w = window.innerWidth || 1920, hh = window.innerHeight || 1080;
+        var vp = viewportSize(), w = vp.w, hh = vp.h;
         scale = Math.min(w / 1920, hh / 1080);
         offX = Math.round((w - 1920 * scale) / 2);
         offY = Math.round((hh - 1080 * scale) / 2);
@@ -845,7 +853,7 @@
 
         /** Bildbereich als Anteil des sichtbaren Fensters (für Android) */
         fractions: function (rect) {
-            var w = window.innerWidth || 1920, hh = window.innerHeight || 1080;
+            var vp = viewportSize(), w = vp.w, hh = vp.h;
             if (!rect) return { x: 0, y: 0, w: 1, h: 1 };
             return {
                 x: (offX + rect.x * scale) / w, y: (offY + rect.y * scale) / hh,
@@ -2169,6 +2177,11 @@
     function boot() {
         applyScale();
         window.addEventListener('resize', applyScale);
+        window.addEventListener('load', applyScale);
+        window.addEventListener('orientationchange', function () { setTimeout(applyScale, 300); });
+        // Zur Sicherheit kurz nach dem Start nochmal einpassen
+        setTimeout(applyScale, 300);
+        setTimeout(applyScale, 1200);
         registerKeys();
         Favs.load();
         Player.init();
