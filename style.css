@@ -1,0 +1,476 @@
+/* ImperumTV – Samsung TV (1920 x 1080) */
+
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0f1115;
+}
+/* Hinter der Oberfläche liegt das Videobild: html selbst muss durchsichtig sein */
+html { background: transparent; }
+body {
+    color: #f2efe8;
+    font-family: "SamsungOne", "Samsung Sans", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Während Video läuft, muss alles hinter der Oberfläche durchsichtig sein */
+body.video-mode, body.preview-mode { background: transparent; }
+body.video-mode #app { display: none; }
+
+#av-player, #html-player {
+    position: absolute;
+    left: 0; top: 0;
+    width: 0; height: 0;
+    background: transparent;
+}
+#html-player { background: #000; }
+
+#stage {
+    position: absolute;
+    left: 0; top: 0;
+    width: 1920px;
+    height: 1080px;
+    transform-origin: 0 0;
+    overflow: hidden;
+}
+
+#app {
+    position: absolute;
+    left: 0; top: 0;
+    width: 1920px;
+    height: 1080px;
+    background:
+        linear-gradient(160deg, transparent 30%, rgba(217,176,102,.30) 31%, rgba(217,176,102,.08) 47%, transparent 48%),
+        linear-gradient(115deg, transparent 58%, rgba(217,176,102,.14) 59%, rgba(217,176,102,.14) 70%, transparent 71%),
+        linear-gradient(20deg, transparent 62%, rgba(0,0,0,.40) 63%, rgba(0,0,0,.40) 69%, transparent 70%),
+        linear-gradient(135deg, #1d1a17, #0c0d10);
+}
+body.preview-mode #app { background: transparent; }
+
+.hidden { display: none !important; }
+.gold { color: #f4dc9e; }
+.muted { color: #a7a39a; }
+
+/* ---------- Fokus ---------- */
+.focusable { outline: none; }
+.focused { box-shadow: 0 0 0 4px #f4dc9e, 0 0 28px rgba(244,220,158,.45) !important; }
+
+/* ---------- Kopfzeile ---------- */
+.topbar {
+    position: absolute;
+    left: 0; top: 0; right: 0;
+    height: 110px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.brand {
+    font-size: 54px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    color: #e8c98a;
+    text-shadow: 0 2px 8px rgba(0,0,0,.6);
+}
+.brand img { height: 150px; vertical-align: middle; border-radius: 16px; margin-top: 50px; }
+.screen-title {
+    position: absolute;
+    left: 70px; top: 34px;
+    font-size: 40px;
+    font-weight: bold;
+    color: #f4dc9e;
+}
+.hint {
+    position: absolute;
+    right: 70px; top: 44px;
+    font-size: 24px;
+    color: #a7a39a;
+}
+
+/* ---------- Startbildschirm ---------- */
+.home-circles {
+    position: absolute;
+    left: 0; right: 0; top: 260px;
+    text-align: center;
+}
+.circle {
+    display: inline-block;
+    width: 330px; height: 330px;
+    margin: 0 24px;
+    border-radius: 50%;
+    border: 3px solid rgba(255,255,255,.75);
+    background: rgba(0,0,0,.42);
+    vertical-align: top;
+    text-align: center;
+    position: relative;
+}
+.circle .icon { font-size: 110px; line-height: 1; margin-top: 70px; }
+.circle .label { font-size: 38px; font-weight: bold; margin-top: 18px; letter-spacing: 1px; }
+.circle.focused { background: rgba(217,176,102,.35); transform: scale(1.06); }
+
+.home-tiles {
+    position: absolute;
+    left: 0; right: 0; top: 670px;
+    text-align: center;
+}
+.tile {
+    display: inline-block;
+    width: 190px; height: 120px;
+    margin: 0 10px;
+    border-radius: 10px;
+    border: 2px solid rgba(255,255,255,.5);
+    background: rgba(0,0,0,.45);
+    text-align: center;
+    vertical-align: top;
+}
+.tile .icon { font-size: 44px; margin-top: 16px; }
+.tile .label { font-size: 22px; font-weight: bold; margin-top: 8px; }
+.tile.focused { background: rgba(217,176,102,.35); }
+
+.expiry {
+    position: absolute;
+    left: 0; right: 0; top: 890px;
+    text-align: center;
+    font-size: 32px;
+    font-weight: bold;
+    text-shadow: 0 2px 6px rgba(0,0,0,.7);
+}
+
+/* ---------- Anmeldung ---------- */
+.field-label { font-size: 24px; color: #a7a39a; margin: 22px 0 8px; }
+.input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 18px 22px;
+    font-size: 30px;
+    border-radius: 12px;
+    border: 2px solid #2c323b;
+    background: #20252d;
+    color: #f2efe8;
+}
+.button {
+    display: inline-block;
+    padding: 18px 40px;
+    border-radius: 40px;
+    font-size: 30px;
+    font-weight: bold;
+    background: rgba(255,255,255,.1);
+    color: #f2efe8;
+    margin-right: 16px;
+    text-align: center;
+}
+.button.primary { background: #d9b066; color: #1a1408; }
+.button.focused { background: #f4dc9e; color: #1a1408; }
+.error { color: #f08a7a; font-size: 24px; margin-top: 20px; min-height: 30px; text-align: center; }
+
+/* ---------- Spalten-Ansichten ---------- */
+.columns {
+    position: absolute;
+    left: 0; top: 110px; right: 0; bottom: 0;
+}
+.col {
+    position: absolute;
+    top: 0; bottom: 0;
+    overflow: hidden;
+}
+.col-cats { left: 0; width: 420px; background: rgba(12,13,16,.92); border-right: 1px solid rgba(255,255,255,.08); }
+.col-list { left: 420px; width: 640px; background: rgba(16,18,22,.94); border-right: 1px solid rgba(255,255,255,.08); }
+.col-info { left: 1060px; right: 0; }
+.col-grid { left: 420px; right: 0; background: rgba(16,18,22,.80); }
+
+.scroll {
+    position: absolute;
+    left: 0; right: 0; top: 0; bottom: 0;
+    overflow: hidden;
+}
+.col-head {
+    font-size: 24px;
+    color: #f4dc9e;
+    font-weight: bold;
+    padding: 18px 26px 10px;
+}
+
+.cat {
+    margin: 4px 14px;
+    padding: 14px 18px;
+    font-size: 27px;
+    border-radius: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cat.active { color: #f4dc9e; background: rgba(217,176,102,.22); }
+.cat.focused { background: rgba(217,176,102,.40); color: #fff; }
+
+.row {
+    margin: 4px 14px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    font-size: 28px;
+}
+.row .num { width: 70px; text-align: right; margin-right: 18px; color: #a7a39a; font-size: 24px; }
+.row .logo { width: 84px; height: 56px; margin-right: 18px; object-fit: contain; }
+.row .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .star { color: #d9b066; margin-left: 10px; font-size: 26px; }
+.row.active { background: rgba(217,176,102,.22); }
+.row.focused { background: rgba(217,176,102,.40); }
+
+/* Vorschau + Programm */
+.preview-box {
+    position: absolute;
+    left: 30px; top: 20px;
+    width: 800px; height: 450px;
+    border: 2px solid rgba(217,176,102,.5);
+    border-radius: 10px;
+    background: transparent;
+}
+.preview-box.empty { background: rgba(0,0,0,.85); }
+.preview-placeholder {
+    position: absolute; left: 0; right: 0; top: 190px;
+    text-align: center; font-size: 28px; color: #a7a39a;
+}
+.info-panel {
+    position: absolute;
+    left: 30px; top: 490px; width: 800px; bottom: 30px;
+    padding: 20px 26px;
+    box-sizing: border-box;
+    border-radius: 10px;
+    background: rgba(16,18,22,.94);
+    overflow: hidden;
+}
+.info-title { font-size: 34px; font-weight: bold; margin-bottom: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.epg-row { font-size: 26px; margin: 10px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.epg-row .time { color: #d9b066; margin-right: 14px; }
+.epg-row.later { color: #a7a39a; }
+.progress { height: 6px; background: rgba(255,255,255,.15); border-radius: 3px; margin: 6px 0 14px; }
+.progress .bar { height: 6px; background: #d9b066; border-radius: 3px; width: 0; }
+
+/* ---------- Poster-Raster ---------- */
+.grid { padding: 10px 0 40px 24px; }
+.poster {
+    display: inline-block;
+    vertical-align: top;
+    width: 200px;
+    margin: 14px 14px 10px 0;
+    border-radius: 10px;
+    padding: 6px;
+}
+.poster .img {
+    width: 200px; height: 300px;
+    border-radius: 8px;
+    background: #20252d center / cover no-repeat;
+    position: relative;
+}
+.poster .img .fav { position: absolute; right: 8px; top: 6px; color: #d9b066; font-size: 30px; text-shadow: 0 1px 4px #000; }
+.poster .title { font-size: 22px; margin-top: 8px; height: 56px; overflow: hidden; line-height: 28px; }
+.poster.focused { background: rgba(217,176,102,.40); transform: scale(1.05); }
+.empty-note { font-size: 28px; color: #a7a39a; padding: 40px 30px; }
+
+/* ---------- Detailseiten ---------- */
+.detail-bg {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+    background: #0c0d10 center / cover no-repeat;
+    opacity: .35;
+}
+.detail-shade {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+    background: linear-gradient(90deg, rgba(8,9,12,.97) 0%, rgba(8,9,12,.85) 55%, rgba(8,9,12,.55) 100%);
+}
+.detail {
+    position: absolute;
+    left: 90px; top: 130px; right: 90px; bottom: 60px;
+}
+.detail .cover {
+    position: absolute; left: 0; top: 0;
+    width: 360px; height: 540px;
+    border-radius: 14px;
+    background: #20252d center / cover no-repeat;
+    border: 2px solid rgba(217,176,102,.35);
+}
+.detail .body { position: absolute; left: 420px; top: 0; right: 0; bottom: 0; }
+.detail h1 { margin: 0 0 14px; font-size: 54px; }
+.detail .meta { font-size: 28px; color: #f4dc9e; margin-bottom: 10px; }
+.detail .rating { font-size: 28px; color: #d9b066; margin-bottom: 26px; }
+.detail .plot { font-size: 28px; line-height: 40px; color: rgba(255,255,255,.88); margin-top: 30px; max-height: 280px; overflow: hidden; }
+.detail .credits { font-size: 24px; color: #a7a39a; margin-top: 18px; line-height: 34px; max-height: 110px; overflow: hidden; }
+
+.seasons { margin: 24px 0 10px; white-space: nowrap; }
+.season {
+    display: inline-block;
+    padding: 12px 26px;
+    margin-right: 12px;
+    border-radius: 30px;
+    font-size: 26px;
+    background: rgba(255,255,255,.1);
+}
+.season.active { background: rgba(217,176,102,.5); color: #fff; }
+.season.focused { background: #f4dc9e; color: #1a1408; }
+.episodes { position: absolute; left: 0; right: 0; top: 330px; bottom: 0; overflow: hidden; }
+.episode {
+    padding: 16px 20px;
+    margin: 6px 0;
+    border-radius: 10px;
+    font-size: 28px;
+    background: rgba(255,255,255,.06);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.episode .n { color: #d9b066; margin-right: 18px; font-weight: bold; }
+.episode.focused { background: rgba(217,176,102,.45); }
+
+/* ---------- Konto ---------- */
+.account {
+    position: absolute; left: 460px; top: 170px; width: 1000px;
+    padding: 40px 60px;
+    border-radius: 24px;
+    background: rgba(18,20,25,.92);
+    border: 2px solid rgba(217,176,102,.4);
+}
+.account .line { font-size: 30px; margin: 14px 0; }
+.account .line span { color: #a7a39a; display: inline-block; width: 300px; }
+.account .buttons { margin-top: 36px; }
+
+/* ---------- Player-Oberfläche ---------- */
+#player-ui { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+.pl-top {
+    position: absolute; left: 0; top: 0; right: 0; height: 200px;
+    background: linear-gradient(rgba(0,0,0,.85), transparent);
+    padding: 40px 70px;
+    box-sizing: border-box;
+}
+.pl-title { font-size: 44px; font-weight: bold; }
+.pl-sub { font-size: 28px; color: #f4dc9e; margin-top: 8px; }
+.pl-bottom {
+    position: absolute; left: 0; bottom: 0; right: 0; height: 260px;
+    background: linear-gradient(transparent, rgba(0,0,0,.9));
+    padding: 60px 70px 0;
+    box-sizing: border-box;
+}
+.pl-bar { height: 8px; background: rgba(255,255,255,.25); border-radius: 4px; }
+.pl-bar .bar { height: 8px; background: #d9b066; border-radius: 4px; width: 0; }
+.pl-times { font-size: 24px; color: #ddd; margin-top: 10px; overflow: hidden; }
+.pl-times .right { float: right; }
+.pl-buttons { margin-top: 24px; text-align: center; }
+.pl-btn {
+    display: inline-block;
+    min-width: 90px;
+    padding: 14px 26px;
+    margin: 0 8px;
+    border-radius: 40px;
+    font-size: 26px;
+    background: rgba(255,255,255,.12);
+    text-align: center;
+}
+.pl-btn.focused { background: #f4dc9e; color: #1a1408; }
+.live-badge { display: inline-block; background: #c0392b; color: #fff; font-size: 22px; font-weight: bold; padding: 4px 14px; border-radius: 6px; margin-right: 16px; }
+
+#subtitle {
+    position: absolute; left: 160px; right: 160px; bottom: 120px;
+    text-align: center;
+    font-size: 40px;
+    line-height: 54px;
+    color: #fff;
+    text-shadow: 0 0 6px #000, 0 2px 4px #000;
+}
+.player-ui-visible ~ #subtitle { bottom: 290px; }
+
+/* ---------- Meldungen ---------- */
+#toast {
+    position: absolute; left: 50%; top: 60px;
+    width: 900px; margin-left: -450px;
+    padding: 22px 30px;
+    border-radius: 14px;
+    background: rgba(20,22,27,.96);
+    border: 2px solid rgba(217,176,102,.6);
+    font-size: 28px;
+    text-align: center;
+}
+#loader {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+    background: rgba(0,0,0,.55);
+    text-align: center;
+}
+#loader-text { font-size: 32px; margin-top: 30px; }
+.spinner {
+    width: 90px; height: 90px;
+    margin: 430px auto 0;
+    border-radius: 50%;
+    border: 8px solid rgba(255,255,255,.2);
+    border-top-color: #d9b066;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Handy/Tablet: Listen mit dem Finger scrollen */
+body.touch .scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+/* ---------- Wiedergabelisten (MAC-Adresse + Geräte-Schlüssel) ---------- */
+.pl { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+.pl-left { position: absolute; left: 0; top: 0; width: 1290px; height: 1080px; }
+.pl-head { position: absolute; left: 110px; top: 50px; right: 40px; height: 100px; display: flex; align-items: center; }
+.pl-back {
+    width: 84px; height: 84px; border-radius: 50%;
+    background: rgba(255,255,255,.18); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+}
+.pl-back.focused { background: #f4dc9e; color: #1a1408; }
+.pl-divider { width: 2px; height: 56px; background: rgba(255,255,255,.35); margin: 0 38px; }
+.pl-title { font-size: 46px; color: #fff; flex: 1; }
+.pl-logo { height: 100px; border-radius: 14px; }
+.pl-grid {
+    position: absolute; left: 110px; top: 190px; right: 40px; height: 600px;
+    display: flex; flex-wrap: wrap; align-content: flex-start;
+}
+.pl-card {
+    width: 540px; height: 250px; margin: 0 22px 22px 0; padding: 30px 34px;
+    box-sizing: border-box; border-radius: 12px;
+    background: rgba(255,255,255,.16); position: relative;
+}
+.pl-card.focused { background: rgba(217,176,102,.42); }
+.pl-name { font-size: 40px; font-weight: bold; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-url { font-size: 32px; color: rgba(255,255,255,.88); margin-top: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-badge {
+    position: absolute; left: 34px; bottom: 28px;
+    background: #d9b066; color: #1a1408; font-size: 26px; font-weight: bold;
+    padding: 8px 22px; border-radius: 24px;
+}
+.pl-note { width: 1100px; font-size: 30px; line-height: 44px; color: #d8d4cb; padding: 30px 0; }
+.pl-note-title { font-size: 40px; color: #f4dc9e; margin-bottom: 16px; font-weight: bold; }
+.pl-foot { position: absolute; left: 60px; right: 40px; top: 830px; text-align: center; }
+.pl-foot-big { font-size: 34px; font-weight: bold; color: #fff; }
+.pl-foot-small { font-size: 28px; color: rgba(255,255,255,.85); margin-top: 22px; }
+.pl-side {
+    position: absolute; left: 1290px; top: 0; width: 630px; height: 1080px;
+    border-left: 2px solid rgba(255,255,255,.45);
+    background: rgba(10,11,14,.55);
+    box-sizing: border-box; padding: 60px 40px 0; text-align: center;
+}
+.pl-qr { width: 300px; height: 300px; margin: 0 auto 26px; background: #fff; border-radius: 14px; padding: 10px; box-sizing: border-box; }
+.pl-qr svg { display: block; width: 280px; height: 280px; }
+.pl-yellow { font-size: 30px; color: #f4dc9e; line-height: 40px; }
+.pl-status { font-size: 34px; color: #fff; font-weight: bold; margin-top: 22px; }
+.pl-site { font-size: 24px; color: #f4dc9e; font-weight: bold; margin-top: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-text { font-size: 28px; color: #fff; line-height: 38px; margin-top: 18px; }
+.pl-label { font-size: 30px; color: #fff; margin-top: 22px; }
+.pl-value { font-size: 36px; color: #f4dc9e; margin-top: 6px; letter-spacing: 1px; font-family: "Courier New", monospace; font-weight: bold; }
+.pl-buttons { margin-top: 28px; }
+.pl-buttons .button { margin: 0 8px; }
+
+/* ---------- Testphase und Aktivierung ---------- */
+.trial-note {
+    position: absolute; left: 0; right: 0; top: 950px;
+    text-align: center; font-size: 26px; color: #f4dc9e;
+    text-shadow: 0 2px 6px rgba(0,0,0,.7);
+}
+.pl-status.trial { color: #f4dc9e; }
+.pl-price { font-size: 26px; color: rgba(255,255,255,.85); margin-top: 8px; }
+.lock { padding: 120px 110px 0; box-sizing: border-box; }
+.lock-logo { height: 150px; border-radius: 18px; margin-bottom: 50px; }
+.lock-title { font-size: 64px; font-weight: bold; color: #fff; margin-bottom: 26px; }
+.lock-text { font-size: 34px; line-height: 50px; color: rgba(255,255,255,.88); max-width: 1000px; }
+.lock-steps { font-size: 30px; line-height: 46px; color: #f4dc9e; margin: 40px 0 0; padding-left: 40px; }
+.lock-steps li { margin-bottom: 10px; }
+.lock-note { margin-top: 50px; }
