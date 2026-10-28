@@ -1,0 +1,46 @@
+name: Android APK bauen
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Projekt zusammenbauen
+        run: sh setup-android.sh
+
+      - name: APK bauen
+        working-directory: build-project
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: APK umbenennen
+        run: cp build-project/app/build/outputs/apk/release/app-release.apk ImperumTV.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ImperumTV-apk
+          path: ImperumTV.apk
+
+      - name: Als Download veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: ImperumTV 1.0.${{ github.run_number }}
+          files: ImperumTV.apk
+          make_latest: true
