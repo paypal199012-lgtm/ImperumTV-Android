@@ -615,3 +615,60 @@ body.touch .scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .episode .ep-left { float: right; font-size: 22px; color: #d9b066; margin-left: 20px; line-height: 34px; }
 .episode .prog { left: 20px; right: 20px; bottom: 4px; height: 5px; }
 .episode.focused .ep-left { color: #fff; }
+
+/* ---------- Bildschirmtastatur ---------- */
+.kbd { margin-top: 18px; white-space: nowrap; }
+.kbd-row { height: 74px; }
+.kbd-key {
+    display: inline-block; vertical-align: top;
+    width: 70px; height: 64px; line-height: 64px; margin: 0 8px 0 0;
+    border-radius: 10px; background: rgba(255,255,255,.10);
+    font-size: 30px; font-weight: bold; text-align: center; color: #f2efe8;
+}
+.kbd-key.w5 { width: 382px; font-size: 26px; }
+.kbd-key.w3 { width: 226px; font-size: 26px; }
+.kbd-key.focused { background: #f4dc9e; color: #1a1408; transform: scale(1.08); }
+.kbd-box { width: 960px; margin-left: -480px; padding: 36px 46px; }
+.kbd-box .search-input { width: 850px; }
+.kbd-box .search-status { margin-top: 6px; }
+
+/* Suche: Tastatur links, Ergebnisse rechts */
+.search-wrap { right: auto; width: 860px; }
+.search-wrap .search-input { width: 850px; }
+.search-results { left: 960px; top: 110px; }
+
+/* Eintrag „Suchen“ in der Kategorie-Spalte */
+.cat-search { margin-top: 14px; color: #f4dc9e; }
+.cat-search svg { vertical-align: middle; margin-right: 12px; position: relative; top: -2px; }
+.poster.has-sub .title { height: 28px; white-space: nowrap; text-overflow: ellipsis; }
+.poster .sub { font-size: 20px; color: #d9b066; margin-top: 2px; height: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Besetzung ---------- */
+.detail .plot { max-height: 160px; margin-top: 24px; }
+.detail .credits { max-height: 34px; white-space: nowrap; text-overflow: ellipsis; }
+.cast-head { font-size: 26px; color: #f4dc9e; font-weight: bold; margin: 18px 0 10px; }
+.cast-strip { overflow: hidden; white-space: nowrap; }
+.cast-inner { white-space: nowrap; padding: 8px 0 8px 6px; }
+.actor { display: inline-block; vertical-align: top; width: 150px; margin-right: 14px; text-align: center; border-radius: 14px; padding: 8px 0; }
+.actor .photo {
+    width: 122px; height: 122px; margin: 0 auto; border-radius: 50%;
+    background: #2a2f38 center 20% / cover no-repeat; border: 3px solid rgba(217,176,102,.35);
+    font-size: 40px; font-weight: bold; line-height: 122px; color: #d9b066;
+}
+.actor .photo.has-img { border-color: rgba(255,255,255,.25); }
+.actor .name { font-size: 21px; line-height: 26px; margin-top: 8px; white-space: normal; height: 52px; overflow: hidden; padding: 0 4px; }
+.actor.focused { background: rgba(217,176,102,.35); }
+.actor.focused .photo { border-color: #f4dc9e; }
+
+/* Serien: Handlung kurz, Besetzung unter dem Cover */
+.detail .splot { font-size: 24px; line-height: 33px; color: rgba(255,255,255,.85); max-height: 66px; overflow: hidden; margin: -2px 0 6px; }
+.detail.with-cast .cover { height: 450px; width: 300px; left: 30px; }
+.cast-grid { position: absolute; left: 0; top: 462px; width: 360px; }
+.cast-grid .cast-head { margin: 0 0 4px 6px; font-size: 22px; }
+.cast-grid .actor { width: 114px; margin-right: 4px; padding: 4px 0; }
+.cast-grid .actor .photo { width: 84px; height: 84px; line-height: 84px; font-size: 28px; }
+.cast-grid .actor .name { font-size: 17px; line-height: 21px; height: 42px; margin-top: 4px; }
+.cast-grid .cast-inner { white-space: normal; padding: 0; }
+.detail .body.with-plot .episodes { top: 400px; }
+.modal-list .modal-buttons { max-height: 640px; overflow: hidden; position: relative; padding: 4px 0; }
+.modal-list .modal-box { top: 50%; }

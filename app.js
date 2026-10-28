@@ -154,8 +154,16 @@
     // =====================================================================
 
     function ensureVisible(node) {
+        // Waagerechte Reihen (z. B. Schauspieler) seitlich mitscrollen
+        var hp = node.parentElement;
+        while (hp && !(hp.classList && hp.classList.contains('hscroll'))) hp = hp.parentElement;
+        if (hp) {
+            var a = node.getBoundingClientRect(), b = hp.getBoundingClientRect(), m = 20 * scale;
+            if (a.left < b.left + m) hp.scrollLeft -= (b.left + m - a.left) / scale;
+            else if (a.right > b.right - m) hp.scrollLeft += (a.right - b.right + m) / scale;
+        }
         var p = node.parentElement;
-        while (p && !(p.classList && p.classList.contains('scroll'))) p = p.parentElement;
+        while (p && !(p.classList && (p.classList.contains('scroll') || p.classList.contains('vscroll')))) p = p.parentElement;
         if (!p) return;
         var nr = node.getBoundingClientRect(), pr = p.getBoundingClientRect();
         var margin = 30 * scale;
@@ -164,7 +172,7 @@
     }
 
     var VERTICAL_LOCK = { cats: true, list: true, grid: true };
-    var HORIZONTAL_LOCK = { seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true, topbtns: true };
+    var HORIZONTAL_LOCK = { cast: true, seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true, topbtns: true };
 
     var Focus = {
         cur: null,
@@ -379,6 +387,19 @@
             var acc = this.accKey();
             this.write(this.raw().filter(function (x) { return !(x.acc === acc && x.key === key); }));
         },
+        /** Stand nach dem Schauen merken (eigener oder externer Player) */
+        record: function (kind, items, index, pos, dur, ended) {
+            var it = items[index];
+            if (!it || it.type === 'recording' || it.url) return;
+            var done = ended || (dur > 60 && (pos >= dur * 0.95 || dur - pos < 60));
+            if (done) {
+                var next = kind === 'episode' ? items[index + 1] : null;
+                if (next) this.save('episode', next, 0, 0, true);
+                else this.remove(this.keyFor(kind, it));
+            } else if (dur > 60 && pos >= 30) {
+                this.save(kind, it, pos, dur, false);
+            }
+        },
         /** Fortschritt 0 … 1 */
         part: function (e) { return e && e.dur > 0 ? Math.max(0, Math.min(1, e.pos / e.dur)) : 0; },
         /** Kurztext: "Noch 23 Min." */
@@ -402,13 +423,103 @@
         return p;
     }
 
+    // =====================================================================
+    // Player für Filme und Serien: eingebaut oder extern (VLC, MX Player … – nur Android)
+    // =====================================================================
+
+    var VodPlayer = {
+        pending: null,
+        available: function () { return !!(AB && AB.openExternal && AB.externalPlayers); },
+        list: function () {
+            if (!this.available()) return [];
+            try { return JSON.parse(AB.externalPlayers()) || []; } catch (e) { return []; }
+        },
+        /** '' = ImperumTV-Player, 'ask' = jedes Mal fragen, sonst Paketname */
+        pref: function () { return this.available() ? Storage.get('vodPlayer', '') : ''; },
+        setPref: function (v) { Storage.set('vodPlayer', v); },
+        nameOf: function (pkg) {
+            if (!pkg) return 'ImperumTV';
+            if (pkg === 'ask') return 'Jedes Mal fragen';
+            var l = this.list();
+            for (var i = 0; i < l.length; i++) if (l[i].pkg === pkg) return l[i].name;
+            return 'ImperumTV';
+        },
+        installed: function (pkg) {
+            var l = this.list();
+            for (var i = 0; i < l.length; i++) if (l[i].pkg === pkg) return true;
+            return false;
+        },
+        /** Startet Film/Folge im gewählten Player */
+        play: function (items, index, kind, at) {
+            var p = this.pref();
+            if (p === 'ask') { this.choose(items, index, kind, at); return; }
+            if (p && this.installed(p)) { this.launch(p, items, index, kind, at); return; }
+            Nav.push(new PlayerScreen(items, index, kind, at));
+        },
+        /** Auswahl für dieses eine Mal */
+        choose: function (items, index, kind, at) {
+            var self = this, list = this.list();
+            var buttons = [{ label: '▶  ImperumTV-Player', primary: true, action: function () { Nav.push(new PlayerScreen(items, index, kind, at)); } }];
+            list.forEach(function (pl) {
+                buttons.push({ label: '▶  ' + pl.name, action: function () { self.launch(pl.pkg, items, index, kind, at); } });
+            });
+            buttons.push({ label: 'Abbrechen' });
+            Modal.open('Womit abspielen?', list.length ? 'Den Standard-Player stellst du in den Einstellungen ein.'
+                : 'Kein anderer Player installiert. Installiere z. B. VLC oder MX Player aus dem Store.', buttons);
+            if (Modal.node) Modal.node.classList.add('modal-list');
+        },
+        /** Standard-Player festlegen. done() wird danach aufgerufen. */
+        pick: function (done) {
+            var self = this, cur = this.pref(), list = this.list();
+            var opts = [{ pkg: '', name: 'ImperumTV-Player (eingebaut)' }, { pkg: 'ask', name: 'Jedes Mal fragen' }].concat(list);
+            var buttons = opts.map(function (o) {
+                return { label: (o.pkg === cur ? '✓  ' : '      ') + o.name, primary: o.pkg === cur,
+                    action: function () { self.setPref(o.pkg); toast('Player für Filme & Serien: ' + self.nameOf(o.pkg)); if (done) done(); } };
+            });
+            buttons.push({ label: 'Abbrechen' });
+            Modal.open('Player für Filme & Serien', list.length ? '' : 'Kein anderer Player installiert. Installiere z. B. VLC oder MX Player aus dem Store.', buttons);
+            if (Modal.node) Modal.node.classList.add('modal-list');
+        },
+        url: function (kind, it) { return kind === 'movie' ? Api.movieUrl(it.id, it.ext) : Api.episodeUrl(it.id, it.ext); },
+        launch: function (pkg, items, index, kind, at) {
+            var it = items[index];
+            var title = kind === 'episode' && it.series ? it.series.name + ' – S' + it.season + ' F' + (it.num || '') + ' ' + it.name : it.name;
+            this.pending = { items: items, index: index, kind: kind };
+            toast('Wird in ' + this.nameOf(pkg) + ' geöffnet …');
+            AB.openExternal(this.url(kind, it), pkg, title, at || 0);
+        },
+        /** Antwort vom externen Player (Position/Länge in Millisekunden) */
+        returned: function (pos, dur, done, failed) {
+            var p = this.pending;
+            this.pending = null;
+            if (failed) { toast('Der Player ließ sich nicht öffnen. Wähle einen anderen in den Einstellungen.', 6000); return; }
+            if (!p) return;
+            if (done || (pos >= 0 && dur > 0)) Resume.record(p.kind, p.items, p.index, Math.max(0, pos) / 1000, Math.max(0, dur) / 1000, !!done);
+            var top = Nav.top();
+            if (top && !(top instanceof PlayerScreen) && !Modal.node) {
+                top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey;
+                Nav.show(top);
+            }
+        }
+    };
+    window.__androidExternal = function (pos, dur, done, failed) { VodPlayer.returned(pos, dur, done, failed); };
+
+    /** Knopf „⇄ Player: VLC“ für die Detailseiten */
+    function playerButton(screen) {
+        var b = h('div', 'button', '⇄  Player: ' + VodPlayer.nameOf(VodPlayer.pref()));
+        focusable(b, 'vodplayer', function () {
+            VodPlayer.pick(function () { screen.focusKey = 'vodplayer'; Nav.show(screen); });
+        }, 'buttons');
+        return b;
+    }
+
     /** Film oder Folge starten. Gibt es einen gespeicherten Stand, wird gefragt. */
     function playWithResume(items, index, kind) {
         var it = items[index], e = Resume.forItem(kind, it);
-        if (!e || e.next || e.pos < 30) { Nav.push(new PlayerScreen(items, index, kind, 0)); return; }
+        if (!e || e.next || e.pos < 30) { VodPlayer.play(items, index, kind, 0); return; }
         Modal.open(it.name, 'Du hast bei ' + fmtTime(e.pos) + (e.dur ? ' von ' + fmtTime(e.dur) : '') + ' aufgehört.', [
-            { label: '▶  Fortsetzen ab ' + fmtTime(e.pos), primary: true, action: function () { Nav.push(new PlayerScreen(items, index, kind, e.pos)); } },
-            { label: '↺  Von vorne', action: function () { Nav.push(new PlayerScreen(items, index, kind, 0)); } },
+            { label: '▶  Fortsetzen ab ' + fmtTime(e.pos), primary: true, action: function () { VodPlayer.play(items, index, kind, e.pos); } },
+            { label: '↺  Von vorne', action: function () { VodPlayer.play(items, index, kind, 0); } },
             { label: 'Abbrechen' }
         ]);
     }
@@ -1082,7 +1193,13 @@
                     var extra = {};
                     try { extra = JSON.parse(list[i].extra_info); } catch (e) { /* kein JSON */ }
                     var code = extra.language || extra.track_lang || extra.lang || '';
-                    out.push({ index: list[i].index, name: langName(code, (type === 'AUDIO' ? 'Tonspur ' : 'Untertitel ') + (out.length + 1)) });
+                    var det = [];
+                    var cc = String(extra.fourCC || extra.codec || '').toUpperCase();
+                    if (/EAC3|E-AC3/.test(cc)) det.push('Dolby Digital Plus'); else if (/AC3/.test(cc)) det.push('Dolby Digital');
+                    else if (/DTS/.test(cc)) det.push('DTS'); else if (/AAC|MP4A/.test(cc)) det.push('AAC'); else if (/MP3|MPEG/.test(cc)) det.push('MP3');
+                    var chn = parseInt(extra.channels, 10);
+                    if (chn === 1) det.push('Mono'); else if (chn === 2) det.push('Stereo'); else if (chn === 6) det.push('5.1'); else if (chn === 8) det.push('7.1');
+                    out.push({ index: list[i].index, name: langName(code, (type === 'AUDIO' ? 'Tonspur ' : 'Untertitel ') + (out.length + 1)), detail: det.join(' · ') });
                 }
             } catch (e2) { /* nicht verfügbar */ }
             return out;
@@ -1141,6 +1258,56 @@
             this.subtitleOn = true;
             Storage.set('prefSubtitle', t.name);
             return 'Untertitel: ' + t.name;
+        },
+
+        /** Spuren als Liste. kind 'audio' oder 'text'. Rückgabe [{ id, name, detail, selected }] */
+        trackList: function (kind) {
+            var out = [];
+            if (this.android) {
+                if (!AB.tracks) return out;
+                try {
+                    (JSON.parse(AB.tracks(kind)) || []).forEach(function (t) {
+                        out.push({ id: t.i, name: t.name, detail: t.detail || '', selected: !!t.selected });
+                    });
+                } catch (e) { /* keine Liste */ }
+                return out;
+            }
+            if (this.tizen) {
+                var list = this.tracks(kind === 'text' ? 'TEXT' : 'AUDIO');
+                var cur = kind === 'text' ? (this.subtitleOn && this.subIndex >= 0 && list[this.subIndex] ? list[this.subIndex].index : -1) : this.currentAudio();
+                list.forEach(function (t) { out.push({ id: t.index, name: t.name, detail: t.detail || '', selected: t.index === cur }); });
+                return out;
+            }
+            // Browser: nur Untertitel aus der Datei
+            var tt = this.video && this.video.textTracks;
+            if (kind === 'text' && tt) {
+                for (var i = 0; i < tt.length; i++) out.push({ id: i, name: tt[i].label || langName(tt[i].language, 'Untertitel ' + (i + 1)), detail: '', selected: tt[i].mode === 'showing' });
+            }
+            return out;
+        },
+        /** Spur wählen, id -1 bei Untertiteln = aus. Merkt sich die Wahl für den nächsten Film. */
+        selectTrack: function (kind, id, name) {
+            var ok = true;
+            if (this.android) {
+                ok = AB.selectTrack ? AB.selectTrack(kind, id) : false;
+            } else if (this.tizen) {
+                try {
+                    if (kind === 'audio') this.av.setSelectTrack('AUDIO', id);
+                    else if (id < 0) { this.av.setSilentSubtitle(true); this.subtitleOn = false; this.subIndex = -1; }
+                    else {
+                        this.av.setSelectTrack('TEXT', id);
+                        this.av.setSilentSubtitle(false);
+                        this.subtitleOn = true;
+                        var l = this.tracks('TEXT');
+                        for (var j = 0; j < l.length; j++) if (l[j].index === id) this.subIndex = j;
+                    }
+                } catch (e) { ok = false; }
+            } else if (this.video && this.video.textTracks) {
+                var tt = this.video.textTracks;
+                for (var k = 0; k < tt.length; k++) tt[k].mode = k === id ? 'showing' : 'disabled';
+            }
+            if (ok) Storage.set(kind === 'audio' ? 'prefAudio' : 'prefSubtitle', id < 0 ? 'Aus' : name);
+            return ok;
         },
 
         /** Zuletzt gewählte Sprache automatisch nehmen (z. B. Deutsch) */
@@ -1229,9 +1396,19 @@
         return bar;
     }
 
-    function categoryColumn(cats, activeIndex, onSelect) {
+    /** search: { query, onClick } → Eintrag „Suchen“ ganz oben */
+    function categoryColumn(cats, activeIndex, onSelect, search) {
         var col = h('div', 'col col-cats');
         var scroll = h('div', 'scroll');
+        if (search) {
+            var sq = search.query;
+            var si = h('div', 'cat cat-search' + (sq ? ' active' : ''));
+            si.innerHTML = icon('search', 30) + '<span></span>';
+            si.lastChild.textContent = sq ? '„' + sq + '“' : 'Suchen';
+            focusable(si, 'cat-search', search.onClick, 'cats');
+            scroll.appendChild(si);
+            if (sq) activeIndex = -1;
+        }
         scroll.appendChild(h('div', 'col-head', 'Kategorien'));
         cats.forEach(function (name, i) {
             var item = h('div', 'cat' + (i === activeIndex ? ' active' : ''), name);
@@ -1247,12 +1424,16 @@
         var img = h('div', 'img');
         if (item.logo) img.style.backgroundImage = 'url("' + item.logo.replace(/"/g, '%22') + '")';
         if (isFav) img.appendChild(h('div', 'fav', '★'));
-        if (item.type === 'movie') {
-            var e = Resume.forItem('movie', item);
-            if (e && e.pos >= 30) img.appendChild(progressNode(Resume.part(e)));
-        }
+        var e = null;
+        if (item.type === 'movie') { e = Resume.forItem('movie', item); if (e && e.pos < 30) e = null; }
+        else if (item.type === 'series') e = Resume.forSeries(item.id);
+        if (e && !e.next) img.appendChild(progressNode(Resume.part(e)));
         node.appendChild(img);
         node.appendChild(h('div', 'title', item.name));
+        if (e && item.type === 'series') {
+            node.classList.add('has-sub');
+            node.appendChild(h('div', 'sub', 'S' + e.season + ' F' + (e.num || '?') + ' · ' + Resume.leftText(e)));
+        }
         return focusable(node, keyPrefix + item.id, action, 'grid');
     }
 
@@ -1498,7 +1679,7 @@
             var box = h('div', 'modal-box');
             box.appendChild(h('div', 'modal-title', title));
             if (text) box.appendChild(h('div', 'modal-text', text));
-            var row = h('div', 'modal-buttons');
+            var row = h('div', 'modal-buttons vscroll');
             var self = this, first = null;
             buttons.forEach(function (b, i) {
                 var node = h('div', 'button' + (b.primary ? ' primary' : ''), b.label);
@@ -1515,14 +1696,114 @@
             this.node = wrap;
             if (first) Focus.set(first);
         },
+        /** Fenster mit eigenem Inhalt (z. B. Tastatur) */
+        openBox: function (box, firstFocus) {
+            this.close();
+            this.returnFocus = Focus.cur;
+            var wrap = h('div', null);
+            wrap.id = 'modal';
+            wrap.appendChild(box);
+            $('#stage').appendChild(wrap);
+            this.node = wrap;
+            if (firstFocus) Focus.set(firstFocus);
+        },
         close: function () {
             if (!this.node) return;
+            if (document.activeElement && this.node.contains(document.activeElement)) document.activeElement.blur();
             this.node.parentNode.removeChild(this.node);
             this.node = null;
             if (this.returnFocus && document.body.contains(this.returnFocus)) Focus.set(this.returnFocus);
             this.returnFocus = null;
         }
     };
+
+    // =====================================================================
+    // Bildschirmtastatur (funktioniert mit jeder Fernbedienung)
+    // =====================================================================
+
+    var Keyboard = {
+        ROWS: [
+            ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-'],
+            ['Q', 'W', 'E', 'R', 'T', 'Z', 'U', 'I', 'O', 'P', 'Ü'],
+            ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'Ö', 'Ä'],
+            ['Y', 'X', 'C', 'V', 'B', 'N', 'M', '.', '&', '+', 'ß']
+        ],
+        /** Baut die Tasten. input: das Eingabefeld, das gefüllt wird. */
+        build: function (input, prefix) {
+            prefix = prefix || 'kb';
+            var box = h('div', 'kbd');
+            function changed() {
+                try { input.dispatchEvent(new Event('input')); } catch (e) { /* alte Browser */ }
+                if (input._onType) input._onType();
+            }
+            function key(label, cls, keyName, action) {
+                var k = h('div', 'kbd-key' + (cls ? ' ' + cls : ''), label);
+                focusable(k, prefix + '-' + keyName, function () { action(); changed(); }, 'kbd');
+                return k;
+            }
+            this.ROWS.forEach(function (row, r) {
+                var line = h('div', 'kbd-row');
+                row.forEach(function (ch, c) {
+                    line.appendChild(key(ch, '', r + '-' + c, function () { input.value += ch.toLowerCase(); }));
+                });
+                box.appendChild(line);
+            });
+            var last = h('div', 'kbd-row');
+            last.appendChild(key('Leerzeichen', 'w5', 'space', function () { if (input.value && input.value.slice(-1) !== ' ') input.value += ' '; }));
+            last.appendChild(key('←  Löschen', 'w3', 'del', function () { input.value = input.value.slice(0, -1); }));
+            last.appendChild(key('✕  Leeren', 'w3', 'clear', function () { input.value = ''; }));
+            box.appendChild(last);
+            return box;
+        },
+        first: function (box) { return box.querySelector('.kbd-key'); }
+    };
+
+    /** Suchvergleich: Groß/Klein egal, alle Wörter müssen vorkommen */
+    function searchNorm(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+    function searchMatcher(query) {
+        var words = searchNorm(query).split(' ').filter(function (w) { return w; });
+        return function (item) {
+            var n = searchNorm(item.name);
+            for (var i = 0; i < words.length; i++) if (n.indexOf(words[i]) < 0) return false;
+            return true;
+        };
+    }
+
+    /** Suchfenster mit Tastatur. count(q) liefert die Trefferzahl, onDone(q) übernimmt die Suche. */
+    function openSearchDialog(title, initial, count, onDone) {
+        var box = h('div', 'modal-box kbd-box');
+        box.appendChild(h('div', 'modal-title', title));
+        var input = h('input', 'input search-input');
+        input.type = 'text';
+        input.placeholder = 'Suchbegriff …';
+        input.value = initial || '';
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('autocapitalize', 'none');
+        focusable(input, 'sd-input', null, 'searchbox');
+        box.appendChild(input);
+        var info = h('div', 'search-status', '');
+        function changed() {
+            var q = input.value.trim();
+            info.textContent = q.length ? count(q) + ' Treffer' : 'Tippe mit den Pfeiltasten und OK.';
+        }
+        input._onType = changed;
+        input.addEventListener('input', changed);
+        var kb = Keyboard.build(input, 'sd');
+        box.appendChild(kb);
+        box.appendChild(info);
+        var row = h('div', 'modal-buttons');
+        function btn(label, primary, action) {
+            var b = h('div', 'button' + (primary ? ' primary' : ''), label);
+            focusable(b, 'sd-' + label, function () { Modal.close(); action(); }, 'dialog');
+            row.appendChild(b);
+        }
+        btn('Suchen', true, function () { onDone(input.value.trim()); });
+        if (initial) btn('Suche aufheben', false, function () { onDone(''); });
+        btn('Abbrechen', false, function () { });
+        box.appendChild(row);
+        changed();
+        Modal.openBox(box, Keyboard.first(kb));
+    }
 
     // =====================================================================
     // Aufnahmen (nur in der Android-App)
@@ -1668,12 +1949,24 @@
         this.selected = null;
         this.list = [];
     }
+    /** Suche übernehmen und zum ersten Treffer springen (für Live, Filme, Serien) */
+    function applySearch(q, firstSelector) {
+        this.query = q;
+        this.focusKey = null;
+        Nav.show(this);
+        var first = q ? $(firstSelector) : null;
+        var target = first || Focus.byKey('cat-search');
+        if (target) Focus.set(target);
+        if (q) toast(this.filter().length + ' Treffer für „' + q + '“');
+    }
+    LiveScreen.prototype.applySearch = applySearch;
     LiveScreen.prototype.categories = function () {
         var seen = {}, cats = [];
         Data.channels.forEach(function (c) { if (c.cat && !seen[c.cat]) { seen[c.cat] = true; cats.push(c.cat); } });
         return ['Alle', '★ Favoriten'].concat(cats);
     };
     LiveScreen.prototype.filter = function () {
+        if (this.query) return Data.channels.filter(searchMatcher(this.query));
         var cats = this.categories(), cat = cats[this.catIndex];
         if (this.catIndex === 0) return Data.channels.slice();
         if (this.catIndex === 1) return Data.channels.filter(function (c) { return Favs.has('live', c.id); });
@@ -1688,11 +1981,12 @@
         var cats = this.categories();
         columns.appendChild(categoryColumn(cats, this.catIndex, function (i) {
             self.catIndex = i;
+            self.query = '';
             self.focusKey = null;
             Nav.show(self);
             var first = $('.col-list .row');
             if (first) Focus.set(first);
-        }));
+        }, { query: this.query, onClick: function () { self.openSearch(); } }));
 
         var listCol = h('div', 'col col-list');
         var scroll = h('div', 'scroll');
@@ -1701,7 +1995,7 @@
 
         this.list = this.filter();
         if (!this.list.length) {
-            scroll.appendChild(h('div', 'empty-note', this.catIndex === 1 ? 'Noch keine Favoriten. Drücke bei einem Sender die gelbe Taste.' : 'Keine Sender in dieser Kategorie.'));
+            scroll.appendChild(h('div', 'empty-note', this.query ? 'Kein Sender gefunden für „' + this.query + '“.' : this.catIndex === 1 ? 'Noch keine Favoriten. Drücke bei einem Sender die gelbe Taste.' : 'Keine Sender in dieser Kategorie.'));
         }
         var batch = batchRender(scroll, this.list, function (ch, i) {
             var row = h('div', 'row' + (self.selected && self.selected.id === ch.id ? ' active' : ''));
@@ -1736,6 +2030,12 @@
             var sel = this.selected;
             setTimeout(function () { self.startPreview(sel); }, 50);
         }
+    };
+    LiveScreen.prototype.openSearch = function () {
+        var self = this;
+        openSearchDialog('Sender suchen', this.query, function (q) {
+            return Data.channels.filter(searchMatcher(q)).length;
+        }, function (q) { self.applySearch(q, '.col-list .row'); });
     };
     LiveScreen.prototype.choose = function (ch, index) {
         if (this.selected && this.selected.id === ch.id) {
@@ -1815,18 +2115,38 @@
     MoviesScreen.prototype.items = function () { return this.kind === 'movies' ? Data.movies : Data.series; };
     MoviesScreen.prototype.favType = function () { return this.kind === 'movies' ? 'movie' : 'series'; };
     MoviesScreen.prototype.yearLabel = function () { return 'Filme ' + new Date().getFullYear(); };
+    var RESUME_CAT = '▶ Weiter ansehen';
+    /** Angefangene Filme bzw. Serien, zuletzt geschaute zuerst */
+    MoviesScreen.prototype.resumeItems = function () {
+        var byId = {}, out = [], movies = this.kind === 'movies';
+        this.items().forEach(function (m) { byId[String(m.id)] = m; });
+        Resume.all().forEach(function (e) {
+            if (movies && e.kind === 'movie' && e.pos >= 30 && byId[String(e.id)]) out.push(byId[String(e.id)]);
+            if (!movies && e.kind === 'episode' && e.series && byId[String(e.series.id)]) out.push(byId[String(e.series.id)]);
+        });
+        return out;
+    };
     MoviesScreen.prototype.categories = function () {
         var seen = {}, cats = [];
         this.items().forEach(function (m) { if (m.cat && !seen[m.cat]) { seen[m.cat] = true; cats.push(m.cat); } });
-        var base = ['Alle', '★ Favoriten'];
+        var base = ['Alle', '★ Favoriten', RESUME_CAT];
         if (this.kind === 'movies') base.push(this.yearLabel());
         return base.concat(cats);
     };
+    MoviesScreen.prototype.applySearch = applySearch;
+    MoviesScreen.prototype.openSearch = function () {
+        var self = this, items = this.items();
+        openSearchDialog(this.kind === 'movies' ? 'Filme suchen' : 'Serien suchen', this.query, function (q) {
+            return items.filter(searchMatcher(q)).length;
+        }, function (q) { self.applySearch(q, '.poster'); });
+    };
     MoviesScreen.prototype.filter = function () {
+        if (this.query) return this.items().filter(searchMatcher(this.query));
         var items = this.items(), fav = this.favType();
         var cats = this.categories(), cat = cats[this.catIndex];
         if (this.catIndex === 0) return items.slice();
         if (this.catIndex === 1) return items.filter(function (m) { return Favs.has(fav, m.id); });
+        if (cat === RESUME_CAT) return this.resumeItems();
         if (this.kind === 'movies' && cat === this.yearLabel()) {
             var year = new Date().getFullYear();
             return items.filter(function (m) { return m.year === year; });
@@ -1853,11 +2173,12 @@
         var columns = h('div', 'columns');
         columns.appendChild(categoryColumn(this.categories(), this.catIndex, function (i) {
             self.catIndex = i;
+            self.query = '';
             self.focusKey = null;
             Nav.show(self);
             var first = $('.poster');
             if (first) Focus.set(first);
-        }));
+        }, { query: this.query, onClick: function () { self.openSearch(); } }));
 
         var gridCol = h('div', 'col col-grid');
         var scroll = h('div', 'scroll');
@@ -1869,7 +2190,9 @@
 
         var list = this.filter(), fav = this.favType();
         if (!list.length) {
-            var note = this.catIndex === 1 ? 'Noch keine Favoriten. Drücke bei einem Poster die gelbe Taste.'
+            var note = this.query ? 'Nichts gefunden für „' + this.query + '“.' :
+                this.categories()[this.catIndex] === RESUME_CAT ? 'Hier erscheinen ' + (this.kind === 'movies' ? 'Filme' : 'Serien') + ', die du angefangen hast.' :
+                this.catIndex === 1 ? 'Noch keine Favoriten. Drücke bei einem Poster die gelbe Taste.'
                 : (this.categories()[this.catIndex] === this.yearLabel() ? 'Dein Anbieter hat keine Filme mit dem Jahr ' + new Date().getFullYear() + ' gekennzeichnet.' : 'Nichts gefunden.');
             grid.appendChild(h('div', 'empty-note', note));
         }
@@ -1994,17 +2317,17 @@
     };
     /** Filme sofort, Folgen mit allen Folgen der Serie (damit die nächste automatisch kommt) */
     ContinueScreen.prototype.play = function (e, item, at) {
-        if (e.kind !== 'episode' || !e.series) { Nav.push(new PlayerScreen([item], 0, e.kind, at)); return; }
+        if (e.kind !== 'episode' || !e.series) { VodPlayer.play([item], 0, e.kind, at); return; }
         loader(true, 'Folgen werden geladen …');
         Data.seriesDetails(e.series.id).then(function (res) {
             loader(false);
             var eps = res.episodes, idx = -1;
             eps.forEach(function (ep, i) { ep.series = e.series; if (String(ep.id) === String(e.id)) idx = i; });
-            if (idx < 0) Nav.push(new PlayerScreen([item], 0, 'episode', at));
-            else Nav.push(new PlayerScreen(eps, idx, 'episode', at));
+            if (idx < 0) VodPlayer.play([item], 0, 'episode', at);
+            else VodPlayer.play(eps, idx, 'episode', at);
         }, function () {
             loader(false);
-            Nav.push(new PlayerScreen([item], 0, 'episode', at));
+            VodPlayer.play([item], 0, 'episode', at);
         });
     };
     ContinueScreen.prototype.removeEntry = function (e) {
@@ -2018,6 +2341,110 @@
         if (k === KEY.YELLOW && Focus.cur && Focus.cur._entry) { this.removeEntry(Focus.cur._entry); return true; }
         return false;
     };
+
+    // =====================================================================
+    // Besetzung mit Fotos (Fotos kostenlos von Wikipedia)
+    // =====================================================================
+
+    var People = {
+        mem: null,
+        queue: [], running: 0,
+        JOB: /schauspiel|darsteller|actor|actress|regisseur|director|komiker|comedian|moderator|presenter|sänger|singer|rapper|musiker|musician|model|synchronsprecher|voice|filmemacher|filmmaker|drehbuch|screenwriter|wrestler|sportler|fußball|boxer|kabarettist|entertainer|tänzer|dancer|youtuber|influencer|autor|writer/i,
+        cache: function () {
+            if (!this.mem) { var m = Storage.get('people', {}); this.mem = m && typeof m === 'object' ? m : {}; }
+            return this.mem;
+        },
+        store: function (name, url) {
+            var c = this.cache(), keys = Object.keys(c);
+            if (keys.length > 600) { for (var i = 0; i < 200; i++) delete c[keys[i]]; }
+            c[name] = url;
+            Storage.set('people', c);
+        },
+        /** Namen aus "A, B, C" */
+        names: function (text, max) {
+            var seen = {}, out = [];
+            String(text || '').split(/\s*[,;\n\/|]\s*/).forEach(function (n) {
+                n = n.replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+                if (n.length < 3 || n.length > 40 || seen[n.toLowerCase()]) return;
+                seen[n.toLowerCase()] = true;
+                out.push(n);
+            });
+            return out.slice(0, max || 12);
+        },
+        /** Foto-Adresse oder '' – callback(url) */
+        photo: function (name, cb) {
+            var c = this.cache();
+            if (c.hasOwnProperty(name)) { cb(c[name]); return; }
+            this.queue.push({ name: name, cb: cb });
+            this.next();
+        },
+        next: function () {
+            var self = this;
+            while (this.running < 4 && this.queue.length) {
+                (function (job) {
+                    self.running++;
+                    self.lookup(job.name, 'de', function (url) {
+                        if (url !== null) return finish(url);
+                        self.lookup(job.name, 'en', function (url2) { finish(url2 || ''); });
+                    });
+                    function finish(url) {
+                        if (url !== undefined) self.store(job.name, url);
+                        self.running--;
+                        job.cb(url || '');
+                        self.next();
+                    }
+                })(this.queue.shift());
+            }
+        },
+        /** Fragt eine Wikipedia ab. cb(url) mit url = Bild, '' = Person ohne Bild, null = nicht gefunden */
+        lookup: function (name, lang, cb) {
+            var url = 'https://' + lang + '.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(name.replace(/ /g, '_'));
+            var done = false, self = this;
+            var timer = setTimeout(function () { if (!done) { done = true; cb(undefined); } }, 8000);
+            fetch(url).then(function (res) { return res.ok ? res.json() : null; }).then(function (j) {
+                if (done) return;
+                done = true; clearTimeout(timer);
+                if (!j || j.type !== 'standard') return cb(null);
+                var desc = (j.description || '') + ' ' + String(j.extract || '').slice(0, 200);
+                if (!self.JOB.test(desc)) return cb(null);
+                cb(j.thumbnail && j.thumbnail.source ? j.thumbnail.source : '');
+            }, function () { if (!done) { done = true; clearTimeout(timer); cb(undefined); } });
+        }
+    };
+
+    function initials(name) {
+        var p = name.split(' ');
+        return (p[0].charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase();
+    }
+
+    /** Leiste/Raster mit Schauspielern. layout: 'row' (Filme) oder 'grid' (Serien) */
+    function castNode(names, layout) {
+        var wrap = h('div', 'cast cast-' + layout);
+        wrap.appendChild(h('div', 'cast-head', 'Besetzung'));
+        var strip = h('div', 'cast-strip' + (layout === 'row' ? ' hscroll' : ''));
+        var inner = h('div', 'cast-inner');
+        names.forEach(function (n, i) {
+            var card = h('div', 'actor');
+            var ph = h('div', 'photo', initials(n));
+            card.appendChild(ph);
+            card.appendChild(h('div', 'name', n));
+            focusable(card, 'actor-' + i, null, layout === 'row' ? 'cast' : 'castgrid');
+            People.photo(n, function (url) {
+                if (!url) return;
+                var img = new Image();
+                img.onload = function () {
+                    ph.style.backgroundImage = 'url("' + url.replace(/"/g, '%22') + '")';
+                    ph.classList.add('has-img');
+                    ph.textContent = '';
+                };
+                img.src = url;
+            });
+            inner.appendChild(card);
+        });
+        strip.appendChild(inner);
+        wrap.appendChild(strip);
+        return wrap;
+    }
 
     // =====================================================================
     // Film-Detailseite
@@ -2042,14 +2469,14 @@
         var saved = Resume.forItem('movie', m);
         if (saved && saved.pos >= 30) {
             var cont = h('div', 'button primary', '▶  Weiter ab ' + fmtTime(saved.pos));
-            focusable(cont, 'play', function () { Nav.push(new PlayerScreen([m], 0, 'movie', saved.pos)); }, 'buttons');
+            focusable(cont, 'play', function () { VodPlayer.play([m], 0, 'movie', saved.pos); }, 'buttons');
             body.appendChild(cont);
             var again = h('div', 'button', '↺  Von vorne');
-            focusable(again, 'restart', function () { Nav.push(new PlayerScreen([m], 0, 'movie', 0)); }, 'buttons');
+            focusable(again, 'restart', function () { VodPlayer.play([m], 0, 'movie', 0); }, 'buttons');
             body.appendChild(again);
         } else {
             var play = h('div', 'button primary', '▶  Abspielen');
-            focusable(play, 'play', function () { Nav.push(new PlayerScreen([m], 0, 'movie', 0)); }, 'buttons');
+            focusable(play, 'play', function () { VodPlayer.play([m], 0, 'movie', 0); }, 'buttons');
             body.appendChild(play);
         }
         var fav = h('div', 'button', Favs.has('movie', m.id) ? '★  Favorit' : '☆  Zu Favoriten');
@@ -2058,6 +2485,7 @@
             fav.textContent = on ? '★  Favorit' : '☆  Zu Favoriten';
         }, 'buttons');
         body.appendChild(fav);
+        if (VodPlayer.available()) body.appendChild(playerButton(this));
 
         var plot = h('div', 'plot', 'Infos werden geladen …');
         var credits = h('div', 'credits', '');
@@ -2066,6 +2494,8 @@
         d.appendChild(body);
         root.appendChild(d);
 
+        var castBox = h('div', 'cast-box');
+        body.appendChild(castBox);
         function fill(info) {
             var img = info.cover || m.logo;
             if (img) cover.style.backgroundImage = 'url("' + img.replace(/"/g, '%22') + '")';
@@ -2074,10 +2504,10 @@
             meta.textContent = info.meta || (m.year ? String(m.year) : '');
             rating.textContent = info.rating ? '★ ' + info.rating : '';
             plot.textContent = info.plot || '';
-            var c = [];
-            if (info.director) c.push('Regie: ' + info.director);
-            if (info.cast) c.push('Besetzung: ' + info.cast);
-            credits.textContent = c.join('\n');
+            credits.textContent = info.director ? 'Regie: ' + info.director : '';
+            castBox.innerHTML = '';
+            var names = People.names(info.cast, 15);
+            if (names.length) castBox.appendChild(castNode(names, 'row'));
         }
         if (this.info) fill(this.info);
         else {
@@ -2142,6 +2572,10 @@
         var back = info.backdrop || info.cover || s.logo;
         if (back) bg.style.backgroundImage = 'url("' + back.replace(/"/g, '%22') + '")';
         if (info.meta) body.appendChild(h('div', 'meta', info.meta));
+        if (info.plot) { body.appendChild(h('div', 'splot', info.plot)); body.classList.add('with-plot'); }
+        // Besetzung links unter dem Cover
+        var castNames = People.names(info.cast, 6);
+        if (castNames.length) { d.classList.add('with-cast'); d.appendChild(castNode(castNames, 'grid')); }
 
         // Weiterschauen: zuletzt gesehene (oder nächste) Folge
         var all = this.episodes, last = Resume.forSeries(s.id), lastIndex = -1;
@@ -2158,7 +2592,7 @@
                 (last.next || last.pos < 30 ? '' : ' ab ' + fmtTime(last.pos));
             var cont = h('div', 'button primary', txt);
             focusable(cont, 'scont', function () {
-                Nav.push(new PlayerScreen(all, lastIndex, 'episode', last.next ? 0 : last.pos));
+                VodPlayer.play(all, lastIndex, 'episode', last.next ? 0 : last.pos);
             }, 'buttons');
             body.appendChild(cont);
         }
@@ -2169,6 +2603,7 @@
             fav.textContent = on ? '★  Favorit' : '☆  Zu Favoriten';
         }, 'buttons');
         body.appendChild(fav);
+        if (VodPlayer.available()) body.appendChild(playerButton(this));
 
         // Staffeln
         var seasons = [];
@@ -2776,7 +3211,7 @@
     function SearchScreen() { this.query = ''; this.timer = null; }
     SearchScreen.prototype.render = function (root) {
         var self = this;
-        root.appendChild(topbar('Suche', 'OK aufs Feld: Tastatur öffnen · ▼: zu den Ergebnissen'));
+        root.appendChild(topbar('Suche', 'Tippen mit Pfeiltasten und OK · ▶ zu den Ergebnissen'));
         var wrap = h('div', 'search-wrap');
         var input = h('input', 'input search-input');
         input.type = 'text';
@@ -2787,6 +3222,7 @@
         focusable(input, 'search-input', null, 'searchbox');
         input._onFocus = function () { if (self.results) self.results.scrollTop = 0; };
         wrap.appendChild(input);
+        wrap.appendChild(Keyboard.build(input, 'kb'));
         this.status = h('div', 'search-status');
         wrap.appendChild(this.status);
         root.appendChild(wrap);
@@ -2802,6 +3238,7 @@
                 self.renderResults();
             }, 350);
         }
+        input._onType = update;
         input.addEventListener('input', update);
         input.addEventListener('change', update);
 
@@ -2818,16 +3255,16 @@
             });
         }
         this.renderResults();
-        if (!this.focusKey) this.focusKey = 'search-input';
+        if (!this.focusKey) this.focusKey = 'kb-1-0';
     };
     SearchScreen.prototype.renderResults = function () {
         var self = this, box = this.results, q = this.query.toLowerCase();
         box.innerHTML = '';
         if (q.length < 2) {
-            box.appendChild(h('div', 'empty-note', 'Gib mindestens 2 Buchstaben ein. Gesucht wird in Live-TV, Filmen und Serien.'));
+            box.appendChild(h('div', 'empty-note', 'Gib mindestens 2 Buchstaben ein. Gesucht wird in Live TV, Filmen und Serien.'));
             return;
         }
-        function match(item) { return item.name.toLowerCase().indexOf(q) >= 0; }
+        var match = searchMatcher(q);
         var live = Data.channels.filter(match).slice(0, 40);
         var movies = Data.movies.filter(match).slice(0, 40);
         var series = Data.series.filter(match).slice(0, 40);
@@ -2880,6 +3317,12 @@
             v.textContent = Settings.liveExt.toUpperCase();
             toast(Settings.liveExt === 'ts' ? 'Live-Sender laufen jetzt als TS (meist am stabilsten)' : 'Live-Sender laufen jetzt als HLS (M3U8)');
         });
+        if (VodPlayer.available()) {
+            var self = this;
+            row('vodplayer', 'Player für Filme & Serien', VodPlayer.nameOf(VodPlayer.pref()), function () {
+                VodPlayer.pick(function () { self.focusKey = 'set-vodplayer'; Nav.show(self); });
+            });
+        }
         row('lists', 'Wiedergabelisten', 'Liste wechseln oder neue hinzufügen', function () { Nav.push(new PlaylistsScreen()); });
         row('account', 'Konto', License.activated() ? 'Aktiviert (unbegrenzt)' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
         row('device', 'Gerät', 'MAC ' + Device.macText() + '  ·  Schlüssel ' + Device.key, function () { Nav.push(new PlaylistsScreen()); });
@@ -2934,14 +3377,8 @@
         var it = this.item(), pos = Player.current(), dur = Player.duration();
         if (!ended && !(dur > 60)) return;            // Länge noch unbekannt
         this.lastSave = Date.now();
-        var done = ended || pos >= dur * 0.95 || dur - pos < 60;
-        if (done) {
-            var next = this.kind === 'episode' ? this.items[this.index + 1] : null;
-            if (next) Resume.save('episode', next, 0, 0, true);
-            else Resume.remove(Resume.keyFor(this.kind, it));
-        } else if (pos >= 30) {
-            Resume.save(this.kind, it, pos, dur, false);
-        }
+        void it;
+        Resume.record(this.kind, this.items, this.index, pos, dur, ended);
     };
     PlayerScreen.prototype.start = function () {
         var self = this;
@@ -3079,8 +3516,11 @@
         if (this.kind === 'live' && Rec.available()) {
             btn('pl-rec', '● Aufnehmen', function () { self.recordNow(); });
         }
-        btn('pl-audio', 'Sprache', function () { toast(Player.nextAudio()); });
-        btn('pl-sub', 'Untertitel', function () { toast(Player.nextSubtitle()); });
+        if (this.kind !== 'live' && this.resumable() && VodPlayer.available()) {
+            btn('pl-switch', '⇄ Player', function () { self.switchPlayer(); });
+        }
+        btn('pl-audio', '♪ Sprache', function () { self.trackMenu('audio'); });
+        btn('pl-sub', 'CC Untertitel', function () { self.trackMenu('text'); });
         if (this.kind !== 'episode' && it.type !== 'recording') {
             var favType = this.kind === 'live' ? 'live' : 'movie';
             btn('pl-fav', Favs.has(favType, it.id) ? '★ Favorit' : '☆ Favorit', function () {
@@ -3096,6 +3536,56 @@
         var target = Focus.byKey(focusedKey) || Focus.byKey('pl-play');
         if (target) Focus.set(target);
         this.updateBar();
+    };
+    /** Auswahlliste für Sprache (audio) oder Untertitel (text) */
+    PlayerScreen.prototype.trackMenu = function (kind) {
+        var self = this, list = Player.trackList(kind), audio = kind === 'audio';
+        clearTimeout(this.hideTimer);
+        var buttons = [];
+        if (!audio) {
+            var anyOn = list.some(function (t) { return t.selected; });
+            buttons.push({ label: (anyOn ? '      ' : '✓  ') + 'Aus', primary: !anyOn, action: function () {
+                Player.selectTrack('text', -1, 'Aus'); toast('Untertitel: Aus'); self.showOverlay();
+            } });
+        }
+        list.forEach(function (t) {
+            buttons.push({ label: (t.selected ? '✓  ' : '      ') + t.name + (t.detail ? '  ·  ' + t.detail : ''), primary: t.selected, action: function () {
+                var ok = Player.selectTrack(kind, t.id, t.name);
+                toast(ok ? (audio ? 'Sprache: ' : 'Untertitel: ') + t.name : 'Diese Spur ließ sich nicht wählen');
+                self.showOverlay();
+            } });
+        });
+        var empty = audio ? 'Dieser Film hat nur eine Tonspur.' : 'Dieser Film hat keine Untertitel.';
+        if (this.kind === 'live') empty = audio ? 'Dieser Sender hat nur eine Tonspur.' : 'Dieser Sender sendet keine Untertitel.';
+        buttons.push({ label: 'Schließen', action: function () { self.showOverlay(); } });
+        Modal.open(audio ? '♪ Sprache' : 'CC Untertitel', (audio ? list.length < 2 : !list.length) ? empty : 'Die Auswahl merkt sich die App für den nächsten Film.', buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+        // Fokus auf die gewählte Spur
+        var sel = Modal.node && Modal.node.querySelector('.button.primary');
+        if (sel) Focus.set(sel);
+    };
+    /** Mitten im Film zu VLC & Co. wechseln, an derselben Stelle */
+    PlayerScreen.prototype.switchPlayer = function () {
+        var self = this, list = VodPlayer.list();
+        clearTimeout(this.hideTimer);
+        if (!list.length) {
+            toast('Kein anderer Player installiert. Installiere z. B. VLC oder MX Player aus dem Store.', 6000);
+            this.showOverlay();
+            return;
+        }
+        var buttons = list.map(function (pl) {
+            return { label: '▶  ' + pl.name, primary: false, action: function () {
+                var items = self.items, index = self.index, kind = self.kind, pos = Player.current();
+                self.saveProgress(false);
+                self.saved = true;
+                Nav.back();
+                VodPlayer.launch(pl.pkg, items, index, kind, pos);
+            } };
+        });
+        if (buttons.length) buttons[0].primary = true;
+        buttons.push({ label: 'Abbrechen', action: function () { self.showOverlay(); } });
+        Modal.open('Weiterschauen mit …', 'Ab ' + fmtTime(Player.current()), buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
     };
     /** Sofort aufnehmen: bis Sendungsende oder für eine feste Zeit */
     PlayerScreen.prototype.recordNow = function () {
@@ -3165,8 +3655,8 @@
         if (k === KEY.FF) { Player.seekBy(30); this.showOverlay(); return true; }
         if (k === KEY.RW) { Player.seekBy(-30); this.showOverlay(); return true; }
         if (k === KEY.STOP) { this.close(); return true; }
-        if (k === KEY.GREEN) { toast(Player.nextAudio()); return true; }
-        if (k === KEY.BLUE) { toast(Player.nextSubtitle()); return true; }
+        if (k === KEY.GREEN) { this.trackMenu('audio'); return true; }
+        if (k === KEY.BLUE) { this.trackMenu('text'); return true; }
 
         if (!this.overlay) {
             if (k === KEY.ENTER) { this.showOverlay(); return true; }
