@@ -23,6 +23,19 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+        <!-- Externe Video-Player (VLC, MX Player, Just Player …) finden -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" android:mimeType="video/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:mimeType="video/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="video/*" />
+        </intent>
     </queries>
 
     <application

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -38,6 +39,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.Callable
@@ -51,6 +53,10 @@ import java.util.concurrent.TimeUnit
  */
 @UnstableApi
 class MainActivity : Activity() {
+
+    companion object {
+        private const val REQ_EXTERNAL = 4711
+    }
 
     private lateinit var root: FrameLayout
     private lateinit var webView: WebView
@@ -256,6 +262,26 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    // ---------- Externer Player (VLC, MX Player …) kommt zurück ----------
+
+    @Deprecated("Einfachster Weg, die Position vom externen Player zurückzubekommen")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_EXTERNAL) return
+        val extras = data?.extras
+        fun num(vararg keys: String): Long {
+            for (k in keys) {
+                val v = try { extras?.get(k) } catch (e: Exception) { null }
+                if (v is Number) return v.toLong()
+            }
+            return -1L
+        }
+        val pos = num("extra_position", "position")
+        val dur = num("extra_duration", "duration")
+        val done = data?.getStringExtra("end_by") == "playback_completion"
+        webView.evaluateJavascript("window.__androidExternal && window.__androidExternal($pos, $dur, $done)", null)
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         player.release()
@@ -324,6 +350,30 @@ class MainActivity : Activity() {
             if (name.isNotBlank()) return name.replaceFirstChar { it.uppercase() }
         }
         return fallback
+    }
+
+    /** Zusatzinfo zur Spur, z. B. "Dolby Digital · 5.1" */
+    private fun trackDetail(f: Format): String {
+        val parts = ArrayList<String>()
+        when (f.sampleMimeType) {
+            "audio/ac3" -> parts.add("Dolby Digital")
+            "audio/eac3", "audio/eac3-joc" -> parts.add("Dolby Digital Plus")
+            "audio/true-hd" -> parts.add("Dolby TrueHD")
+            "audio/vnd.dts", "audio/vnd.dts.hd" -> parts.add("DTS")
+            "audio/mp4a-latm" -> parts.add("AAC")
+            "audio/mpeg", "audio/mpeg-L2" -> parts.add("MP3")
+            "audio/opus" -> parts.add("Opus")
+        }
+        when (f.channelCount) {
+            1 -> parts.add("Mono")
+            2 -> parts.add("Stereo")
+            6 -> parts.add("5.1")
+            8 -> parts.add("7.1")
+        }
+        if ((f.selectionFlags and C.SELECTION_FLAG_FORCED) != 0) parts.add("Nur fremdsprachige Stellen")
+        if ((f.roleFlags and C.ROLE_FLAG_DESCRIBES_VIDEO) != 0) parts.add("Hörfilm")
+        if ((f.roleFlags and C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND) != 0) parts.add("Für Hörgeschädigte")
+        return parts.joinToString(" · ")
     }
 
     private fun groups(type: Int): List<Tracks.Group> =
@@ -451,6 +501,41 @@ class MainActivity : Activity() {
             }
         }
 
+        /** Alle Ton- bzw. Untertitelspuren als JSON-Liste: [{"i":0,"name":"Deutsch","detail":"5.1","selected":true}] */
+        @JavascriptInterface
+        fun tracks(kind: String): String = onMain {
+            val type = if (kind == "text") C.TRACK_TYPE_TEXT else C.TRACK_TYPE_AUDIO
+            val out = JSONArray()
+            groups(type).forEachIndexed { i, g ->
+                val f = g.getTrackFormat(0)
+                val fallback = (if (type == C.TRACK_TYPE_TEXT) "Untertitel " else "Tonspur ") + (i + 1)
+                out.put(JSONObject()
+                    .put("i", i)
+                    .put("name", trackName(f, fallback))
+                    .put("detail", trackDetail(f))
+                    .put("selected", g.isSelected))
+            }
+            out.toString()
+        }
+
+        /** Spur auswählen. Untertitel mit index -1 = aus */
+        @JavascriptInterface
+        fun selectTrack(kind: String, index: Int): Boolean = onMain {
+            val type = if (kind == "text") C.TRACK_TYPE_TEXT else C.TRACK_TYPE_AUDIO
+            if (type == C.TRACK_TYPE_TEXT && index < 0) {
+                subtitleIndex = -1
+                player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build()
+                return@onMain true
+            }
+            val list = groups(type)
+            if (index < 0 || index >= list.size) return@onMain false
+            if (type == C.TRACK_TYPE_TEXT) subtitleIndex = index
+            select(list[index])
+            true
+        }
+
         /** Zuletzt gewählte Sprache und Untertitel wieder nehmen (z. B. Deutsch) */
         @JavascriptInterface
         fun applyPrefs(audio: String, subtitle: String) {
@@ -474,7 +559,10 @@ class MainActivity : Activity() {
             handler.post {
                 webView.requestFocus()
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)
+                if (!imm.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)) {
+                    // Manche Fernseher (Fire TV) brauchen einen zweiten, kräftigeren Versuch
+                    handler.postDelayed({ imm.showSoftInput(webView, InputMethodManager.SHOW_FORCED) }, 200)
+                }
             }
         }
 
@@ -482,6 +570,50 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun deviceId(): String =
             Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: ""
+
+        /** Installierte Video-Player als JSON: [{"pkg":"org.videolan.vlc","name":"VLC"}] */
+        @JavascriptInterface
+        fun externalPlayers(): String {
+            val out = JSONArray()
+            try {
+                val probe = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("http://example.com/film.mkv"), "video/*")
+                val seen = HashSet<String>()
+                for (info in packageManager.queryIntentActivities(probe, PackageManager.MATCH_DEFAULT_ONLY)) {
+                    val pkg = info.activityInfo?.packageName ?: continue
+                    if (pkg == packageName || !seen.add(pkg)) continue
+                    val name = info.loadLabel(packageManager).toString().ifEmpty { pkg }
+                    out.put(JSONObject().put("pkg", pkg).put("name", name))
+                }
+            } catch (e: Exception) {
+                // keine Liste möglich
+            }
+            return out.toString()
+        }
+
+        /** Film/Folge im externen Player öffnen. pkg leer = Android fragt selbst. */
+        @JavascriptInterface
+        fun openExternal(url: String, pkg: String, title: String, positionSec: Double) {
+            handler.post {
+                val ms = (positionSec * 1000).toLong().coerceAtLeast(0L)
+                val intent = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), "video/*")
+                intent.putExtra("title", title)
+                intent.putExtra("return_result", true)
+                if (pkg.startsWith("org.videolan")) {
+                    intent.putExtra("position", ms)
+                    intent.putExtra("from_start", ms == 0L)
+                } else {
+                    intent.putExtra("position", ms.toInt())
+                }
+                if (pkg.isNotEmpty()) intent.setPackage(pkg)
+                try {
+                    player.stop()
+                    val start = if (pkg.isEmpty()) Intent.createChooser(intent, "Player wählen") else intent
+                    startActivityForResult(start, REQ_EXTERNAL)
+                } catch (e: Exception) {
+                    webView.evaluateJavascript("window.__androidExternal && window.__androidExternal(-1, -1, false, true)", null)
+                }
+            }
+        }
 
         /** Website im Browser öffnen (Handy/Tablet) */
         @JavascriptInterface
