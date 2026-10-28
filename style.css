@@ -88,49 +88,69 @@ body.preview-mode #app { background: transparent; }
     color: #a7a39a;
 }
 
-/* ---------- Startbildschirm ---------- */
+/* ---------- Startbildschirm (wie auf dem iPhone) ---------- */
+.home-head { position: absolute; left: 0; right: 0; top: 34px; height: 100px; }
+.home-title {
+    position: absolute; left: 0; right: 0; top: 10px;
+    text-align: center; color: #d9b066;
+}
+.home-title svg { vertical-align: middle; margin-right: 16px; position: relative; top: -6px; }
+.home-title span {
+    font-size: 72px; font-weight: bold; letter-spacing: 1px; vertical-align: middle;
+    color: #f4dc9e;
+    background: linear-gradient(#f4dc9e, #d9b066);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.home-head-btns { position: absolute; right: 150px; top: 6px; }
+.round-btn {
+    display: inline-block; width: 92px; height: 92px; margin-left: 22px; border-radius: 50%;
+    background: rgba(0,0,0,.45); color: #fff; text-align: center;
+}
+.round-btn svg { margin-top: 24px; }
+.round-btn.focused { background: #f4dc9e; color: #1a1408; }
+
 .home-circles {
     position: absolute;
-    left: 0; right: 0; top: 260px;
+    left: 0; right: 0; top: 215px;
     text-align: center;
 }
 .circle {
     display: inline-block;
-    width: 330px; height: 330px;
-    margin: 0 24px;
+    width: 340px; height: 340px;
+    margin: 0 22px;
     border-radius: 50%;
-    border: 3px solid rgba(255,255,255,.75);
+    border: 3px solid rgba(255,255,255,.7);
     background: rgba(0,0,0,.42);
     vertical-align: top;
     text-align: center;
     position: relative;
 }
-.circle .icon { font-size: 110px; line-height: 1; margin-top: 70px; }
-.circle .label { font-size: 38px; font-weight: bold; margin-top: 18px; letter-spacing: 1px; }
-.circle.focused { background: rgba(217,176,102,.35); transform: scale(1.06); }
+.circle .icon { line-height: 1; margin-top: 78px; }
+.circle .label { font-size: 40px; font-weight: bold; margin-top: 20px; letter-spacing: 1px; }
+.circle.focused { background: rgba(217,176,102,.38); transform: scale(1.06); }
 
 .home-tiles {
     position: absolute;
-    left: 0; right: 0; top: 670px;
+    left: 0; right: 0; top: 615px;
     text-align: center;
 }
 .tile {
     display: inline-block;
-    width: 190px; height: 120px;
+    width: 200px; height: 124px;
     margin: 0 10px;
-    border-radius: 10px;
+    border-radius: 12px;
     border: 2px solid rgba(255,255,255,.5);
     background: rgba(0,0,0,.45);
     text-align: center;
     vertical-align: top;
 }
-.tile .icon { font-size: 44px; margin-top: 16px; }
-.tile .label { font-size: 22px; font-weight: bold; margin-top: 8px; }
-.tile.focused { background: rgba(217,176,102,.35); }
+.tile .icon { margin-top: 18px; }
+.tile .label { font-size: 21px; font-weight: bold; margin-top: 8px; letter-spacing: .5px; }
+.tile.focused { background: rgba(217,176,102,.38); }
 
 .expiry {
     position: absolute;
-    left: 0; right: 0; top: 890px;
+    left: 0; right: 0; top: 790px;
     text-align: center;
     font-size: 32px;
     font-weight: bold;
@@ -461,7 +481,7 @@ body.touch .scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
 /* ---------- Testphase und Aktivierung ---------- */
 .trial-note {
-    position: absolute; left: 0; right: 0; top: 950px;
+    position: absolute; left: 0; right: 0; top: 850px;
     text-align: center; font-size: 26px; color: #f4dc9e;
     text-shadow: 0 2px 6px rgba(0,0,0,.7);
 }
@@ -474,3 +494,124 @@ body.touch .scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .lock-steps { font-size: 30px; line-height: 46px; color: #f4dc9e; margin: 40px 0 0; padding-left: 40px; }
 .lock-steps li { margin-bottom: 10px; }
 .lock-note { margin-top: 50px; }
+
+/* ---------- EPG ---------- */
+.col-epg { left: 420px; right: 0; background: rgba(16,18,22,.94); }
+.erow {
+    display: flex; align-items: center;
+    height: 118px; padding: 0 30px 0 10px;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    box-sizing: border-box;
+}
+.erow .num { width: 70px; text-align: right; margin-right: 18px; color: #a7a39a; font-size: 24px; flex: none; }
+.erow .logo { width: 96px; height: 64px; margin-right: 22px; object-fit: contain; flex: none; }
+.emain { flex: 1; min-width: 0; }
+.emain .name { font-size: 30px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.enow { font-size: 25px; color: #f2efe8; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.enow .time { color: #d9b066; margin-right: 12px; }
+.erow .progress { margin: 8px 0 0; max-width: 520px; }
+.enext { width: 460px; flex: none; margin-left: 30px; color: #a7a39a; }
+.enext .lbl { font-size: 20px; text-transform: none; }
+.enext .ntitle { font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #d8d4cb; }
+.erow.focused { background: rgba(217,176,102,.40); }
+
+/* ---------- Suche ---------- */
+.search-wrap { position: absolute; left: 70px; right: 70px; top: 120px; }
+.search-input { font-size: 34px; padding: 22px 28px; }
+.search-input.focused { box-shadow: 0 0 0 4px #f4dc9e, 0 0 28px rgba(244,220,158,.45) !important; }
+.search-status { font-size: 24px; color: #a7a39a; margin-top: 12px; min-height: 30px; }
+.search-results { position: absolute; left: 46px; right: 0; top: 270px; bottom: 0; }
+.search-section { font-size: 30px; color: #f4dc9e; font-weight: bold; margin: 26px 0 6px 24px; }
+
+/* ---------- Einstellungen ---------- */
+.settings { position: absolute; left: 260px; right: 260px; top: 150px; }
+.set-row {
+    display: flex; justify-content: space-between; align-items: center;
+    background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.12);
+    border-radius: 14px; padding: 26px 34px; margin-bottom: 16px;
+}
+.set-label { font-size: 32px; font-weight: bold; }
+.set-value { font-size: 26px; color: #f4dc9e; text-align: right; margin-left: 30px; }
+.set-row.focused { background: rgba(217,176,102,.38); }
+.set-note { font-size: 24px; color: #a7a39a; margin-top: 20px; text-align: center; }
+
+/* ---------- EPG-Raster ---------- */
+.eg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+/* Nur das Vorschaubild ist durchsichtig, alles andere deckt das Video ab */
+.eg-preview { position: absolute; left: 0; top: 0; width: 560px; height: 315px; border-bottom: 2px solid rgba(217,176,102,.35); }
+.eg-preview-label { position: absolute; left: 20px; bottom: 14px; font-size: 26px; font-weight: bold; text-shadow: 0 2px 6px #000; }
+.eg-info {
+    position: absolute; left: 560px; top: 0; right: 0; height: 315px; box-sizing: border-box;
+    padding: 34px 220px 0 44px;
+    background: linear-gradient(135deg, #1d1a17, #0c0d10);
+    border-bottom: 2px solid rgba(217,176,102,.35);
+}
+.eg-title { font-size: 44px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 10px; }
+.eg-meta { font-size: 26px; color: #d9b066; margin-bottom: 14px; }
+.eg-desc { font-size: 24px; line-height: 34px; color: rgba(255,255,255,.85); max-height: 136px; overflow: hidden; }
+.eg-clock { position: absolute; right: 70px; top: 30px; font-size: 36px; font-weight: bold; color: #f4dc9e; }
+.eg-main { position: absolute; left: 0; right: 0; top: 315px; bottom: 0; background: linear-gradient(135deg, #17181c, #0c0d10); overflow: hidden; }
+.eg-axis { position: absolute; left: 360px; right: 40px; top: 6px; height: 46px; border-bottom: 1px solid rgba(255,255,255,.12); }
+.eg-time { position: absolute; top: 8px; font-size: 24px; color: #a7a39a; }
+.eg-rows { position: absolute; left: 0; right: 40px; top: 58px; height: 590px; overflow: hidden; }
+.eg-row { position: absolute; left: 0; right: 0; height: 96px; }
+.eg-chan {
+    position: absolute; left: 40px; width: 300px; height: 88px; top: 4px; box-sizing: border-box;
+    background: rgba(0,0,0,.45); border-radius: 10px; display: flex; align-items: center; padding-right: 12px;
+}
+.eg-chan .n { width: 60px; text-align: right; color: #a7a39a; font-size: 22px; margin-right: 16px; flex: none; }
+.eg-chan .nm { font-size: 25px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eg-chan.sel { background: rgba(217,176,102,.25); }
+.eg-chan.focus { background: rgba(217,176,102,.55); box-shadow: 0 0 0 4px #f4dc9e, 0 0 28px rgba(244,220,158,.45); }
+.eg-prog {
+    position: absolute; top: 4px; height: 88px; box-sizing: border-box; padding: 12px 16px; overflow: hidden;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.08); border-radius: 10px;
+}
+.eg-prog .t { font-size: 24px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eg-prog .tm { font-size: 20px; color: #a7a39a; margin-top: 6px; white-space: nowrap; }
+.eg-prog.now { background: rgba(217,176,102,.16); }
+.eg-prog.empty { background: rgba(255,255,255,.04); color: #a7a39a; }
+.eg-prog.empty .t { font-weight: normal; }
+.eg-prog.rec .t { color: #ff8a7a; }
+.eg-prog.focus { background: rgba(217,176,102,.55); box-shadow: 0 0 0 4px #f4dc9e, 0 0 28px rgba(244,220,158,.45); }
+.eg-prog.focus .tm, .eg-prog.focus.rec .t { color: #fff; }
+.eg-nowline { position: absolute; top: 50px; height: 600px; width: 3px; background: #f4dc9e; box-shadow: 0 0 10px #f4dc9e; }
+.eg-hint { position: absolute; left: 70px; right: 70px; bottom: 16px; font-size: 22px; color: #a7a39a; white-space: nowrap; }
+.eg-hint span { margin-right: 34px; }
+.eg-hint b { color: #f2efe8; }
+.k { display: inline-block; width: 16px; height: 16px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; }
+.k.red { background: #e74c3c; } .k.green { background: #2ecc71; } .k.yellow { background: #f1c40f; } .k.blue { background: #3498db; }
+
+/* ---------- Auswahlfenster ---------- */
+#modal { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: rgba(0,0,0,.65); z-index: 50; }
+.modal-box {
+    position: absolute; left: 50%; top: 50%; width: 1000px; margin-left: -500px; transform: translateY(-50%);
+    background: #1b1d22; border: 2px solid rgba(217,176,102,.5); border-radius: 20px; padding: 44px 50px; box-sizing: border-box;
+    box-shadow: 0 30px 80px rgba(0,0,0,.7);
+}
+.modal-title { font-size: 40px; font-weight: bold; margin-bottom: 12px; }
+.modal-text { font-size: 26px; color: #d9b066; margin-bottom: 8px; }
+.modal-buttons { margin-top: 30px; }
+.modal-buttons .button { margin: 0 16px 16px 0; }
+.modal-list .modal-buttons .button { display: block; margin: 0 0 12px 0; text-align: left; }
+
+/* ---------- Aufnahmen ---------- */
+.recs { position: absolute; left: 70px; right: 70px; top: 110px; bottom: 0; }
+.rec-storage { font-size: 26px; color: #a7a39a; margin: 6px 0 10px; }
+.rec-row { background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.1); border-radius: 14px; padding: 22px 30px; margin-bottom: 14px; }
+.rec-title { font-size: 32px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-info { font-size: 24px; color: #a7a39a; margin-top: 6px; }
+.rec-row.recording .rec-title { color: #ff8a7a; }
+.rec-row.failed, .rec-row.missed { opacity: .7; }
+.rec-row.focused { background: rgba(217,176,102,.38); }
+
+/* ---------- Weiterschauen ---------- */
+.prog { position: absolute; left: 10px; right: 10px; bottom: 10px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.28); overflow: hidden; }
+.prog .bar { height: 100%; background: #d9b066; border-radius: 4px; }
+.poster .img .prog { box-shadow: 0 1px 4px rgba(0,0,0,.6); }
+.poster.resume .title { height: 28px; white-space: nowrap; text-overflow: ellipsis; }
+.poster.resume .sub { font-size: 20px; color: #d9b066; margin-top: 2px; }
+.episode { position: relative; }
+.episode .ep-left { float: right; font-size: 22px; color: #d9b066; margin-left: 20px; line-height: 34px; }
+.episode .prog { left: 20px; right: 20px; bottom: 4px; height: 5px; }
+.episode.focused .ep-left { color: #fff; }

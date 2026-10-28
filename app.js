@@ -76,7 +76,12 @@
         logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/>',
         crown: '<path d="M3 18h18M4 16l-1-9 5 4 4-6 4 6 5-4-1 9z"/>',
         list: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/>',
-        back: '<path d="M19 12H5M11 6l-6 6 6 6"/>'
+        back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+        search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/>',
+        resume: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.2 3.8v4.6h4.6"/><path d="M10 8.6l5.2 3.4-5.2 3.4z"/>',
+        rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
+        gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M5.5 18.5l1.9-1.9M16.6 7.4l1.9-1.9"/><circle cx="12" cy="12" r="6.2"/>',
+        epg: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/><circle cx="5.2" cy="9" r=".4"/><circle cx="5.2" cy="13" r=".4"/><circle cx="5.2" cy="17" r=".4"/>'
     };
     function icon(name, size) {
         return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" fill="none" stroke="currentColor" ' +
@@ -88,8 +93,16 @@
     // =====================================================================
 
     var scale = 1, offX = 0, offY = 0;
+    function viewportSize() {
+        var de = document.documentElement;
+        var w = window.innerWidth || (de && de.clientWidth) || 0;
+        var hh = window.innerHeight || (de && de.clientHeight) || 0;
+        // Größe noch unbekannt (manche Fernseher melden sie erst später): vorerst Full HD annehmen
+        if (w < 100 || hh < 100) { w = 1920; hh = 1080; }
+        return { w: w, h: hh };
+    }
     function applyScale() {
-        var w = window.innerWidth || 1920, hh = window.innerHeight || 1080;
+        var vp = viewportSize(), w = vp.w, hh = vp.h;
         scale = Math.min(w / 1920, hh / 1080);
         offX = Math.round((w - 1920 * scale) / 2);
         offY = Math.round((hh - 1080 * scale) / 2);
@@ -151,7 +164,7 @@
     }
 
     var VERTICAL_LOCK = { cats: true, list: true, grid: true };
-    var HORIZONTAL_LOCK = { seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true };
+    var HORIZONTAL_LOCK = { seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true, topbtns: true };
 
     var Focus = {
         cur: null,
@@ -175,7 +188,8 @@
         },
 
         all: function () {
-            var list = document.querySelectorAll('#stage .focusable');
+            // Ist ein Auswahlfenster offen, nur dessen Knöpfe
+            var list = document.querySelectorAll(Modal.node ? '#modal .focusable' : '#stage .focusable');
             var out = [];
             for (var i = 0; i < list.length; i++) {
                 if (list[i].offsetParent !== null) out.push(list[i]);
@@ -308,6 +322,96 @@
             return !!this.set[k];
         }
     };
+
+    // =====================================================================
+    // Weiterschauen: merkt sich bei Filmen und Serienfolgen, wo man aufgehört hat
+    // =====================================================================
+
+    var Resume = {
+        MAX: 40,
+        cache: null,
+        accKey: function () { var a = Api.acc; return a ? a.server + '|' + a.username : ''; },
+        raw: function () {
+            if (!this.cache) { var l = Storage.get('resume', []); this.cache = Array.isArray(l) ? l : []; }
+            return this.cache;
+        },
+        write: function (list) { this.cache = list; Storage.set('resume', list); },
+        /** Einträge der aktuellen Wiedergabeliste, neueste zuerst */
+        all: function () {
+            var acc = this.accKey();
+            return this.raw().filter(function (e) { return e.acc === acc; });
+        },
+        keyFor: function (kind, it) {
+            if (kind === 'episode') return 'series:' + (it.series ? it.series.id : 'ep' + it.id);
+            return 'movie:' + it.id;
+        },
+        /** Eintrag genau für diesen Film bzw. diese Folge */
+        forItem: function (kind, it) {
+            if (!it || it.type === 'recording') return null;
+            var key = this.keyFor(kind, it), acc = this.accKey(), list = this.raw();
+            for (var i = 0; i < list.length; i++) {
+                var e = list[i];
+                if (e.acc === acc && e.key === key && String(e.id) === String(it.id)) return e;
+            }
+            return null;
+        },
+        forSeries: function (seriesId) {
+            var key = 'series:' + seriesId, acc = this.accKey(), list = this.raw();
+            for (var i = 0; i < list.length; i++) if (list[i].acc === acc && list[i].key === key) return list[i];
+            return null;
+        },
+        save: function (kind, it, pos, dur, next) {
+            var acc = this.accKey(), key = this.keyFor(kind, it);
+            var e = {
+                acc: acc, key: key, kind: kind, id: it.id, name: it.name, logo: it.logo || '', ext: it.ext || '',
+                pos: Math.floor(pos), dur: Math.floor(dur), at: Date.now(), next: !!next
+            };
+            if (kind === 'episode') {
+                e.season = it.season; e.num = it.num;
+                if (it.series) { e.series = it.series; e.logo = it.series.logo || e.logo; }
+            }
+            var list = this.raw().filter(function (x) { return !(x.acc === acc && x.key === key); });
+            list.unshift(e);
+            if (list.length > this.MAX) list = list.slice(0, this.MAX);
+            this.write(list);
+        },
+        remove: function (key) {
+            var acc = this.accKey();
+            this.write(this.raw().filter(function (x) { return !(x.acc === acc && x.key === key); }));
+        },
+        /** Fortschritt 0 … 1 */
+        part: function (e) { return e && e.dur > 0 ? Math.max(0, Math.min(1, e.pos / e.dur)) : 0; },
+        /** Kurztext: "Noch 23 Min." */
+        leftText: function (e) {
+            if (e.next) return 'Nächste Folge';
+            var min = Math.max(1, Math.round((e.dur - e.pos) / 60));
+            return 'Noch ' + min + ' Min.';
+        },
+        label: function (e) {
+            if (e.kind !== 'episode') return e.name;
+            return (e.series ? e.series.name : e.name) + ' · S' + e.season + ' F' + (e.num || '?');
+        }
+    };
+
+    /** Fortschrittsbalken für Poster und Folgen */
+    function progressNode(part) {
+        var p = h('div', 'prog');
+        var b = h('div', 'bar');
+        b.style.width = Math.round(part * 100) + '%';
+        p.appendChild(b);
+        return p;
+    }
+
+    /** Film oder Folge starten. Gibt es einen gespeicherten Stand, wird gefragt. */
+    function playWithResume(items, index, kind) {
+        var it = items[index], e = Resume.forItem(kind, it);
+        if (!e || e.next || e.pos < 30) { Nav.push(new PlayerScreen(items, index, kind, 0)); return; }
+        Modal.open(it.name, 'Du hast bei ' + fmtTime(e.pos) + (e.dur ? ' von ' + fmtTime(e.dur) : '') + ' aufgehört.', [
+            { label: '▶  Fortsetzen ab ' + fmtTime(e.pos), primary: true, action: function () { Nav.push(new PlayerScreen(items, index, kind, e.pos)); } },
+            { label: '↺  Von vorne', action: function () { Nav.push(new PlayerScreen(items, index, kind, 0)); } },
+            { label: 'Abbrechen' }
+        ]);
+    }
 
     // =====================================================================
     // Xtream-Schnittstelle
@@ -741,6 +845,25 @@
             }, function () { return []; });
         },
 
+        /** Programm für die nächsten Stunden (für das EPG-Raster) */
+        epgFull: function (streamId) {
+            var self = this;
+            self.epgFullCache = self.epgFullCache || {};
+            var cached = self.epgFullCache[streamId];
+            if (cached && Date.now() - cached.at < 10 * 60 * 1000) return Promise.resolve(cached.list);
+            return Api.call('get_short_epg', { stream_id: streamId, limit: 60 }).then(function (json) {
+                var list = ((json && json.epg_listings) || []).map(function (e) {
+                    return {
+                        title: b64(e.title), desc: b64(e.description || ''),
+                        start: parseFloat(e.start_timestamp) * 1000, end: parseFloat(e.stop_timestamp) * 1000
+                    };
+                }).filter(function (e) { return e.title && e.start && e.end && e.end > e.start; });
+                list.sort(function (a, b) { return a.start - b.start; });
+                self.epgFullCache[streamId] = { at: Date.now(), list: list };
+                return list;
+            }, function () { return []; });
+        },
+
         expiryText: function () {
             if (!this.expiry) return '';
             var d = this.expiry;
@@ -845,7 +968,7 @@
 
         /** Bildbereich als Anteil des sichtbaren Fensters (für Android) */
         fractions: function (rect) {
-            var w = window.innerWidth || 1920, hh = window.innerHeight || 1080;
+            var vp = viewportSize(), w = vp.w, hh = vp.h;
             if (!rect) return { x: 0, y: 0, w: 1, h: 1 };
             return {
                 x: (offX + rect.x * scale) / w, y: (offY + rect.y * scale) / hh,
@@ -915,6 +1038,26 @@
             else if (this.tizen) { try { d = this.av.getDuration() / 1000; } catch (e) { d = 0; } }
             else d = this.video.duration;
             return isFinite(d) && d > 0 && d < 86400 ? d : 0;
+        },
+
+        /** Zu einer festen Stelle springen (Sekunden) */
+        seekTo: function (sec) {
+            sec = Math.max(0, sec);
+            if (this.android) {
+                if (AB.seekTo) AB.seekTo(sec); else AB.seekBy(sec - AB.position());
+                return;
+            }
+            if (this.tizen) {
+                var av = this.av, ms = Math.round(sec * 1000);
+                try { av.seekTo(ms); } catch (e) {
+                    try { av.jumpForward(ms); } catch (e2) { /* nicht möglich */ }
+                }
+                return;
+            }
+            var v = this.video;
+            if (v.readyState >= 1) { v.currentTime = sec; return; }
+            var f = function () { v.removeEventListener('loadedmetadata', f); v.currentTime = sec; };
+            v.addEventListener('loadedmetadata', f);
         },
 
         seekBy: function (sec) {
@@ -1104,6 +1247,10 @@
         var img = h('div', 'img');
         if (item.logo) img.style.backgroundImage = 'url("' + item.logo.replace(/"/g, '%22') + '")';
         if (isFav) img.appendChild(h('div', 'fav', '★'));
+        if (item.type === 'movie') {
+            var e = Resume.forItem('movie', item);
+            if (e && e.pos >= 30) img.appendChild(progressNode(Resume.part(e)));
+        }
         node.appendChild(img);
         node.appendChild(h('div', 'title', item.name));
         return focusable(node, keyPrefix + item.id, action, 'grid');
@@ -1334,24 +1481,129 @@
         toast('Zum Beenden noch einmal Zurück drücken');
     };
 
+
+    // =====================================================================
+    // Auswahlfenster (z. B. „Aufnahme planen“ / „Abbrechen“)
+    // =====================================================================
+
+    var Modal = {
+        node: null,
+        returnFocus: null,
+        /** buttons: [{ label, action, primary }] */
+        open: function (title, text, buttons) {
+            this.close();
+            this.returnFocus = Focus.cur;
+            var wrap = h('div', null);
+            wrap.id = 'modal';
+            var box = h('div', 'modal-box');
+            box.appendChild(h('div', 'modal-title', title));
+            if (text) box.appendChild(h('div', 'modal-text', text));
+            var row = h('div', 'modal-buttons');
+            var self = this, first = null;
+            buttons.forEach(function (b, i) {
+                var node = h('div', 'button' + (b.primary ? ' primary' : ''), b.label);
+                focusable(node, 'modal-' + i, function () {
+                    self.close();
+                    if (b.action) b.action();
+                }, 'dialog');
+                row.appendChild(node);
+                if (!first) first = node;
+            });
+            box.appendChild(row);
+            wrap.appendChild(box);
+            $('#stage').appendChild(wrap);
+            this.node = wrap;
+            if (first) Focus.set(first);
+        },
+        close: function () {
+            if (!this.node) return;
+            this.node.parentNode.removeChild(this.node);
+            this.node = null;
+            if (this.returnFocus && document.body.contains(this.returnFocus)) Focus.set(this.returnFocus);
+            this.returnFocus = null;
+        }
+    };
+
+    // =====================================================================
+    // Aufnahmen (nur in der Android-App)
+    // =====================================================================
+
+    var Rec = {
+        available: function () { return !!(AB && AB.recSchedule); },
+        list: function () {
+            if (!this.available()) return [];
+            try { return JSON.parse(AB.recList()) || []; } catch (e) { return []; }
+        },
+        storage: function () {
+            try { return JSON.parse(AB.recStorage()); } catch (e) { return null; }
+        },
+        /** Live-Adresse für Aufnahmen: immer TS, das lässt sich am besten speichern */
+        url: function (ch) {
+            return Api.acc.server + '/live/' + Api.creds() + '/' + ch.id + '.ts';
+        },
+        /** Aufnahme planen. Rückgabe: true oder Fehlertext */
+        schedule: function (ch, title, start, end, progStart, progEnd) {
+            var now = Date.now();
+            var res = AB.recSchedule(JSON.stringify({
+                channelId: ch.id, channel: ch.name, title: title || ch.name, url: this.url(ch),
+                start: Math.max(now, start), end: end,
+                progStart: progStart || start, progEnd: progEnd || end
+            }));
+            if (!res || res.charAt(0) === '!') return res ? res.slice(1) : 'Aufnahme konnte nicht geplant werden.';
+            return true;
+        },
+        /** Geplante/laufende Aufnahmen je Sender und Sendungsbeginn */
+        marks: function () {
+            var map = {};
+            this.list().forEach(function (r) {
+                if (r.status === 'scheduled' || r.status === 'recording') map[r.channelId + ':' + (r.progStart || r.start)] = r;
+            });
+            return map;
+        },
+        sizeText: function (bytes) {
+            if (!bytes) return '0 MB';
+            if (bytes > 1e9) return (bytes / 1e9).toFixed(1).replace('.', ',') + ' GB';
+            return Math.round(bytes / 1e6) + ' MB';
+        }
+    };
+
+    function dateText(ms) {
+        var d = new Date(ms), days = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+        var today = new Date(); today.setHours(0, 0, 0, 0);
+        var diff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - today) / 86400000);
+        var day = diff === 0 ? 'Heute' : diff === 1 ? 'Morgen' : diff === -1 ? 'Gestern' : days[d.getDay()] + ' ' + pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.';
+        return day + ' ' + fmtClock(d);
+    }
+
     // =====================================================================
     // Startbildschirm
     // =====================================================================
 
     function HomeScreen() { this.lastBack = 0; }
     HomeScreen.prototype.render = function (root) {
-        var bar = h('div', 'topbar');
-        var brand = h('div', 'brand');
-        brand.innerHTML = '<img src="img/icon.png" alt="">';
-        bar.appendChild(brand);
-        root.appendChild(bar);
+        // Kopfzeile: Krone + ImperumTV in der Mitte, Suche und Neu laden rechts
+        var head = h('div', 'home-head');
+        var title = h('div', 'home-title');
+        title.innerHTML = icon('crown', 58) + '<span>ImperumTV</span>';
+        head.appendChild(title);
+        var btns = h('div', 'home-head-btns');
+        [
+            ['search', 'search', function () { Nav.push(new SearchScreen()); }],
+            ['reload', 'refresh', function () { reloadAll(); }]
+        ].forEach(function (b) {
+            var node = h('div', 'round-btn');
+            node.innerHTML = icon(b[1], 44);
+            btns.appendChild(focusable(node, 'home-top-' + b[0], b[2], 'topbtns'));
+        });
+        head.appendChild(btns);
+        root.appendChild(head);
 
         var circles = h('div', 'home-circles');
         [
             ['live', 'tv', 'LIVE TV', function () { Nav.push(new LiveScreen(0)); }],
+            ['epg', 'epg', 'EPG', function () { Nav.push(new EpgGridScreen(0)); }],
             ['movies', 'film', 'FILME', function () { Nav.push(new MoviesScreen('movies')); }],
-            ['series', 'series', 'SERIEN', function () { Nav.push(new MoviesScreen('series')); }],
-            ['favs', 'star', 'FAVORITEN', function () { Nav.push(new FavoritesScreen()); }]
+            ['series', 'series', 'SERIEN', function () { Nav.push(new MoviesScreen('series')); }]
         ].forEach(function (c) {
             var node = h('div', 'circle');
             node.innerHTML = '<div class="icon">' + icon(c[1], 120) + '</div><div class="label">' + c[2] + '</div>';
@@ -1360,11 +1612,19 @@
         root.appendChild(circles);
 
         var tiles = h('div', 'home-tiles');
-        [
-            ['reload', 'refresh', 'NEU LADEN', function () { reloadAll(); }],
+        var tileList = [];
+        if (Resume.all().length) tileList.push(['continue', 'resume', 'WEITERSCHAUEN', function () { Nav.push(new ContinueScreen()); }]);
+        tileList.push(
+            ['favs', 'star', 'FAVORITEN', function () { Nav.push(new FavoritesScreen()); }],
+            ['search', 'search', 'SUCHE', function () { Nav.push(new SearchScreen()); }]
+        );
+        if (Rec.available()) tileList.push(['recs', 'rec', 'AUFNAHMEN', function () { Nav.push(new RecordingsScreen()); }]);
+        tileList.push(
             ['account', 'user', 'KONTO', function () { Nav.push(new AccountScreen()); }],
+            ['settings', 'gear', 'EINSTELLUNGEN', function () { Nav.push(new SettingsScreen()); }],
             ['lists', 'list', 'LISTEN', function () { Nav.push(new PlaylistsScreen()); }]
-        ].forEach(function (t) {
+        );
+        tileList.forEach(function (t) {
             var node = h('div', 'tile');
             node.innerHTML = '<div class="icon">' + icon(t[1], 46) + '</div><div class="label">' + t[2] + '</div>';
             tiles.appendChild(focusable(node, 'home-' + t[0], t[3], 'tiles'));
@@ -1685,6 +1945,81 @@
     };
 
     // =====================================================================
+    // Weiter ansehen
+    // =====================================================================
+
+    function ContinueScreen() { }
+    ContinueScreen.prototype.render = function (root) {
+        var self = this;
+        root.appendChild(topbar('Weiter ansehen', 'OK: Abspielen · Gelb: Entfernen'));
+        var col = h('div', 'col col-grid');
+        col.style.left = '0';
+        col.style.top = '110px';
+        var scroll = h('div', 'scroll'), grid = h('div', 'grid');
+        grid.style.paddingLeft = '70px';
+        scroll.appendChild(grid);
+        col.appendChild(scroll);
+        root.appendChild(col);
+
+        var list = Resume.all();
+        if (!list.length) grid.appendChild(h('div', 'empty-note', 'Hier erscheinen Filme und Serien, die du angefangen hast.'));
+        list.forEach(function (e) {
+            var node = h('div', 'poster resume');
+            var img = h('div', 'img');
+            if (e.logo) img.style.backgroundImage = 'url("' + String(e.logo).replace(/"/g, '%22') + '")';
+            if (!e.next) img.appendChild(progressNode(Resume.part(e)));
+            node.appendChild(img);
+            node.appendChild(h('div', 'title', Resume.label(e)));
+            node.appendChild(h('div', 'sub', Resume.leftText(e)));
+            focusable(node, 'cont-' + e.key, function () { self.open(e); }, 'grid');
+            node._entry = e;
+            grid.appendChild(node);
+        });
+    };
+    ContinueScreen.prototype.open = function (e) {
+        var self = this;
+        var item = { type: e.kind, id: e.id, name: e.name, logo: e.logo, ext: e.ext, season: e.season, num: e.num, series: e.series };
+        var title = e.kind === 'episode' ? Resume.label(e) : e.name;
+        var buttons = [];
+        buttons.push({ label: e.next || e.pos < 30 ? '▶  Abspielen' : '▶  Fortsetzen ab ' + fmtTime(e.pos), primary: true,
+            action: function () { self.play(e, item, e.next ? 0 : e.pos); } });
+        if (!e.next) buttons.push({ label: '↺  Von vorne', action: function () { self.play(e, item, 0); } });
+        if (e.kind === 'episode' && e.series) {
+            buttons.push({ label: 'Zur Serie', action: function () {
+                Nav.push(new SeriesDetailScreen({ type: 'series', id: e.series.id, name: e.series.name, logo: e.series.logo }));
+            } });
+        }
+        buttons.push({ label: 'Entfernen', action: function () { self.removeEntry(e); } });
+        Modal.open(title, e.kind === 'episode' ? e.name : '', buttons);
+    };
+    /** Filme sofort, Folgen mit allen Folgen der Serie (damit die nächste automatisch kommt) */
+    ContinueScreen.prototype.play = function (e, item, at) {
+        if (e.kind !== 'episode' || !e.series) { Nav.push(new PlayerScreen([item], 0, e.kind, at)); return; }
+        loader(true, 'Folgen werden geladen …');
+        Data.seriesDetails(e.series.id).then(function (res) {
+            loader(false);
+            var eps = res.episodes, idx = -1;
+            eps.forEach(function (ep, i) { ep.series = e.series; if (String(ep.id) === String(e.id)) idx = i; });
+            if (idx < 0) Nav.push(new PlayerScreen([item], 0, 'episode', at));
+            else Nav.push(new PlayerScreen(eps, idx, 'episode', at));
+        }, function () {
+            loader(false);
+            Nav.push(new PlayerScreen([item], 0, 'episode', at));
+        });
+    };
+    ContinueScreen.prototype.removeEntry = function (e) {
+        Resume.remove(e.key);
+        toast(Resume.label(e) + ' entfernt');
+        this.focusKey = null;
+        if (!Resume.all().length) { Nav.back(); return; }
+        Nav.show(this);
+    };
+    ContinueScreen.prototype.onKey = function (k) {
+        if (k === KEY.YELLOW && Focus.cur && Focus.cur._entry) { this.removeEntry(Focus.cur._entry); return true; }
+        return false;
+    };
+
+    // =====================================================================
     // Film-Detailseite
     // =====================================================================
 
@@ -1704,9 +2039,19 @@
         body.appendChild(meta);
         body.appendChild(rating);
 
-        var play = h('div', 'button primary', '▶  Abspielen');
-        focusable(play, 'play', function () { Nav.push(new PlayerScreen([m], 0, 'movie')); }, 'buttons');
-        body.appendChild(play);
+        var saved = Resume.forItem('movie', m);
+        if (saved && saved.pos >= 30) {
+            var cont = h('div', 'button primary', '▶  Weiter ab ' + fmtTime(saved.pos));
+            focusable(cont, 'play', function () { Nav.push(new PlayerScreen([m], 0, 'movie', saved.pos)); }, 'buttons');
+            body.appendChild(cont);
+            var again = h('div', 'button', '↺  Von vorne');
+            focusable(again, 'restart', function () { Nav.push(new PlayerScreen([m], 0, 'movie', 0)); }, 'buttons');
+            body.appendChild(again);
+        } else {
+            var play = h('div', 'button primary', '▶  Abspielen');
+            focusable(play, 'play', function () { Nav.push(new PlayerScreen([m], 0, 'movie', 0)); }, 'buttons');
+            body.appendChild(play);
+        }
         var fav = h('div', 'button', Favs.has('movie', m.id) ? '★  Favorit' : '☆  Zu Favoriten');
         focusable(fav, 'fav', function () {
             var on = Favs.toggle('movie', m.id);
@@ -1773,7 +2118,12 @@
             Data.seriesDetails(s.id).then(function (res) {
                 self.episodes = res.episodes;
                 self.info = res.info;
+                var ser = { id: s.id, name: s.name, logo: s.logo || '' };
+                self.episodes.forEach(function (e) { e.series = ser; });
                 if (self.episodes.length) self.season = self.episodes[0].season;
+                // Mit der Staffel weitermachen, in der man zuletzt war
+                var last = Resume.forSeries(s.id);
+                if (last && self.episodes.some(function (e) { return e.season === last.season; })) self.season = last.season;
                 if (Nav.top() === self) Nav.show(self);
             }, function (e) {
                 toast(e.message || String(e), 6000);
@@ -1792,6 +2142,26 @@
         var back = info.backdrop || info.cover || s.logo;
         if (back) bg.style.backgroundImage = 'url("' + back.replace(/"/g, '%22') + '")';
         if (info.meta) body.appendChild(h('div', 'meta', info.meta));
+
+        // Weiterschauen: zuletzt gesehene (oder nächste) Folge
+        var all = this.episodes, last = Resume.forSeries(s.id), lastIndex = -1;
+        if (last) for (var li = 0; li < all.length; li++) if (String(all[li].id) === String(last.id)) lastIndex = li;
+        // Seit dem letzten Anzeigen weitergeschaut (z. B. nächste Staffel)? Dann dorthin springen.
+        if (lastIndex >= 0 && last.at > (this.seasonCheckedAt || 0) && this.season !== all[lastIndex].season) {
+            this.season = all[lastIndex].season;
+            if (this.seasonCheckedAt) this.focusKey = 'scont';
+        }
+        this.seasonCheckedAt = Date.now();
+        if (lastIndex >= 0) {
+            var ep0 = all[lastIndex];
+            var txt = (last.next ? '▶  Nächste: ' : '▶  Weiter: ') + 'S' + ep0.season + ' F' + (ep0.num || lastIndex + 1) +
+                (last.next || last.pos < 30 ? '' : ' ab ' + fmtTime(last.pos));
+            var cont = h('div', 'button primary', txt);
+            focusable(cont, 'scont', function () {
+                Nav.push(new PlayerScreen(all, lastIndex, 'episode', last.next ? 0 : last.pos));
+            }, 'buttons');
+            body.appendChild(cont);
+        }
 
         var fav = h('div', 'button', Favs.has('series', s.id) ? '★  Favorit' : '☆  Zu Favoriten');
         focusable(fav, 'sfav', function () {
@@ -1824,13 +2194,18 @@
         list.forEach(function (ep, i) {
             var n = h('div', 'episode');
             n.appendChild(h('span', 'n', String(ep.num || i + 1)));
+            var e = Resume.forItem('episode', ep);
+            if (e && !e.next && e.pos >= 30) {
+                n.appendChild(h('span', 'ep-left', Resume.leftText(e)));
+                n.appendChild(progressNode(Resume.part(e)));
+            }
             n.appendChild(document.createTextNode(ep.name));
-            focusable(n, 'ep-' + ep.id, function () { Nav.push(new PlayerScreen(list, i, 'episode')); }, 'episodes');
+            focusable(n, 'ep-' + ep.id, function () { playWithResume(all, all.indexOf(ep), 'episode'); }, 'episodes');
             scroll.appendChild(n);
         });
         body.appendChild(eps);
 
-        if (!this.focusKey) this.focusKey = list.length ? 'ep-' + list[0].id : 'sfav';
+        if (!this.focusKey) this.focusKey = lastIndex >= 0 ? 'scont' : list.length ? 'ep-' + list[0].id : 'sfav';
     };
 
     // =====================================================================
@@ -1881,13 +2256,648 @@
     };
 
     // =====================================================================
+    // EPG: alle Sender mit „Jetzt“ und „Danach“
+    // =====================================================================
+
+    /** Programm-Abfragen nacheinander (höchstens 4 gleichzeitig) */
+    var EpgQueue = {
+        running: 0, list: [], generation: 0,
+        add: function (job) { this.list.push({ job: job, gen: this.generation }); this.next(); },
+        clear: function () { this.list = []; this.generation++; },
+        next: function () {
+            var self = this;
+            while (this.running < 4 && this.list.length) {
+                var item = this.list.shift();
+                if (item.gen !== this.generation) continue;
+                this.running++;
+                item.job().then(done, done);
+            }
+            function done() { self.running--; self.next(); }
+        }
+    };
+
+    function timeRange(e) {
+        if (!e.start) return '';
+        var t = fmtClock(new Date(e.start));
+        return e.end ? t + ' – ' + fmtClock(new Date(e.end)) : t;
+    }
+
+    function EpgScreen(catIndex) { this.catIndex = catIndex || 0; this.list = []; }
+    EpgScreen.prototype.categories = LiveScreen.prototype.categories;
+    EpgScreen.prototype.filter = LiveScreen.prototype.filter;
+    EpgScreen.prototype.render = function (root) {
+        var self = this;
+        EpgQueue.clear();
+        root.appendChild(topbar('EPG', 'OK: Sender ansehen · Gelb: Favorit'));
+        var columns = h('div', 'columns');
+        columns.appendChild(categoryColumn(this.categories(), this.catIndex, function (i) {
+            self.catIndex = i;
+            self.focusKey = null;
+            Nav.show(self);
+            var first = $('.col-epg .erow');
+            if (first) Focus.set(first);
+        }));
+        var col = h('div', 'col col-epg');
+        var scroll = h('div', 'scroll');
+        col.appendChild(scroll);
+        columns.appendChild(col);
+        root.appendChild(columns);
+
+        this.list = this.filter();
+        if (!this.list.length) scroll.appendChild(h('div', 'empty-note', 'Keine Sender in dieser Kategorie.'));
+
+        // Programm erst laden, wenn eine Zeile sichtbar wird
+        var observer = null;
+        if (window.IntersectionObserver) {
+            observer = new IntersectionObserver(function (entries) {
+                entries.forEach(function (en) {
+                    if (en.isIntersecting && en.target._loadEpg) { en.target._loadEpg(); observer.unobserve(en.target); }
+                });
+            }, { root: scroll, rootMargin: '300px 0px' });
+        }
+        this.observer = observer;
+
+        batchRender(scroll, this.list, function (ch, i) {
+            var row = h('div', 'erow');
+            row.appendChild(h('div', 'num', String(ch.num)));
+            var logo = h('img', 'logo');
+            if (ch.logo) logo.src = ch.logo;
+            logo.onerror = function () { logo.style.visibility = 'hidden'; };
+            row.appendChild(logo);
+            var main = h('div', 'emain');
+            main.appendChild(h('div', 'name', ch.name + (Favs.has('live', ch.id) ? '  ★' : '')));
+            var now = h('div', 'enow', 'Programm wird geladen …');
+            var prog = h('div', 'progress'), bar = h('div', 'bar');
+            prog.appendChild(bar);
+            main.appendChild(now);
+            main.appendChild(prog);
+            row.appendChild(main);
+            var next = h('div', 'enext');
+            row.appendChild(next);
+            row._channel = ch;
+            row._loadEpg = function () {
+                row._loadEpg = null;
+                EpgQueue.add(function () {
+                    return Data.shortEpg(ch.id).then(function (list) {
+                        var t = Date.now();
+                        var cur = list.filter(function (e) { return e.start <= t && (!e.end || e.end > t); })[0] || list[0];
+                        var after = cur ? list[list.indexOf(cur) + 1] : null;
+                        if (!cur) { now.textContent = 'Kein Programm verfügbar'; prog.style.visibility = 'hidden'; return; }
+                        now.innerHTML = '';
+                        now.appendChild(h('span', 'time', timeRange(cur)));
+                        now.appendChild(document.createTextNode(cur.title));
+                        if (cur.start && cur.end && cur.end > cur.start) {
+                            bar.style.width = Math.max(0, Math.min(100, (t - cur.start) / (cur.end - cur.start) * 100)) + '%';
+                        } else prog.style.visibility = 'hidden';
+                        if (after) {
+                            next.appendChild(h('div', 'lbl', 'Danach'));
+                            next.appendChild(h('div', 'ntitle', (after.start ? fmtClock(new Date(after.start)) + '  ' : '') + after.title));
+                        }
+                    });
+                });
+            };
+            if (observer) observer.observe(row);
+            else if (i < 12) row._loadEpg();
+            var prevFocus = row._onFocus;
+            row._onFocus = function () { if (prevFocus) prevFocus(); if (row._loadEpg) row._loadEpg(); };
+            return focusable(row, 'epg-' + ch.id, function () { Nav.push(new PlayerScreen(self.list, i, 'live')); }, 'list');
+        }, 80);
+        if (!this.focusKey) this.focusKey = this.list.length ? 'epg-' + this.list[0].id : 'cat-0';
+    };
+    EpgScreen.prototype.onKey = function (k) {
+        if (k === KEY.YELLOW && Focus.cur && Focus.cur._channel) {
+            var ch = Focus.cur._channel;
+            var on = Favs.toggle('live', ch.id);
+            var name = $('.name', Focus.cur);
+            if (name) name.textContent = ch.name + (on ? '  ★' : '');
+            toast(on ? ch.name + ' zu Favoriten hinzugefügt' : ch.name + ' aus Favoriten entfernt');
+            return true;
+        }
+        return false;
+    };
+    EpgScreen.prototype.hide = function () {
+        EpgQueue.clear();
+        if (this.observer) this.observer.disconnect();
+    };
+
+
+    // =====================================================================
+    // EPG-Raster: Sender untereinander, Sendungen als Balken über die Zeit
+    // =====================================================================
+
+    var HALF_HOUR = 30 * 60 * 1000;
+    function floorHalfHour(ms) { return Math.floor(ms / HALF_HOUR) * HALF_HOUR; }
+
+    function EpgGridScreen(catIndex) {
+        this.catIndex = catIndex || 0;
+        this.chIndex = 0;
+        this.cursor = Date.now();
+        this.winStart = floorHalfHour(Date.now());
+        this.col = 'prog';
+        this.rowTop = 0;
+        this.epg = {};
+        this.loading = {};
+        this.previewId = null;
+    }
+    EpgGridScreen.prototype.ROWS = 6;
+    EpgGridScreen.prototype.SPAN = 150 * 60 * 1000;      // 2,5 Stunden sichtbar
+    EpgGridScreen.prototype.X0 = 360;                    // Beginn der Zeitachse (px)
+    EpgGridScreen.prototype.WIDTH = 1520;                // Breite der Zeitachse (px)
+    EpgGridScreen.prototype.categories = LiveScreen.prototype.categories;
+    EpgGridScreen.prototype.filter = LiveScreen.prototype.filter;
+
+    EpgGridScreen.prototype.render = function (root) {
+        var self = this;
+        document.body.classList.add('preview-mode');
+        EpgQueue.clear();
+        this.list = this.filter();
+        if (this.chIndex >= this.list.length) this.chIndex = 0;
+
+        var wrap = h('div', 'eg');
+        this.previewBox = h('div', 'eg-preview');
+        this.previewLabel = h('div', 'eg-preview-label', '');
+        this.previewBox.appendChild(this.previewLabel);
+        wrap.appendChild(this.previewBox);
+        this.info = h('div', 'eg-info');
+        wrap.appendChild(this.info);
+        this.clock = h('div', 'eg-clock', fmtClock(new Date()));
+        wrap.appendChild(this.clock);
+        this.main = h('div', 'eg-main');
+        wrap.appendChild(this.main);
+        var hint = h('div', 'eg-hint');
+        hint.innerHTML = '<span><b>◀ ▶</b> Zeit</span><span><b>▲ ▼</b> Sender</span><span><b>OK</b> Ansehen' +
+            (Rec.available() ? ' / Aufnehmen' : '') + '</span><span><i class="k red"></i>−2 Std.</span><span><i class="k green"></i>+2 Std.</span>' +
+            '<span><i class="k yellow"></i>Favorit</span><span><i class="k blue"></i>Jetzt</span><span><b>◀</b> ganz links: Kategorie</span>';
+        wrap.appendChild(hint);
+        root.appendChild(wrap);
+
+        this.marks = Rec.marks();
+        if (!this.list.length) {
+            this.main.appendChild(h('div', 'empty-note', 'Keine Sender in dieser Kategorie.'));
+            return;
+        }
+        this.draw();
+        clearInterval(this.ticker);
+        this.ticker = setInterval(function () {
+            if (Nav.top() !== self || Modal.node) return;
+            self.clock.textContent = fmtClock(new Date());
+            self.marks = Rec.marks();
+            self.draw();
+        }, 30000);
+    };
+
+    EpgGridScreen.prototype.hide = function () {
+        clearInterval(this.ticker);
+        clearTimeout(this.previewTimer);
+        EpgQueue.clear();
+        Player.on({});
+        Player.stop();
+        this.previewId = null;
+    };
+
+    EpgGridScreen.prototype.px = function (ms) {
+        return this.X0 + (ms - this.winStart) / this.SPAN * this.WIDTH;
+    };
+
+    /** Sendungen eines Senders im sichtbaren Zeitfenster (oder ein Platzhalter) */
+    EpgGridScreen.prototype.programs = function (ch) {
+        var list = this.epg[ch.id], winEnd = this.winStart + this.SPAN, self = this;
+        if (!list) return [{ placeholder: true, loading: true, title: 'Programm wird geladen …', start: this.winStart, end: winEnd }];
+        var out = list.filter(function (p) { return p.end > self.winStart && p.start < winEnd; });
+        if (!out.length) return [{ placeholder: true, title: 'Kein Programm verfügbar', start: this.winStart, end: winEnd }];
+        return out;
+    };
+
+    EpgGridScreen.prototype.focusedProgram = function () {
+        var ch = this.list[this.chIndex];
+        if (!ch) return null;
+        var progs = this.programs(ch), c = this.cursor;
+        for (var i = 0; i < progs.length; i++) if (progs[i].start <= c && progs[i].end > c) return progs[i];
+        for (var j = 0; j < progs.length; j++) if (progs[j].start > c) return progs[j];
+        return progs[progs.length - 1];
+    };
+
+    EpgGridScreen.prototype.load = function (ch) {
+        var self = this;
+        if (this.epg[ch.id] || this.loading[ch.id]) return;
+        this.loading[ch.id] = true;
+        EpgQueue.add(function () {
+            return Data.epgFull(ch.id).then(function (list) {
+                self.epg[ch.id] = list;
+                if (Nav.top() === self && !Modal.node) self.draw();
+            });
+        });
+    };
+
+    EpgGridScreen.prototype.draw = function () {
+        var self = this, main = this.main;
+        if (!main) return;
+        main.innerHTML = '';
+        // Sichtbare Sender
+        if (this.chIndex < this.rowTop) this.rowTop = this.chIndex;
+        if (this.chIndex >= this.rowTop + this.ROWS) this.rowTop = this.chIndex - this.ROWS + 1;
+
+        // Zeitachse
+        var axis = h('div', 'eg-axis');
+        for (var t = this.winStart; t < this.winStart + this.SPAN; t += HALF_HOUR) {
+            var lbl = h('div', 'eg-time', fmtClock(new Date(t)));
+            lbl.style.left = (this.px(t) - this.X0) + 'px';
+            axis.appendChild(lbl);
+        }
+        main.appendChild(axis);
+
+        var rows = h('div', 'eg-rows');
+        var focused = this.focusedProgram();
+        var now = Date.now();
+        for (var r = 0; r < this.ROWS; r++) {
+            var idx = this.rowTop + r;
+            var ch = this.list[idx];
+            if (!ch) break;
+            this.load(ch);
+            var next = this.list[idx + this.ROWS];
+            if (next) this.load(next);
+
+            var row = h('div', 'eg-row');
+            row.style.top = (r * 98) + 'px';
+            var cn = h('div', 'eg-chan' + (idx === this.chIndex ? ' sel' : '') + (idx === this.chIndex && this.col === 'chan' ? ' focus' : ''));
+            cn.appendChild(h('div', 'n', String(ch.num)));
+            cn.appendChild(h('div', 'nm', ch.name + (Favs.has('live', ch.id) ? ' ★' : '')));
+            row.appendChild(cn);
+
+            this.programs(ch).forEach(function (p) {
+                var a = Math.max(p.start, self.winStart), b = Math.min(p.end, self.winStart + self.SPAN);
+                var cls = 'eg-prog';
+                if (p.placeholder) cls += ' empty';
+                if (!p.placeholder && p.start <= now && p.end > now) cls += ' now';
+                if (idx === self.chIndex && self.col === 'prog' && p === focused) cls += ' focus';
+                var block = h('div', cls);
+                block.style.left = (self.px(a) + 4) + 'px';
+                block.style.width = Math.max(20, self.px(b) - self.px(a) - 8) + 'px';
+                var mark = !p.placeholder && self.marks[ch.id + ':' + p.start];
+                block.appendChild(h('div', 't', (mark ? '● ' : '') + p.title));
+                if (!p.placeholder) block.appendChild(h('div', 'tm', fmtClock(new Date(p.start)) + ' – ' + fmtClock(new Date(p.end))));
+                if (mark) block.classList.add('rec');
+                row.appendChild(block);
+            });
+            rows.appendChild(row);
+        }
+        main.appendChild(rows);
+
+        // Linie „Jetzt“
+        if (now >= this.winStart && now < this.winStart + this.SPAN) {
+            var line = h('div', 'eg-nowline');
+            line.style.left = this.px(now) + 'px';
+            main.appendChild(line);
+        }
+        this.renderInfo(focused);
+        this.schedulePreview();
+    };
+
+    EpgGridScreen.prototype.renderInfo = function (p) {
+        var ch = this.list[this.chIndex], box = this.info;
+        box.innerHTML = '';
+        if (!ch) return;
+        if (this.col === 'chan') {
+            box.appendChild(h('div', 'eg-title', ch.name));
+            box.appendChild(h('div', 'eg-meta', 'Kategorie: ' + this.categories()[this.catIndex] + ' · OK: Kategorie wechseln'));
+            return;
+        }
+        box.appendChild(h('div', 'eg-title', p ? p.title : ch.name));
+        var meta = ch.name;
+        if (p && !p.placeholder) meta += ' · ' + dateText(p.start) + ' – ' + fmtClock(new Date(p.end));
+        var mark = p && !p.placeholder && this.marks[ch.id + ':' + p.start];
+        if (mark) meta += mark.status === 'recording' ? ' · ● Wird aufgenommen' : ' · ● Aufnahme geplant';
+        box.appendChild(h('div', 'eg-meta', meta));
+        if (p && p.desc) box.appendChild(h('div', 'eg-desc', p.desc));
+    };
+
+    /** Vorschau des markierten Senders (startet erst, wenn man kurz verweilt) */
+    EpgGridScreen.prototype.schedulePreview = function () {
+        var self = this, ch = this.list[this.chIndex];
+        if (!ch) return;
+        this.previewLabel.textContent = ch.num + ' · ' + ch.name;
+        if (this.previewId === ch.id) return;
+        clearTimeout(this.previewTimer);
+        this.previewTimer = setTimeout(function () {
+            if (Nav.top() !== self || Modal.node) return;
+            self.previewId = ch.id;
+            Player.on({ ready: function () { Player.applyPreferences(); } });
+            Player.open(Api.liveUrl(ch.id), stageRect(self.previewBox));
+        }, 900);
+    };
+
+    EpgGridScreen.prototype.moveTime = function (delta) {
+        var earliest = floorHalfHour(Date.now()) - HALF_HOUR;
+        this.cursor = Math.max(earliest, this.cursor + delta);
+        this.fitWindow();
+    };
+
+    /** Zeitfenster so verschieben, dass der Cursor sichtbar ist */
+    EpgGridScreen.prototype.fitWindow = function () {
+        var earliest = floorHalfHour(Date.now()) - HALF_HOUR;
+        while (this.cursor >= this.winStart + this.SPAN - 15 * 60 * 1000) this.winStart += HALF_HOUR;
+        while (this.cursor < this.winStart && this.winStart > earliest) this.winStart -= HALF_HOUR;
+        if (this.winStart < earliest) this.winStart = earliest;
+    };
+
+    EpgGridScreen.prototype.onKey = function (k) {
+        var p = this.focusedProgram(), ch = this.list[this.chIndex];
+        if (!ch) return false;
+        var earliest = floorHalfHour(Date.now()) - HALF_HOUR;
+        switch (k) {
+            case KEY.UP: this.chIndex = Math.max(0, this.chIndex - 1); break;
+            case KEY.DOWN: this.chIndex = Math.min(this.list.length - 1, this.chIndex + 1); break;
+            case KEY.CH_UP: this.chIndex = Math.max(0, this.chIndex - this.ROWS); break;
+            case KEY.CH_DOWN: this.chIndex = Math.min(this.list.length - 1, this.chIndex + this.ROWS); break;
+            case KEY.RIGHT:
+                if (this.col === 'chan') { this.col = 'prog'; break; }
+                this.cursor = p.placeholder ? this.cursor + HALF_HOUR : p.end + 1000;
+                this.fitWindow();
+                break;
+            case KEY.LEFT:
+                if (this.col === 'chan') return true;
+                var target = p.placeholder ? this.cursor - HALF_HOUR : p.start - 1000;
+                if (target < Math.max(earliest, this.winStart) && this.winStart <= earliest) { this.col = 'chan'; break; }
+                if (p.placeholder && this.cursor - HALF_HOUR < earliest) { this.col = 'chan'; break; }
+                this.cursor = Math.max(earliest, target);
+                this.fitWindow();
+                break;
+            case KEY.RED: this.moveTime(-2 * 3600 * 1000); break;
+            case KEY.GREEN: this.moveTime(2 * 3600 * 1000); break;
+            case KEY.BLUE: this.cursor = Date.now(); this.winStart = floorHalfHour(Date.now()); break;
+            case KEY.YELLOW:
+                var on = Favs.toggle('live', ch.id);
+                toast(on ? ch.name + ' zu Favoriten hinzugefügt' : ch.name + ' aus Favoriten entfernt');
+                break;
+            case KEY.ENTER: this.choose(ch, p); return true;
+            default: return false;
+        }
+        this.draw();
+        return true;
+    };
+
+    EpgGridScreen.prototype.choose = function (ch, p) {
+        var self = this;
+        if (this.col === 'chan') { this.chooseCategory(); return; }
+        var now = Date.now();
+        if (!p.placeholder && p.end <= now) { toast('Diese Sendung ist schon vorbei.'); return; }
+        var running = p.placeholder || (p.start <= now && p.end > now);
+        var watch = function () { Player.on({}); Player.stop(); self.previewId = null; Nav.push(new PlayerScreen(self.list, self.chIndex, 'live')); };
+        if (!Rec.available() || p.placeholder) { if (running) watch(); else toast('Diese Sendung beginnt erst um ' + fmtClock(new Date(p.start)) + '.'); return; }
+
+        var mark = this.marks[ch.id + ':' + p.start];
+        var when = dateText(p.start) + ' – ' + fmtClock(new Date(p.end)) + ' · ' + ch.name;
+        var buttons = [];
+        if (running) buttons.push({ label: 'Ansehen', primary: true, action: watch });
+        if (mark) {
+            buttons.push({ label: mark.status === 'recording' ? 'Aufnahme stoppen' : 'Aufnahme löschen', primary: !running, action: function () {
+                AB.recCancel(mark.id);
+                toast(mark.status === 'recording' ? 'Aufnahme gestoppt' : 'Geplante Aufnahme gelöscht');
+                self.marks = Rec.marks(); self.draw();
+            } });
+        } else {
+            buttons.push({ label: running ? 'Bis zum Ende aufnehmen' : 'Aufnahme planen', primary: !running, action: function () {
+                // 2 Minuten Puffer vorher, 5 Minuten nachher
+                var res = Rec.schedule(ch, p.title, p.start - 2 * 60000, p.end + 5 * 60000, p.start, p.end);
+                if (res === true) toast(running ? 'Aufnahme läuft: ' + p.title : 'Aufnahme geplant: ' + p.title + ' (' + dateText(p.start) + ')', 4500);
+                else toast(res, 6000);
+                self.marks = Rec.marks(); self.draw();
+            } });
+        }
+        buttons.push({ label: 'Abbrechen' });
+        Modal.open(p.title, when, buttons);
+    };
+
+    EpgGridScreen.prototype.chooseCategory = function () {
+        var self = this, cats = this.categories();
+        // Viele Kategorien: als Liste mit bis zu 12 Einträgen ab der aktuellen
+        var start = Math.max(0, Math.min(this.catIndex - 2, cats.length - 12));
+        var buttons = cats.slice(start, start + 12).map(function (name, i) {
+            return { label: name, primary: start + i === self.catIndex, action: function () {
+                self.catIndex = start + i; self.chIndex = 0; self.rowTop = 0; self.col = 'prog';
+                Nav.show(self);
+            } };
+        });
+        if (start + 12 < cats.length) buttons.push({ label: 'Weitere …', action: function () { self.catIndex = Math.min(cats.length - 1, start + 12); self.chooseCategory(); } });
+        Modal.open('Kategorie wählen', '', buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+    };
+
+    // =====================================================================
+    // Aufnahmen
+    // =====================================================================
+
+    function RecordingsScreen() { this.timer = null; }
+    RecordingsScreen.prototype.render = function (root) {
+        var self = this;
+        root.appendChild(topbar('Aufnahmen', Rec.available() ? 'OK: Abspielen / Optionen · Aufnahmen planst du im EPG' : ''));
+        var box = h('div', 'recs scroll');
+        root.appendChild(box);
+        if (!Rec.available()) {
+            box.appendChild(h('div', 'empty-note', 'Aufnahmen gibt es nur in der Android-App (Handy, Android TV, Google TV, Fire TV).'));
+            return;
+        }
+        var st = Rec.storage();
+        if (st) box.appendChild(h('div', 'rec-storage', 'Freier Speicher: ' + Rec.sizeText(st.free) + ' von ' + Rec.sizeText(st.total) + (st.removable ? ' (USB/SD-Karte)' : '') +
+            ' · etwa ' + Math.max(0, Math.floor(st.free / 2.5e9)) + ' Std. Aufnahme'));
+
+        var list = Rec.list();
+        var groups = [
+            ['Läuft gerade', list.filter(function (r) { return r.status === 'recording'; })],
+            ['Geplant', list.filter(function (r) { return r.status === 'scheduled'; }).sort(function (a, b) { return a.start - b.start; })],
+            ['Fertig', list.filter(function (r) { return r.status === 'done'; }).sort(function (a, b) { return b.start - a.start; })],
+            ['Nicht geklappt', list.filter(function (r) { return r.status === 'failed' || r.status === 'missed'; })]
+        ];
+        if (!list.length) {
+            box.appendChild(h('div', 'empty-note', 'Noch keine Aufnahmen. Öffne das EPG, wähle eine Sendung und drücke OK → „Aufnahme planen“. Im Live-Player gibt es außerdem den Knopf „● Aufnehmen“.'));
+        }
+        groups.forEach(function (g) {
+            if (!g[1].length) return;
+            box.appendChild(h('div', 'search-section', g[0] + ' (' + g[1].length + ')'));
+            g[1].forEach(function (r) {
+                var row = h('div', 'rec-row ' + r.status);
+                row.appendChild(h('div', 'rec-title', (r.status === 'recording' ? '● ' : '') + r.title));
+                var info = r.channel + ' · ' + dateText(r.progStart || r.start) + ' – ' + fmtClock(new Date(r.progEnd || r.end));
+                if (r.status === 'done' || r.status === 'recording') info += ' · ' + Rec.sizeText(r.size);
+                if (r.status === 'failed') info += ' · ' + (r.error || 'Fehlgeschlagen');
+                if (r.status === 'missed') info += ' · Gerät war zur Startzeit aus';
+                row.appendChild(h('div', 'rec-info', info));
+                focusable(row, 'rec-' + r.id, function () { self.options(r); }, 'reclist');
+                box.appendChild(row);
+            });
+        });
+        // Größe laufender Aufnahmen aktualisieren
+        clearInterval(this.timer);
+        if (groups[0][1].length) {
+            this.timer = setInterval(function () {
+                if (Nav.top() !== self || Modal.node) return;
+                self.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : self.focusKey;
+                Nav.show(self);
+            }, 10000);
+        }
+        if (!this.focusKey) { var f = $('.rec-row'); if (f) this.focusKey = f.getAttribute('data-key'); }
+    };
+    RecordingsScreen.prototype.hide = function () { clearInterval(this.timer); };
+    RecordingsScreen.prototype.options = function (r) {
+        var self = this;
+        function refresh() { self.focusKey = null; Nav.show(self); }
+        if (r.status === 'done') {
+            Modal.open(r.title, r.channel + ' · ' + dateText(r.progStart || r.start) + ' · ' + Rec.sizeText(r.size), [
+                { label: '▶ Abspielen', primary: true, action: function () {
+                    var url = AB.recFileUrl(r.id);
+                    if (!url) { toast('Die Datei wurde nicht gefunden.'); return; }
+                    Nav.push(new PlayerScreen([{ id: r.id, type: 'recording', name: r.title, url: url }], 0, 'movie'));
+                } },
+                { label: 'Löschen', action: function () { AB.recDelete(r.id); toast('Aufnahme gelöscht'); refresh(); } },
+                { label: 'Abbrechen' }
+            ]);
+        } else if (r.status === 'scheduled') {
+            Modal.open(r.title, 'Geplant: ' + dateText(r.start) + ' · ' + r.channel, [
+                { label: 'Aufnahme absagen', primary: true, action: function () { AB.recCancel(r.id); toast('Geplante Aufnahme gelöscht'); refresh(); } },
+                { label: 'Abbrechen' }
+            ]);
+        } else if (r.status === 'recording') {
+            Modal.open(r.title, 'Läuft bis ' + fmtClock(new Date(r.end)) + ' · bisher ' + Rec.sizeText(r.size), [
+                { label: 'Aufnahme stoppen', primary: true, action: function () { AB.recCancel(r.id); toast('Aufnahme wird gestoppt'); setTimeout(refresh, 1500); } },
+                { label: 'Abbrechen' }
+            ]);
+        } else {
+            Modal.open(r.title, r.error || 'Diese Aufnahme hat nicht geklappt.', [
+                { label: 'Entfernen', primary: true, action: function () { AB.recDelete(r.id); refresh(); } },
+                { label: 'Abbrechen' }
+            ]);
+        }
+    };
+
+    // =====================================================================
+    // Suche: Sender, Filme und Serien
+    // =====================================================================
+
+    function SearchScreen() { this.query = ''; this.timer = null; }
+    SearchScreen.prototype.render = function (root) {
+        var self = this;
+        root.appendChild(topbar('Suche', 'OK aufs Feld: Tastatur öffnen · ▼: zu den Ergebnissen'));
+        var wrap = h('div', 'search-wrap');
+        var input = h('input', 'input search-input');
+        input.type = 'text';
+        input.placeholder = 'Sender, Film oder Serie suchen …';
+        input.value = this.query;
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('autocapitalize', 'none');
+        focusable(input, 'search-input', null, 'searchbox');
+        input._onFocus = function () { if (self.results) self.results.scrollTop = 0; };
+        wrap.appendChild(input);
+        this.status = h('div', 'search-status');
+        wrap.appendChild(this.status);
+        root.appendChild(wrap);
+
+        this.results = h('div', 'search-results scroll');
+        root.appendChild(this.results);
+
+        function update() {
+            clearTimeout(self.timer);
+            self.timer = setTimeout(function () {
+                if (self.query === input.value.trim()) return;
+                self.query = input.value.trim();
+                self.renderResults();
+            }, 350);
+        }
+        input.addEventListener('input', update);
+        input.addEventListener('change', update);
+
+        // Filme und Serien im Hintergrund laden, damit die Suche alles findet
+        var waiting = [];
+        if (!Data.moviesLoaded) waiting.push(Data.loadMovies());
+        if (!Data.seriesLoaded) waiting.push(Data.loadSeries());
+        if (waiting.length) {
+            this.status.textContent = 'Filme und Serien werden geladen …';
+            Promise.all(waiting).then(null, function () { /* trotzdem suchen */ }).then(function () {
+                if (Nav.top() !== self) return;
+                self.status.textContent = '';
+                self.renderResults();
+            });
+        }
+        this.renderResults();
+        if (!this.focusKey) this.focusKey = 'search-input';
+    };
+    SearchScreen.prototype.renderResults = function () {
+        var self = this, box = this.results, q = this.query.toLowerCase();
+        box.innerHTML = '';
+        if (q.length < 2) {
+            box.appendChild(h('div', 'empty-note', 'Gib mindestens 2 Buchstaben ein. Gesucht wird in Live-TV, Filmen und Serien.'));
+            return;
+        }
+        function match(item) { return item.name.toLowerCase().indexOf(q) >= 0; }
+        var live = Data.channels.filter(match).slice(0, 40);
+        var movies = Data.movies.filter(match).slice(0, 40);
+        var series = Data.series.filter(match).slice(0, 40);
+        if (!live.length && !movies.length && !series.length) {
+            box.appendChild(h('div', 'empty-note', 'Nichts gefunden für „' + this.query + '“.'));
+            return;
+        }
+        function section(title, items, type) {
+            if (!items.length) return;
+            box.appendChild(h('div', 'search-section', title + ' (' + items.length + ')'));
+            var grid = h('div', 'grid');
+            items.forEach(function (item, i) {
+                var node = posterNode(item, 'sr-' + type + '-', Favs.has(type, item.id), function () {
+                    if (type === 'live') Nav.push(new PlayerScreen(live, i, 'live'));
+                    else if (type === 'movie') Nav.push(new MovieDetailScreen(item));
+                    else Nav.push(new SeriesDetailScreen(item));
+                });
+                node.setAttribute('data-zone', 'sgrid');
+                grid.appendChild(node);
+            });
+            box.appendChild(grid);
+        }
+        section('Live-TV', live, 'live');
+        section('Filme', movies, 'movie');
+        section('Serien', series, 'series');
+        void self;
+    };
+    SearchScreen.prototype.hide = function () { clearTimeout(this.timer); };
+
+    // =====================================================================
+    // Einstellungen
+    // =====================================================================
+
+    function SettingsScreen() { }
+    SettingsScreen.prototype.render = function (root) {
+        root.appendChild(topbar('Einstellungen', ''));
+        var box = h('div', 'settings');
+        function row(key, label, value, action) {
+            var r = h('div', 'set-row');
+            r.appendChild(h('div', 'set-label', label));
+            var v = h('div', 'set-value', value || '');
+            r.appendChild(v);
+            focusable(r, 'set-' + key, function () { action(v); }, 'setlist');
+            box.appendChild(r);
+            return r;
+        }
+        row('reload', 'Alles neu laden', 'Sender, Filme und Serien neu vom Anbieter holen', function () { reloadAll(); });
+        row('format', 'Live-Format', Settings.liveExt.toUpperCase(), function (v) {
+            Settings.setLiveExt(Settings.liveExt === 'ts' ? 'm3u8' : 'ts');
+            v.textContent = Settings.liveExt.toUpperCase();
+            toast(Settings.liveExt === 'ts' ? 'Live-Sender laufen jetzt als TS (meist am stabilsten)' : 'Live-Sender laufen jetzt als HLS (M3U8)');
+        });
+        row('lists', 'Wiedergabelisten', 'Liste wechseln oder neue hinzufügen', function () { Nav.push(new PlaylistsScreen()); });
+        row('account', 'Konto', License.activated() ? 'Aktiviert (unbegrenzt)' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
+        row('device', 'Gerät', 'MAC ' + Device.macText() + '  ·  Schlüssel ' + Device.key, function () { Nav.push(new PlaylistsScreen()); });
+        box.appendChild(h('div', 'set-note', 'Bleibt ein Sender schwarz oder hängt, stelle das Live-Format um.'));
+        root.appendChild(box);
+        if (!this.focusKey) this.focusKey = 'set-reload';
+    };
+
+    // =====================================================================
     // Vollbild-Player
     // =====================================================================
 
-    function PlayerScreen(items, index, kind) {
+    function PlayerScreen(items, index, kind, startAt) {
         this.items = items;
         this.index = index;
         this.kind = kind;          // 'live', 'movie' oder 'episode'
+        this.startAt = startAt;    // Sekunden; undefined = gespeicherten Stand nehmen
+        this.lastSave = 0;
         this.overlay = false;
         this.hideTimer = null;
         this.retries = 0;
@@ -1898,6 +2908,7 @@
     PlayerScreen.prototype.item = function () { return this.items[this.index]; };
     PlayerScreen.prototype.url = function () {
         var it = this.item();
+        if (it.url) return it.url;          // z. B. eigene Aufnahme
         if (this.kind === 'live') return Api.liveUrl(it.id);
         if (this.kind === 'movie') return Api.movieUrl(it.id, it.ext);
         return Api.episodeUrl(it.id, it.ext);
@@ -1912,19 +2923,58 @@
         clearInterval(this.watchdog);
         this.watchdog = setInterval(function () { self.checkStall(); }, 2000);
     };
+    /** Filme und Folgen merken sich den Stand (Aufnahmen und Live nicht) */
+    PlayerScreen.prototype.resumable = function () {
+        var it = this.item();
+        return (this.kind === 'movie' || this.kind === 'episode') && it && it.type !== 'recording' && !it.url;
+    };
+    /** Stand speichern. Fast zu Ende geschaut: Eintrag entfernen bzw. nächste Folge vormerken. */
+    PlayerScreen.prototype.saveProgress = function (ended) {
+        if (!this.resumable() || this.seekPending) return;
+        var it = this.item(), pos = Player.current(), dur = Player.duration();
+        if (!ended && !(dur > 60)) return;            // Länge noch unbekannt
+        this.lastSave = Date.now();
+        var done = ended || pos >= dur * 0.95 || dur - pos < 60;
+        if (done) {
+            var next = this.kind === 'episode' ? this.items[this.index + 1] : null;
+            if (next) Resume.save('episode', next, 0, 0, true);
+            else Resume.remove(Resume.keyFor(this.kind, it));
+        } else if (pos >= 30) {
+            Resume.save(this.kind, it, pos, dur, false);
+        }
+    };
     PlayerScreen.prototype.start = function () {
         var self = this;
         this.lastTime = -1;
         this.lastProgress = Date.now();
         $('#subtitle').classList.add('hidden');
+        // Startpunkt: beim ersten Mal der übergebene Wert, sonst gespeicherter Stand der Folge
+        var at = 0;
+        if (this.resumable()) {
+            if (this.startAt !== undefined && this.startAt !== null) at = this.startAt;
+            else { var e = Resume.forItem(this.kind, this.item()); if (e && !e.next && e.pos >= 30) at = e.pos; }
+        }
+        this.startAt = undefined;
+        this.seekPending = at > 5 ? at : 0;
         Player.on({
             buffer: function (b) { self.buffering = b; },
             time: function (t) {
                 if (Math.abs(t - self.lastTime) > 0.2) { self.lastTime = t; self.lastProgress = Date.now(); }
                 if (self.overlay) self.updateBar();
+                if (self.seekPending && t >= self.seekPending - 15) self.seekPending = 0;   // Sprung ist angekommen
+                if (Date.now() - self.lastSave > 10000) self.saveProgress(false);
             },
-            ready: function () { Player.applyPreferences(); },
-            end: function () { self.onEnd(); },
+            ready: function () {
+                Player.applyPreferences();
+                if (self.seekPending) {
+                    var target = self.seekPending;
+                    Player.seekTo(target);
+                    toast('Weiter ab ' + fmtTime(target));
+                    // Falls der Sprung nicht klappt, nach 8 s trotzdem wieder speichern
+                    setTimeout(function () { self.seekPending = 0; }, 8000);
+                }
+            },
+            end: function () { self.saveProgress(true); self.onEnd(); },
             error: function (msg) { self.onError(msg); },
             subtitle: function (text, ms) { self.showSubtitle(text, ms); }
         });
@@ -1933,7 +2983,7 @@
         if (this.kind === 'live') {
             var it = this.item();
             Data.shortEpg(it.id).then(function (list) {
-                if (self.item() === it && list.length) { self.nowTitle = list[0].title; if (self.overlay) self.renderOverlay(); }
+                if (self.item() === it && list.length) { self.nowTitle = list[0].title; self.nowEnd = list[0].end; if (self.overlay) self.renderOverlay(); }
             });
         }
     };
@@ -2023,12 +3073,15 @@
             btn('pl-play', Player.isPlaying() ? '❚❚ Pause' : '▶ Weiter', function () { Player.toggle(); self.renderOverlay(); });
             btn('pl-ff', '10 s »', function () { Player.seekBy(10); });
             if (this.kind === 'episode' && this.index < this.items.length - 1) {
-                btn('pl-nextep', 'Nächste Folge', function () { self.index++; self.start(); });
+                btn('pl-nextep', 'Nächste Folge', function () { self.saveProgress(true); self.index++; self.start(); });
             }
+        }
+        if (this.kind === 'live' && Rec.available()) {
+            btn('pl-rec', '● Aufnehmen', function () { self.recordNow(); });
         }
         btn('pl-audio', 'Sprache', function () { toast(Player.nextAudio()); });
         btn('pl-sub', 'Untertitel', function () { toast(Player.nextSubtitle()); });
-        if (this.kind !== 'episode') {
+        if (this.kind !== 'episode' && it.type !== 'recording') {
             var favType = this.kind === 'live' ? 'live' : 'movie';
             btn('pl-fav', Favs.has(favType, it.id) ? '★ Favorit' : '☆ Favorit', function () {
                 var on = Favs.toggle(favType, it.id);
@@ -2043,6 +3096,27 @@
         var target = Focus.byKey(focusedKey) || Focus.byKey('pl-play');
         if (target) Focus.set(target);
         this.updateBar();
+    };
+    /** Sofort aufnehmen: bis Sendungsende oder für eine feste Zeit */
+    PlayerScreen.prototype.recordNow = function () {
+        var self = this, ch = this.item(), now = Date.now();
+        clearTimeout(this.hideTimer);
+        function go(end, title) {
+            var res = Rec.schedule(ch, title, now, end, now, end);
+            toast(res === true ? 'Aufnahme läuft bis ' + fmtClock(new Date(end)) + ': ' + title : res, 5000);
+            self.showOverlay();
+        }
+        var buttons = [];
+        if (this.nowEnd && this.nowEnd > now) {
+            buttons.push({ label: 'Bis Sendungsende (' + fmtClock(new Date(this.nowEnd)) + ')', primary: true,
+                action: function () { go(self.nowEnd + 5 * 60000, self.nowTitle || ch.name); } });
+        }
+        [30, 60, 120].forEach(function (min) {
+            buttons.push({ label: min < 60 ? min + ' Min.' : (min / 60) + ' Std.', primary: !buttons.length,
+                action: function () { go(now + min * 60000, (self.nowTitle || ch.name)); } });
+        });
+        buttons.push({ label: 'Abbrechen', action: function () { self.showOverlay(); } });
+        Modal.open('Aufnehmen: ' + ch.name, this.nowTitle ? 'Jetzt: ' + this.nowTitle : '', buttons);
     };
     PlayerScreen.prototype.updateBar = function () {
         if (this.kind === 'live' || !this.barFill) return;
@@ -2109,6 +3183,7 @@
         return false;
     };
     PlayerScreen.prototype.hide = function () {
+        this.saveProgress(false);
         clearTimeout(this.hideTimer);
         clearTimeout(this.subTimer);
         clearInterval(this.watchdog);
@@ -2147,6 +3222,15 @@
 
         if (!$('#loader').classList.contains('hidden')) { e.preventDefault(); return; }
 
+        if (Modal.node) {
+            if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { Modal.close(); e.preventDefault(); return; }
+            if (k === KEY.LEFT || k === KEY.UP) { Focus.move(k === KEY.LEFT ? 'left' : 'up'); e.preventDefault(); return; }
+            if (k === KEY.RIGHT || k === KEY.DOWN) { Focus.move(k === KEY.RIGHT ? 'right' : 'down'); e.preventDefault(); return; }
+            if (k === KEY.ENTER) { Focus.activate(); e.preventDefault(); return; }
+            e.preventDefault();
+            return;
+        }
+
         var top = Nav.top();
         if (top && top.onKey && top.onKey(k, e)) { e.preventDefault(); return; }
 
@@ -2169,6 +3253,11 @@
     function boot() {
         applyScale();
         window.addEventListener('resize', applyScale);
+        window.addEventListener('load', applyScale);
+        window.addEventListener('orientationchange', function () { setTimeout(applyScale, 300); });
+        // Zur Sicherheit kurz nach dem Start nochmal einpassen
+        setTimeout(applyScale, 300);
+        setTimeout(applyScale, 1200);
         registerKeys();
         Favs.load();
         Player.init();
@@ -2179,6 +3268,7 @@
             if (hidden) {
                 var top = Nav.top();
                 if (top && (top instanceof PlayerScreen || top instanceof LiveScreen)) {
+                    if (top instanceof PlayerScreen) top.saveProgress(false);   // beim Zurückkommen geht es dort weiter
                     try { Player.stop(); } catch (e) { /* egal */ }
                 }
             } else {
@@ -2255,7 +3345,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Resume: Resume,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
