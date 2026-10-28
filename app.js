@@ -255,6 +255,11 @@
             var curZone = cur.getAttribute('data-zone'), bestZone = best.getAttribute('data-zone');
             if (bestZone && bestZone !== curZone) {
                 var remembered = this.memory[bestZone];
+                // Zurück in die Kategorien: immer auf die gewählte Kategorie (z. B. „Bundesliga“)
+                if (bestZone === 'cats') {
+                    var active = document.querySelector('.col-cats .cat.active');
+                    if (this.isValid(active)) remembered = active;
+                }
                 if (this.isValid(remembered)) best = remembered;
             }
             this.set(best);
