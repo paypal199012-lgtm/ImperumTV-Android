@@ -794,3 +794,7 @@ input { -webkit-user-select: text; user-select: text; }
 
 /* Detailseiten: Knöpfe in zwei Reihen nicht aneinanderkleben */
 .detail .body .button { margin-bottom: 12px; }
+
+/* Demo-Liste */
+.pl-card.pl-demo { border-style: dashed; }
+.pl-card.pl-demo .pl-name { color: #f4dc9e; }

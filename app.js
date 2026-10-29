@@ -147,10 +147,10 @@
     }
 
     /** Anmelden und Sender laden, mit Schritten in der Lade-Animation */
-    function loginWithSteps(acc, title, onOk, onErr, showMs) {
+    function loginWithSteps(acc, title, onOk, onErr, showMs, pending) {
         var before = Data.channels.length;
         Loader.show(title, ['Anmelden', 'Sender laden', 'Fertig']);
-        Data.login(acc, function (i) { Loader.step(i); }).then(function () {
+        (pending || Data.login(acc, function (i) { Loader.step(i); })).then(function () {
             var n = Data.channels.length, diff = before ? n - before : 0;
             var text = String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' Sender geladen' + (diff > 0 ? ' (+' + diff + ' neue)' : '');
             Loader.done(text, onOk, showMs || 500);
@@ -240,9 +240,20 @@
         }
     }
 
+    /** LG-Fernseher (webOS) */
+    var WEBOS = !!(window.PalmSystem || window.webOSSystem);
+
     function exitApp() {
         Player.stop();
         if (AB) { AB.exit(); return; }
+        if (WEBOS) {
+            try {
+                if (window.webOSSystem && webOSSystem.platformBack) { webOSSystem.platformBack(); return; }
+                if (window.PalmSystem && PalmSystem.platformBack) { PalmSystem.platformBack(); return; }
+            } catch (e0) { /* weiter unten */ }
+            try { window.close(); } catch (e1) { /* egal */ }
+            return;
+        }
         try { tizen.application.getCurrentApplication().exit(); } catch (e) { toast('App beenden geht nur auf dem Fernseher.'); }
     }
 
@@ -281,14 +292,14 @@
         cur: null,
         memory: {},
 
-        set: function (node) {
+        set: function (node, noScroll) {
             if (!node) return;
             if (this.cur && this.cur !== node) this.cur.classList.remove('focused');
             this.cur = node;
             node.classList.add('focused');
             var zone = node.getAttribute('data-zone');
             if (zone) this.memory[zone] = node;
-            ensureVisible(node);
+            if (!noScroll) ensureVisible(node);
             if (node._onFocus) node._onFocus();
         },
 
@@ -415,6 +426,11 @@
             Focus.set(node);
             if (node.tagName === 'INPUT') node.focus(); else if (action) action();
         });
+        // LG Magic Remote: der Zeiger markiert, worauf er zeigt (ohne die Liste zu verschieben)
+        if (WEBOS) node.addEventListener('mousemove', function () {
+            if (Focus.cur === node || (Modal.node && !Modal.node.contains(node))) return;
+            Focus.set(node, true);
+        });
         // Langes Tippen mit dem Finger (Handy/Tablet)
         node.addEventListener('contextmenu', function (ev) {
             if (!node._onLong) return;
@@ -515,7 +531,7 @@
         introBtn: Storage.get('introBtn', true),     // Serien: Knopf „Intro überspringen“
         introSec: 20,
         setFlag: function (name, on) { this[name] = on; Storage.set(name, on); },
-        liveExt: Storage.get('liveExt', 'ts'),   // 'ts' oder 'm3u8'
+        liveExt: Storage.get('liveExt', (window.PalmSystem || window.webOSSystem) ? 'm3u8' : 'ts'),   // 'ts' oder 'm3u8' (LG: HLS)
         setLiveExt: function (ext) { this.liveExt = ext; Storage.set('liveExt', ext); }
     };
 
@@ -754,11 +770,99 @@
         }
     };
 
+    // =====================================================================
+    // Demo: freie Testvideos (Creative Commons), z. B. für die Prüfung im LG- oder Samsung-Store
+    // =====================================================================
+
+    var Demo = {
+        playlist: { id: 'demo', name: 'Demo', demo: true },
+        account: function () { return { server: 'demo://imperumtv', username: 'demo', password: 'demo', demo: true }; },
+        FILMS: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/',
+        live: [
+            { id: 1, name: 'Demo 1 · Big Buck Bunny', cat: '1', url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', color: '#3f7d3a' },
+            { id: 2, name: 'Demo 2 · Testbild', cat: '1', url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8', color: '#2f5f9e' },
+            { id: 3, name: 'Demo 3 · Tears of Steel', cat: '2', url: 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8', color: '#8a3b3b' }
+        ],
+        movies: [
+            { id: 101, name: 'Big Buck Bunny (2008)', file: 'BigBuckBunny.mp4', year: 2008, rating: '7.5', genre: 'Animation · Komödie', min: 10, color: '#5b8c2a',
+                plot: 'Ein freundliches Riesenkaninchen nimmt es mit drei frechen Nagern auf. Kurzfilm der Blender Foundation (CC BY 3.0).', dir: 'Sacha Goedegebure' },
+            { id: 102, name: 'Elephants Dream (2006)', file: 'ElephantsDream.mp4', year: 2006, rating: '6.6', genre: 'Animation · Sci-Fi', min: 11, color: '#6b4a8a',
+                plot: 'Zwei Männer erkunden eine seltsame, mechanische Welt. Der erste offene Film der Blender Foundation (CC BY 2.5).', dir: 'Bassam Kurdali' },
+            { id: 103, name: 'Sintel (2010)', file: 'Sintel.mp4', year: 2010, rating: '7.4', genre: 'Animation · Fantasy', min: 15, color: '#9a5a2a',
+                plot: 'Eine junge Frau sucht ihren kleinen Drachen. Kurzfilm der Blender Foundation (CC BY 3.0).', dir: 'Colin Levy' },
+            { id: 104, name: 'Tears of Steel (2012)', file: 'TearsOfSteel.mp4', year: 2012, rating: '6.0', genre: 'Sci-Fi', min: 12, color: '#3a5f7a',
+                plot: 'Eine Gruppe von Wissenschaftlern versucht in Amsterdam, die Welt vor Robotern zu retten. Blender Foundation (CC BY 3.0).', dir: 'Ian Hubert' }
+        ],
+        /** Einfaches Poster als Bild (Titel auf Farbfläche) */
+        poster: function (title, color, w, hh) {
+            w = w || 400; hh = hh || 600;
+            var lines = String(title).replace(/\s*\(\d{4}\)/, '').split(' '), rows = [], cur = '';
+            lines.forEach(function (word) { if ((cur + ' ' + word).trim().length > 12) { rows.push(cur.trim()); cur = word; } else cur += ' ' + word; });
+            if (cur.trim()) rows.push(cur.trim());
+            var y0 = hh / 2 - (rows.length - 1) * 28;
+            var text = rows.map(function (r, i) {
+                return '<text x="' + w / 2 + '" y="' + (y0 + i * 56) + '" font-family="Arial,Helvetica,sans-serif" font-size="46" font-weight="bold" fill="#fff" text-anchor="middle">' +
+                    r.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</text>';
+            }).join('');
+            var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + hh + '"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">' +
+                '<stop offset="0" stop-color="' + color + '"/><stop offset="1" stop-color="#111418"/></linearGradient></defs>' +
+                '<rect width="100%" height="100%" fill="url(#g)"/>' + text +
+                '<text x="' + w / 2 + '" y="' + (hh - 40) + '" font-family="Arial,Helvetica,sans-serif" font-size="26" fill="#d9b066" text-anchor="middle">DEMO</text></svg>';
+            return 'data:image/svg+xml,' + encodeURIComponent(svg);
+        },
+        /** Hintergrund ohne Schrift */
+        backdrop: function (color) {
+            return 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080"><defs><radialGradient id="g" cx=".7" cy=".3" r=".9">' +
+                '<stop offset="0" stop-color="' + color + '"/><stop offset="1" stop-color="#0d0f12"/></radialGradient></defs><rect width="100%" height="100%" fill="url(#g)"/></svg>');
+        },
+        b64: function (t) { try { return btoa(unescape(encodeURIComponent(t))); } catch (e) { return ''; } },
+        /** Antworten wie ein Xtream-Server */
+        answer: function (action, extra) {
+            var self = this, now = Math.floor(Date.now() / 1000);
+            switch (action || '') {
+                case '': return { user_info: { auth: 1, status: 'Active', exp_date: null } };
+                case 'get_live_categories': return [{ category_id: '1', category_name: 'Demo Live' }, { category_id: '2', category_name: 'Demo Kino' }];
+                case 'get_live_streams': return this.live.map(function (c) {
+                    return { stream_id: c.id, name: c.name, stream_icon: self.poster(c.name.split('· ')[1] || c.name, c.color, 300, 200), category_id: c.cat };
+                });
+                case 'get_short_epg':
+                    var start = Math.floor(now / 1800) * 1800, list = [];
+                    for (var i = 0; i < 8; i++) list.push({ title: this.b64('Demo-Programm ' + (i + 1)), description: this.b64('Freies Testvideo zum Ausprobieren von ImperumTV.'),
+                        start_timestamp: String(start + i * 1800), stop_timestamp: String(start + (i + 1) * 1800) });
+                    return { epg_listings: list };
+                case 'get_vod_categories': return [{ category_id: '10', category_name: 'Blender Open Movies' }];
+                case 'get_vod_streams': return this.movies.map(function (m, i) {
+                    return { stream_id: m.id, name: m.name, stream_icon: self.poster(m.name, m.color), category_id: '10', container_extension: 'mp4',
+                        rating: m.rating, year: String(m.year), added: String(now - i * 86400) };
+                });
+                case 'get_vod_info':
+                    var mv = this.movie(extra && extra.vod_id);
+                    return { info: mv ? { plot: mv.plot, genre: mv.genre, releasedate: String(mv.year), rating: mv.rating, director: mv.dir,
+                        duration: '00:' + (mv.min < 10 ? '0' : '') + mv.min + ':00', movie_image: this.poster(mv.name, mv.color),
+                        backdrop_path: [this.backdrop(mv.color)] } : {} };
+                case 'get_series_categories': return [{ category_id: '20', category_name: 'Demo-Serien' }];
+                case 'get_series': return [{ series_id: 201, name: 'Blender Open Movies', cover: this.poster('Blender Open Movies', '#7a5a1a'), category_id: '20', rating: '7.2', last_modified: String(now) }];
+                case 'get_series_info':
+                    return { info: { plot: 'Die freien Kurzfilme der Blender Foundation als Serie – zum Testen von Staffeln, Folgen und „Nächste Folge“.', genre: 'Animation', releaseDate: '2006' },
+                        episodes: { '1': this.movies.map(function (m, i) { return { id: String(301 + i), episode_num: i + 1, title: m.name.replace(/\s*\(\d{4}\)/, ''), container_extension: 'mp4', season: 1 }; }) } };
+                default: return [];
+            }
+        },
+        movie: function (id) { for (var i = 0; i < this.movies.length; i++) if (String(this.movies[i].id) === String(id)) return this.movies[i]; return null; },
+        liveUrl: function (id) { for (var i = 0; i < this.live.length; i++) if (this.live[i].id === Number(id)) return this.live[i].url; return this.live[0].url; },
+        movieUrl: function (id) { var m = this.movie(id) || this.movies[0]; return this.FILMS + m.file; },
+        episodeUrl: function (id) { var m = this.movies[(Number(id) - 301) % this.movies.length] || this.movies[0]; return this.FILMS + m.file; }
+    };
+
     var Api = {
         acc: null,
 
         call: function (action, extra) {
             var a = this.acc;
+            if (a && a.demo) {
+                var answer = Demo.answer(action, extra);
+                return new Promise(function (resolve) { setTimeout(function () { resolve(answer); }, 120); });
+            }
             var url = a.server + '/player_api.php?username=' + encodeURIComponent(a.username) +
                 '&password=' + encodeURIComponent(a.password);
             if (action) url += '&action=' + action;
@@ -781,9 +885,9 @@
         creds: function () {
             return encodeURIComponent(this.acc.username) + '/' + encodeURIComponent(this.acc.password);
         },
-        liveUrl: function (id) { return this.acc.server + '/live/' + this.creds() + '/' + id + '.' + Settings.liveExt; },
-        movieUrl: function (id, ext) { return this.acc.server + '/movie/' + this.creds() + '/' + id + '.' + (ext || 'mp4'); },
-        episodeUrl: function (id, ext) { return this.acc.server + '/series/' + this.creds() + '/' + id + '.' + (ext || 'mp4'); }
+        liveUrl: function (id) { if (this.acc.demo) return Demo.liveUrl(id); return this.acc.server + '/live/' + this.creds() + '/' + id + '.' + Settings.liveExt; },
+        movieUrl: function (id, ext) { if (this.acc.demo) return Demo.movieUrl(id); return this.acc.server + '/movie/' + this.creds() + '/' + id + '.' + (ext || 'mp4'); },
+        episodeUrl: function (id, ext) { if (this.acc.demo) return Demo.episodeUrl(id); return this.acc.server + '/series/' + this.creds() + '/' + id + '.' + (ext || 'mp4'); }
     };
 
     // =====================================================================
@@ -959,6 +1063,7 @@
         },
 
         find: function (id) {
+            if (String(id) === 'demo') return Demo.playlist;
             var list = this.lists || [];
             for (var i = 0; i < list.length; i++) if (list[i].id === String(id)) return list[i];
             return null;
@@ -967,6 +1072,7 @@
 
     /** Wiedergabeliste → Xtream-Zugang */
     function playlistAccount(p) {
+        if (p.demo) return Demo.account();
         if (p.server && p.username && p.password) {
             var fromLink = Account.parse(p.server);
             if (fromLink) return fromLink;
@@ -976,6 +1082,7 @@
     }
 
     function playlistAddress(p) {
+        if (p.demo) return 'Freie Testvideos zum Ausprobieren';
         var a = playlistAccount(p);
         if (a) return a.server;
         return (p.m3u || p.server || '').split('?')[0];
@@ -1068,6 +1175,9 @@
         login: function (acc, progress) {
             Api.acc = acc;
             var self = this;
+            // Alles gleichzeitig anfragen (spart Wartezeit); die Senderliste zählt nur, wenn die Anmeldung klappt
+            var lists = Promise.all([Api.call('get_live_categories'), Api.call('get_live_streams')]);
+            lists.then(null, function () { /* Fehler wird unten gemeldet */ });
             return Api.call(null).then(function (json) {
                 var user = json && json.user_info;
                 if (!user) throw new Error('Unerwartete Antwort vom Server.');
@@ -1076,7 +1186,7 @@
                 var exp = parseFloat(user.exp_date);
                 self.expiry = exp > 0 ? new Date(exp * 1000) : null;
                 if (progress) progress(1);
-                return Promise.all([Api.call('get_live_categories'), Api.call('get_live_streams')]);
+                return lists;
             }).then(function (res) {
                 var cats = self.catMap(res[0]);
                 var streams = Array.isArray(res[1]) ? res[1] : [];
@@ -1679,6 +1789,7 @@
             document.body.classList.remove('preview-mode', 'video-mode');
             Focus.clear();
             app.appendChild(frag);
+            LazyImg.scan(app);
             var boxes = this.boxes();
             if (saved) for (var i = 0; i < boxes.length && i < saved.length; i++) boxes[i].scrollTop = saved[i];
             if (screen.revived) screen.revived();
@@ -1859,10 +1970,68 @@
         return col;
     }
 
+    /**
+     * Bilder (Poster, Senderlogos) erst laden, wenn sie gleich ins Bild kommen.
+     * Spart auf Fire-TV-Sticks & Co. viel Netz und Rechenzeit.
+     */
+    var LazyImg = {
+        pending: [], timer: null,
+        /** Beobachter je Liste (Rand gilt dann innerhalb der Liste, nicht nur am Bildschirm) */
+        observerFor: function (root) {
+            var holder = root || document;
+            if (holder._lazyIo) return holder._lazyIo;
+            holder._lazyIo = new IntersectionObserver(function (entries, io) {
+                entries.forEach(function (en) {
+                    if (!en.isIntersecting) return;
+                    io.unobserve(en.target);
+                    LazyImg.apply(en.target);
+                });
+            }, { root: root || null, rootMargin: '600px 600px' });
+            return holder._lazyIo;
+        },
+        apply: function (n) {
+            var url = n._lazyUrl;
+            if (!url) return;
+            n._lazyUrl = null;
+            n.classList.remove('lazy');
+            if (n.tagName === 'IMG') n.src = url;
+            else n.style.backgroundImage = 'url("' + url.replace(/"/g, '%22') + '")';
+        },
+        /** n: <img> oder Element mit Hintergrundbild */
+        set: function (n, url) {
+            if (!url) return;
+            if (!window.IntersectionObserver) { n._lazyUrl = url; this.apply(n); return; }
+            n._lazyUrl = url;
+            n.classList.add('lazy');
+            this.pending.push(n);
+            var self = this;
+            if (!this.timer) this.timer = setTimeout(function () { self.flush(); }, 0);
+        },
+        flush: function () {
+            this.timer = null;
+            var list = this.pending;
+            this.pending = [];
+            for (var i = 0; i < list.length; i++) {
+                var n = list[i];
+                if (!n._lazyUrl) continue;
+                if (!document.body.contains(n)) continue;   // nicht (mehr) sichtbar: kommt über scan() wieder
+                var root = n.parentElement;
+                while (root && !(root.classList && (root.classList.contains('scroll') || root.classList.contains('vscroll') || root.classList.contains('hscroll')))) root = root.parentElement;
+                this.observerFor(root).observe(n);
+            }
+        },
+        /** Nach dem Wiedereinsetzen einer aufgehobenen Liste: offene Bilder neu beobachten */
+        scan: function (root) {
+            var nodes = (root || document).querySelectorAll('.lazy');
+            for (var i = 0; i < nodes.length; i++) if (nodes[i]._lazyUrl) this.pending.push(nodes[i]);
+            if (nodes.length) this.flush();
+        }
+    };
+
     function posterNode(item, keyPrefix, isFav, action) {
         var node = h('div', 'poster');
         var img = h('div', 'img');
-        if (item.logo) img.style.backgroundImage = 'url("' + item.logo.replace(/"/g, '%22') + '")';
+        if (item.logo) LazyImg.set(img, item.logo);
         if (isFav) img.appendChild(h('div', 'fav', '★'));
         if (item.rating > 0) img.appendChild(h('div', 'rate', ratingText(item.rating)));
         var e = null;
@@ -1923,9 +2092,10 @@
                 'Scanne den QR-Code rechts mit dem Handy oder öffne die Website und gib dort MAC-Adresse und Geräte-Schlüssel ein. ' +
                 'Die Wiedergabeliste erscheint danach hier von selbst.'));
             grid.appendChild(note);
-        } else {
-            lists.forEach(function (p) {
-                var card = h('div', 'pl-card');
+        }
+        if (!(this.loading && !lists.length)) {
+            lists.concat([Demo.playlist]).forEach(function (p) {
+                var card = h('div', 'pl-card' + (p.demo ? ' pl-demo' : ''));
                 card.appendChild(h('div', 'pl-name', p.name));
                 card.appendChild(h('div', 'pl-url', playlistAddress(p)));
                 if (p.id === current) card.appendChild(h('div', 'pl-badge', 'Verbunden'));
@@ -1970,7 +2140,7 @@
         root.appendChild(wrap);
 
         if (!this.focusKey || !Focus.byKey(this.focusKey)) {
-            this.focusKey = current && Remote.find(current) ? 'pl-' + current : (lists.length ? 'pl-' + lists[0].id : 'pl-refresh');
+            this.focusKey = current && Remote.find(current) ? 'pl-' + current : (lists.length ? 'pl-' + lists[0].id : 'pl-demo');
         }
         this.signature = JSON.stringify([Remote.lists, Remote.registered, this.error, this.loading, License.state && License.state.activated, License.state && License.state.freeUntil, License.daysLeft()]);
 
@@ -2010,7 +2180,7 @@
         });
     };
     PlaylistsScreen.prototype.connect = function (p) {
-        if (!License.active()) { Nav.replace(new LockScreen()); return; }
+        if (!License.active() && !p.demo) { Nav.replace(new LockScreen()); return; }
         var acc = playlistAccount(p);
         if (!acc) {
             toast('Diese Wiedergabeliste wird nicht unterstützt. Nötig sind Server, Benutzername und Passwort oder ein Link mit get.php?username=…&password=…', 8000);
@@ -2027,6 +2197,7 @@
         });
     };
     PlaylistsScreen.prototype.onRootBack = function () {
+        if (WEBOS) { exitApp(); return; }
         var now = Date.now();
         if (now - this.lastBack < 3000) { exitApp(); return; }
         this.lastBack = now;
@@ -2069,6 +2240,8 @@
         var buttons = h('div', 'pl-buttons');
         var refresh = h('div', 'button primary', 'Ich habe bezahlt');
         buttons.appendChild(focusable(refresh, 'lock-refresh', function () { self.check(true); }, 'side'));
+        var demo = h('div', 'button', 'Demo ansehen');
+        buttons.appendChild(focusable(demo, 'lock-demo', function () { new PlaylistsScreen().connect(Demo.playlist); }, 'side'));
         if (AB && AB.openUrl && document.body.classList.contains('touch')) {
             var open = h('div', 'button', 'Website öffnen');
             buttons.appendChild(focusable(open, 'lock-open', function () { AB.openUrl(Device.link()); }, 'side'));
@@ -2097,6 +2270,7 @@
         });
     };
     LockScreen.prototype.onRootBack = function () {
+        if (WEBOS) { exitApp(); return; }
         var now = Date.now();
         if (now - this.lastBack < 3000) { exitApp(); return; }
         this.lastBack = now;
@@ -2594,20 +2768,48 @@
         if (!this.focusKey) this.focusKey = 'home-live';
     };
     HomeScreen.prototype.onRootBack = function () {
+        if (WEBOS) { exitApp(); return; }
         var now = Date.now();
         if (now - this.lastBack < 3000) { exitApp(); return; }
         this.lastBack = now;
         toast('Zum Beenden noch einmal Zurück drücken');
     };
 
+    /** Aktualisieren: Sender, Filme und Serien neu vom Anbieter holen und zeigen, was neu ist */
     function reloadAll() {
         var acc = Api.acc || Storage.get('account', null);
         if (!acc) return;
-        loginWithSteps(acc, 'Liste wird aktualisiert …', function () {
-            Nav.replace(new HomeScreen());
+        function ids(list) { var m = {}; list.forEach(function (x) { m[x.id] = true; }); return m; }
+        function fresh(list, before) { if (!before) return 0; return list.filter(function (x) { return !before[x.id]; }).length; }
+        function num(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+        var oldCh = Data.channels.length ? ids(Data.channels) : null;
+        var oldMv = Data.moviesLoaded ? ids(Data.movies) : null;
+        var oldSr = Data.seriesLoaded ? ids(Data.series) : null;
+        Loader.show('Liste wird aktualisiert …', ['Anmelden', 'Sender', 'Filme', 'Serien', 'Fertig']);
+        var mvOk = true, srOk = true;
+        Data.login(acc, function (i) { Loader.step(i); }).then(function () {
+            Loader.step(2);
+            return Data.loadMovies().then(null, function () { mvOk = false; });
+        }).then(function () {
+            Loader.step(3);
+            return Data.loadSeries().then(null, function () { srOk = false; });
+        }).then(function () {
+            var parts = [num(Data.channels.length) + ' Sender'];
+            if (mvOk) parts.push(num(Data.movies.length) + ' Filme');
+            if (srOk) parts.push(num(Data.series.length) + ' Serien');
+            var news = [], a = fresh(Data.channels, oldCh), b = mvOk ? fresh(Data.movies, oldMv) : 0, c = srOk ? fresh(Data.series, oldSr) : 0;
+            if (a) news.push('+' + num(a) + ' Sender');
+            if (b) news.push('+' + num(b) + ' Filme');
+            if (c) news.push('+' + num(c) + ' Serien');
+            var text = parts.join(' · ') + (news.length ? '  (neu: ' + news.join(', ') + ')' : '');
+            Loader.done(text, function () {
+                Nav.replace(new HomeScreen());
+                if (!mvOk || !srOk) toast((!mvOk ? 'Filme' : 'Serien') + ' ließen sich gerade nicht laden. Sie werden beim Öffnen erneut geholt.', 6000);
+            }, 1800);
         }, function (e) {
+            Loader.hide();
             toast(e.message || String(e), 6000);
-        }, 1300);
+        });
     }
 
     // =====================================================================
@@ -2673,7 +2875,7 @@
             var row = h('div', 'row' + (self.selected && self.selected.id === ch.id ? ' active' : ''));
             row.appendChild(h('div', 'num', String(ch.num)));
             var logo = h('img', 'logo');
-            if (ch.logo) logo.src = ch.logo;
+            if (ch.logo) LazyImg.set(logo, ch.logo);
             logo.onerror = function () { logo.style.visibility = 'hidden'; };
             row.appendChild(logo);
             row.appendChild(h('div', 'name', ch.name));
@@ -3606,7 +3808,7 @@
             var row = h('div', 'erow');
             row.appendChild(h('div', 'num', String(ch.num)));
             var logo = h('img', 'logo');
-            if (ch.logo) logo.src = ch.logo;
+            if (ch.logo) LazyImg.set(logo, ch.logo);
             logo.onerror = function () { logo.style.visibility = 'hidden'; };
             row.appendChild(logo);
             var main = h('div', 'emain');
@@ -4779,6 +4981,7 @@
 
     function onKeyDown(e) {
         var k = e.keyCode;
+        if (k === 461) k = KEY.BACK;          // Zurück-Taste der LG-Fernbedienung
         var active = document.activeElement;
 
         // Eingabefeld mit Bildschirmtastatur
@@ -4885,27 +5088,37 @@
         var saved = Storage.get('account', null);
         var lastId = Storage.get('playlistId', null);
 
+        // Schnellstart: mit der zuletzt genutzten Liste schon anmelden, während die Website noch antwortet
+        var early = null;
+        if (lastId !== null && saved && saved.server && saved.username && saved.password) {
+            early = Data.login(saved, null);
+            early.then(null, function () { /* wird unten normal behandelt */ });
+        }
+        function sameAcc(a, b) { return a && b && a.server === b.server && a.username === b.username && a.password === b.password && !!a.demo === !!b.demo; }
+
         function start(acc) {
+            var pending = early && sameAcc(acc, saved) ? early : null;
+            early = null;
             loginWithSteps(acc, 'ImperumTV wird gestartet …', function () {
                 Nav.replace(new HomeScreen());
                 Updater.autoCheck();
             }, function (e) {
                 Nav.replace(new PlaylistsScreen(e.message || String(e)));
-            });
+            }, 300, pending);
         }
 
         loader(true, 'Wiedergabelisten werden geladen …');
         Remote.load().then(function () {
             loader(false);
-            if (!License.active()) { Nav.replace(new LockScreen()); return; }
             var chosen = lastId !== null ? Remote.find(lastId) : null;
+            if (!License.active() && !(chosen && chosen.demo)) { Nav.replace(new LockScreen()); return; }
             var acc = chosen ? playlistAccount(chosen) : null;
             if (acc) start(acc);
             else Nav.replace(new PlaylistsScreen(lastId !== null && !chosen && Remote.lists.length ? 'Die zuletzt genutzte Wiedergabeliste gibt es nicht mehr. Bitte wähle eine aus.' : ''));
         }, function (e) {
             loader(false);
             // Website nicht erreichbar: zuletzt bekannter Stand der Testphase gilt
-            if (!License.active()) { Nav.replace(new LockScreen()); return; }
+            if (!License.active() && !(saved && saved.demo && lastId === 'demo')) { Nav.replace(new LockScreen()); return; }
             if (lastId !== null && saved && saved.server && saved.username && saved.password) start(saved);
             else Nav.replace(new PlaylistsScreen(e.message || String(e)));
         });
@@ -4914,6 +5127,7 @@
         setInterval(function () {
             if (Nav.top() instanceof LockScreen) return;
             Remote.load().then(null, function () { /* offline: gespeicherter Stand */ }).then(function () {
+                if (Api.acc && Api.acc.demo) return;      // Demo braucht keine Freischaltung
                 if (!License.active() && !(Nav.top() instanceof LockScreen)) Nav.replace(new LockScreen());
             });
         }, 600000);
