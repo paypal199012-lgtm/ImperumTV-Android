@@ -111,7 +111,7 @@ body.preview-mode #app { background: transparent; }
 
 .home-circles {
     position: absolute;
-    left: 0; right: 0; top: 215px;
+    left: 0; right: 0; top: 285px;   /* Kreise und Kacheln mittig auf dem Bildschirm */
     text-align: center;
 }
 .circle {
@@ -131,7 +131,7 @@ body.preview-mode #app { background: transparent; }
 
 .home-tiles {
     position: absolute;
-    left: 0; right: 0; top: 615px;
+    left: 0; right: 0; top: 690px;
     text-align: center;
 }
 .tile {
@@ -731,7 +731,7 @@ body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none
 input { -webkit-user-select: text; user-select: text; }
 
 /* Logo oben auf der Startseite (ohne Hintergrund) */
-.home-title { top: -6px; }
+.home-title { top: 30px; }
 .home-logo { height: 125px; width: auto; display: inline-block; filter: drop-shadow(0 6px 14px rgba(0,0,0,.55)); }
 
 /* ---------- Kindersicherung ---------- */
