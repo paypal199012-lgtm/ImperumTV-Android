@@ -175,7 +175,6 @@
         search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/>',
         resume: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.2 3.8v4.6h4.6"/><path d="M10 8.6l5.2 3.4-5.2 3.4z"/>',
         lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
-        multi: '<rect x="3" y="4" width="8" height="7" rx="1.2"/><rect x="13" y="4" width="8" height="7" rx="1.2"/><rect x="3" y="13" width="8" height="7" rx="1.2"/><rect x="13" y="13" width="8" height="7" rx="1.2"/>',
         rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
         gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M5.5 18.5l1.9-1.9M16.6 7.4l1.9-1.9"/><circle cx="12" cy="12" r="6.2"/>',
         epg: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/><circle cx="5.2" cy="9" r=".4"/><circle cx="5.2" cy="13" r=".4"/><circle cx="5.2" cy="17" r=".4"/>'
@@ -463,6 +462,15 @@
             shown = end;
         }
         more();
+        // Für „Zurück“: Nav kann weitere Einträge nachladen, bis der gemerkte Eintrag wieder da ist
+        container.classList.add('batch');
+        container._batchMore = function () { if (shown >= items.length) return false; more(); return true; };
+        // Maus/Finger: beim Scrollen nachladen (ohne Fokus würde sonst nach dem ersten Stapel Schluss sein)
+        var sc = container;
+        while (sc && !(sc.classList && (sc.classList.contains('scroll') || sc.classList.contains('vscroll')))) sc = sc.parentElement;
+        if (sc) sc.addEventListener('scroll', function () {
+            if (shown < items.length && sc.scrollTop + sc.clientHeight > sc.scrollHeight - 1500) more();
+        });
         return {
             ensure: function (index) { while (shown <= index && shown < items.length) more(); }
         };
@@ -1536,15 +1544,49 @@
         stack: [],
         top: function () { return this.stack[this.stack.length - 1]; },
 
-        show: function (screen) {
+        show: function (screen, restoring) {
             var app = $('#app');
             app.innerHTML = '';
             $('#toast').classList.add('hidden');   // Meldungen vom vorherigen Bildschirm ausblenden
             document.body.classList.remove('preview-mode', 'video-mode');
             Focus.clear();
             screen.render(app);
+            var saved = restoring ? screen._scrolls : null;
+            if (saved) this.fillTo(saved);
             var target = Focus.byKey(screen.focusKey);
+            if (!target && restoring && screen.focusKey) target = this.loadUntil(screen.focusKey);
             if (target) Focus.set(target); else Focus.first();
+            if (saved) this.restoreScroll(screen, saved);
+        },
+
+        /** Alle Listen-Kästen (gleiche Reihenfolge wie beim Merken) */
+        boxes: function () { return document.querySelectorAll('#app .scroll'); },
+
+        /** So viele Einträge nachladen, dass die gemerkte Scroll-Position wieder erreichbar ist */
+        fillTo: function (saved) {
+            var boxes = this.boxes();
+            for (var i = 0; i < boxes.length && i < saved.length; i++) {
+                var box = boxes[i], batches = box.querySelectorAll('.batch');
+                if (box.classList.contains('batch')) batches = [box].concat([].slice.call(batches));
+                for (var guard = 0; guard < 200 && box.scrollHeight < saved[i] + box.clientHeight + 200; guard++) {
+                    var any = false;
+                    for (var j = 0; j < batches.length; j++) if (batches[j]._batchMore && batches[j]._batchMore()) any = true;
+                    if (!any) break;
+                }
+                box.scrollTop = saved[i];
+            }
+        },
+
+        /** Gemerkten Eintrag suchen, notfalls weitere Stapel nachladen */
+        loadUntil: function (key) {
+            var batches = document.querySelectorAll('#app .batch');
+            for (var guard = 0; guard < 60; guard++) {
+                var any = false;
+                for (var j = 0; j < batches.length; j++) if (batches[j]._batchMore && batches[j]._batchMore()) any = true;
+                var t = Focus.byKey(key);
+                if (t || !any) return t;
+            }
+            return null;
         },
 
         push: function (screen) {
@@ -1552,7 +1594,7 @@
             if (cur) {
                 cur.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : null;
                 // Scroll-Stand aller Listen merken, damit „Zurück“ genau dorthin führt
-                var boxes = document.querySelectorAll('#app .scroll');
+                var boxes = this.boxes();
                 cur._scrolls = [];
                 for (var i = 0; i < boxes.length; i++) cur._scrolls.push(boxes[i].scrollTop);
                 if (cur.hide) cur.hide();
@@ -1577,29 +1619,38 @@
             }
             var cur = this.stack.pop();
             if (cur.hide) cur.hide();
-            var top = this.top();
-            this.show(top);
-            this.restoreScroll(top);
+            this.show(this.top(), true);
         },
 
-        /** Gemerkten Scroll-Stand wiederherstellen (auch kurz danach, falls das Gerät verspätet neu aufbaut) */
-        restoreScroll: function (screen) {
-            var saved = screen._scrolls;
+        /** Gemerkten Scroll-Stand halten (auch kurz danach, falls das Gerät verspätet neu aufbaut oder Bilder nachlädt) */
+        userAt: 0,
+        restoreScroll: function (screen, saved) {
             screen._scrolls = null;
-            if (!saved || !saved.length) return;
+            var since = Date.now();
+            var touch = document.body.classList.contains('touch');
             function apply() {
-                if (Nav.top() !== screen) return;
-                var boxes = document.querySelectorAll('#app .scroll');
+                if (Nav.top() !== screen || Nav.userAt > since) return;   // Nutzer bedient schon wieder: nicht dazwischenfunken
+                var boxes = Nav.boxes();
                 for (var i = 0; i < boxes.length && i < saved.length; i++) {
-                    if (saved[i] && Math.abs(boxes[i].scrollTop - saved[i]) > 2) boxes[i].scrollTop = saved[i];
+                    if (Math.abs(boxes[i].scrollTop - saved[i]) > 2) boxes[i].scrollTop = saved[i];
                 }
-                if (Focus.cur && document.body.contains(Focus.cur)) ensureVisible(Focus.cur);
+                // Mit Fernbedienung muss der Fokus sichtbar sein; mit Finger/Maus zählt die Position
+                if (!touch && Focus.cur && document.body.contains(Focus.cur)) ensureVisible(Focus.cur);
             }
             apply();
-            setTimeout(apply, 80);
-            setTimeout(apply, 450);
+            setTimeout(apply, 60);
+            setTimeout(apply, 300);
+            setTimeout(apply, 800);
+            setTimeout(apply, 1600);
         }
     };
+    // Jede Bedienung beendet das Festhalten der alten Position
+    (function () {
+        function mark() { Nav.userAt = Date.now(); }
+        ['keydown', 'wheel', 'touchstart', 'mousedown'].forEach(function (ev) {
+            document.addEventListener(ev, mark, { capture: true, passive: true });
+        });
+    })();
 
     // =====================================================================
     // Bausteine für die Oberfläche
@@ -2360,7 +2411,6 @@
             ['search', 'search', 'SUCHE', function () { Nav.push(new SearchScreen()); }]
         );
         if (Rec.available()) tileList.push(['recs', 'rec', 'AUFNAHMEN', function () { Nav.push(new RecordingsScreen()); }]);
-        if (MultiScreen.available()) tileList.push(['multi', 'multi', 'MULTI-VIEW', function () { MultiScreen.open(); }]);
         tileList.push(
             ['account', 'user', 'KONTO', function () { Nav.push(new AccountScreen()); }],
             ['settings', 'gear', 'EINSTELLUNGEN', function () { Nav.push(new SettingsScreen()); }],
@@ -3831,183 +3881,6 @@
     };
 
     // =====================================================================
-    // Multi-View: 2 oder 4 Sender gleichzeitig (nur Android)
-    // =====================================================================
-
-    function MultiScreen() {
-        this.count = Storage.get('multiCount', 4) === 2 ? 2 : 4;
-        var saved = Storage.get('multiSlots', []);
-        this.slots = Array.isArray(saved) ? saved : [];
-        this.audio = 0;
-        this.playing = {};
-    }
-    MultiScreen.available = function () { return !!(AB && AB.multiOpen); };
-    /** Erst fragen: 2 oder 4 Sender */
-    MultiScreen.open = function () {
-        var last = Storage.get('multiCount', 0);
-        Modal.open('Multi-View', 'Wie viele Sender möchtest du gleichzeitig sehen?', [
-            { label: '2 Sender nebeneinander', primary: last !== 4, action: function () { Storage.set('multiCount', 2); Nav.push(new MultiScreen()); } },
-            { label: '4 Sender (2 × 2)', primary: last === 4, action: function () { Storage.set('multiCount', 4); Nav.push(new MultiScreen()); } },
-            { label: 'Abbrechen' }
-        ]);
-        if (Modal.node) Modal.node.classList.add('modal-list');
-        var sel = Modal.node && Modal.node.querySelector('.button.primary');
-        if (sel) Focus.set(sel);
-    };
-    /** Lage der Kacheln in 1920er-Koordinaten */
-    MultiScreen.prototype.rects = function () {
-        if (this.count === 2) return [{ x: 6, y: 272, w: 951, h: 535 }, { x: 963, y: 272, w: 951, h: 535 }];
-        return [{ x: 4, y: 4, w: 954, h: 534 }, { x: 962, y: 4, w: 954, h: 534 },
-                { x: 4, y: 542, w: 954, h: 534 }, { x: 962, y: 542, w: 954, h: 534 }];
-    };
-    MultiScreen.prototype.channel = function (i) {
-        var id = this.slots[i];
-        if (id === undefined || id === null) return null;
-        var list = Parental.visible('live', Data.channels);
-        for (var k = 0; k < list.length; k++) if (list[k].id === id) return list[k];
-        return null;
-    };
-    MultiScreen.prototype.render = function (root) {
-        var self = this;
-        document.body.classList.add('preview-mode');
-        var wrap = h('div', 'mv');
-        this.tiles = [];
-        this.rects().forEach(function (r, i) {
-            var t = h('div', 'mv-tile');
-            t.style.left = r.x + 'px'; t.style.top = r.y + 'px'; t.style.width = r.w + 'px'; t.style.height = r.h + 'px';
-            var ch = self.channel(i);
-            if (ch) {
-                t.appendChild(h('div', 'mv-name', ch.name));
-                t.appendChild(h('div', 'mv-state', ''));
-            } else {
-                t.classList.add('empty');
-                t.innerHTML = '<div class="mv-plus">+</div><div class="mv-empty">Sender wählen</div>';
-            }
-            t._onFocus = function () {
-                if (self.audio !== i) { self.audio = i; if (AB.multiAudio) AB.multiAudio(i); }
-            };
-            t._onLong = function () { self.options(i); };
-            focusable(t, 'mv-' + i, function () { self.pick(i); }, 'mv');
-            self.tiles.push(t);
-            wrap.appendChild(t);
-        });
-        root.appendChild(wrap);
-        root.appendChild(h('div', 'mv-hint', 'OK: Sender wählen · OK lang: Vollbild/Entfernen · Ton kommt von der markierten Kachel'));
-        if (!this.focusKey) this.focusKey = 'mv-' + this.audio;
-        var me = this;
-        setTimeout(function () { if (Nav.top() === me) me.startAll(); }, 60);
-    };
-    MultiScreen.prototype.startAll = function () {
-        var self = this;
-        if (AB.multiAudio) AB.multiAudio(this.audio);
-        this.rects().forEach(function (r, i) {
-            var ch = self.channel(i);
-            if (!ch) return;
-            var fr = Player.fractions(r);
-            // 2 Pixel Rand frei lassen, damit der goldene Rahmen sichtbar bleibt
-            AB.multiOpen(i, Api.liveUrl(ch.id), fr.x, fr.y, fr.w, fr.h);
-            self.playing[i] = ch.id;
-        });
-    };
-    MultiScreen.prototype.stopAll = function () {
-        if (AB && AB.multiStopAll) AB.multiStopAll();
-        this.playing = {};
-    };
-    MultiScreen.prototype.state = function (slot, st, msg) {
-        var t = this.tiles && this.tiles[slot];
-        var box = t && $('.mv-state', t);
-        if (!box) return;
-        box.textContent = st === 'buffer' ? 'Lädt …' : st === 'error' ? 'Kein Bild' + (/DECODER|DECODING/i.test(msg || '') ? ' – das Gerät schafft nicht so viele Videos' : '') : '';
-    };
-    MultiScreen.prototype.pick = function (i) {
-        Nav.push(new MultiPickScreen(this, i));
-    };
-    MultiScreen.prototype.options = function (i) {
-        var self = this, ch = this.channel(i);
-        var buttons = [{ label: 'Sender wählen', primary: true, action: function () { self.pick(i); } }];
-        if (ch) {
-            buttons.push({ label: 'Im Vollbild ansehen', action: function () { Nav.push(new PlayerScreen([ch], 0, 'live')); } });
-            buttons.push({ label: 'Kachel leeren', action: function () {
-                self.slots[i] = null; Storage.set('multiSlots', self.slots);
-                if (AB.multiStop) AB.multiStop(i);
-                self.focusKey = 'mv-' + i; Nav.show(self);
-            } });
-        }
-        buttons.push({ label: this.count === 4 ? 'Auf 2 Sender wechseln' : 'Auf 4 Sender wechseln', action: function () {
-            self.stopAll();
-            self.count = self.count === 4 ? 2 : 4;
-            Storage.set('multiCount', self.count);
-            if (self.audio >= self.count) self.audio = 0;
-            self.focusKey = 'mv-' + self.audio;
-            Nav.show(self);
-        } });
-        buttons.push({ label: 'Schließen' });
-        Modal.open(ch ? ch.name : 'Kachel ' + (i + 1), '', buttons);
-        if (Modal.node) Modal.node.classList.add('modal-list');
-    };
-    MultiScreen.prototype.hide = function () {
-        this.stopAll();
-        document.body.classList.remove('preview-mode');
-    };
-    window.__androidMulti = function (slot, st, msg) {
-        var top = Nav.top();
-        if (top instanceof MultiScreen) top.state(slot, st, msg);
-    };
-
-    /** Sender für eine Multi-View-Kachel auswählen */
-    function MultiPickScreen(multi, slot) {
-        this.multi = multi;
-        this.slot = slot;
-        this.catIndex = 0;
-        this.query = '';
-    }
-    MultiPickScreen.prototype.categories = LiveScreen.prototype.categories;
-    MultiPickScreen.prototype.filter = LiveScreen.prototype.filter;
-    MultiPickScreen.prototype.applySearch = applySearch;
-    MultiPickScreen.prototype.openSearch = function () {
-        var self = this;
-        openSearchDialog('Sender suchen', this.query, function (q) {
-            return Parental.visible('live', Data.channels).filter(searchMatcher(q)).length;
-        }, function (q) { self.applySearch(q, '.col-list .row'); });
-    };
-    MultiPickScreen.prototype.render = function (root) {
-        var self = this;
-        root.appendChild(topbar('Sender für Kachel ' + (this.slot + 1), 'OK: auswählen · Zurück: abbrechen'));
-        var columns = h('div', 'columns');
-        columns.appendChild(categoryColumn(this.categories(), this.catIndex, function (i) {
-            self.catIndex = i; self.query = ''; self.focusKey = null;
-            Nav.show(self);
-            var first = $('.col-list .row');
-            if (first) Focus.set(first);
-        }, { query: this.query, kind: 'live', onClick: function () { self.openSearch(); } }));
-        var listCol = h('div', 'col col-list mv-pick');
-        var scroll = h('div', 'scroll');
-        listCol.appendChild(scroll);
-        columns.appendChild(listCol);
-        root.appendChild(columns);
-        var list = this.filter();
-        if (!list.length) scroll.appendChild(h('div', 'empty-note', 'Keine Sender gefunden.'));
-        var current = this.multi.slots[this.slot];
-        batchRender(scroll, list, function (ch) {
-            var row = h('div', 'row' + (ch.id === current ? ' active' : ''));
-            row.appendChild(h('div', 'num', String(ch.num)));
-            var logo = h('img', 'logo');
-            if (ch.logo) logo.src = ch.logo;
-            logo.onerror = function () { logo.style.visibility = 'hidden'; };
-            row.appendChild(logo);
-            row.appendChild(h('div', 'name', ch.name));
-            return focusable(row, 'mp-' + ch.id, function () {
-                self.multi.slots[self.slot] = ch.id;
-                Storage.set('multiSlots', self.multi.slots);
-                self.multi.focusKey = 'mv-' + self.slot;
-                self.multi.audio = self.slot;
-                Nav.back();
-            }, 'list');
-        }, 120);
-        if (!this.focusKey) this.focusKey = list.length ? 'mp-' + list[0].id : 'cat-0';
-    };
-
-    // =====================================================================
     // Kindersicherung: Einstellungen
     // =====================================================================
 
@@ -4555,14 +4428,12 @@
             if (hidden) {
                 Parental.lock();
                 var top = Nav.top();
-                if (top instanceof MultiScreen) top.stopAll();
                 if (top && (top instanceof PlayerScreen || top instanceof LiveScreen)) {
                     if (top instanceof PlayerScreen) top.saveProgress(false);   // beim Zurückkommen geht es dort weiter
                     try { Player.stop(); } catch (e) { /* egal */ }
                 }
             } else {
                 var cur = Nav.top();
-                if (cur instanceof MultiScreen) cur.startAll();
                 if (cur instanceof PlayerScreen) cur.start();
                 else if (cur instanceof LiveScreen && cur.selected) cur.startPreview(cur.selected);
             }
@@ -4572,6 +4443,7 @@
 
         // Tasten, die die Android-App weiterreicht (Zurück, Medientasten, Farbtasten)
         window.__androidKey = function (code, repeat) {
+            Nav.userAt = Date.now();
             onKeyDown({ keyCode: code, repeat: !!repeat, preventDefault: function () { } });
         };
         window.__androidKeyUp = function (code) { if (code === KEY.ENTER) LongPress.up(); };
