@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
+    <!-- Updates direkt aus der App installieren -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- Läuft auf Handys UND Fernsehern: weder Touchscreen noch Leanback ist Pflicht -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -70,6 +73,17 @@
             android:name=".RecordingService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Gibt die heruntergeladene Update-APK an den Installer weiter -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="tv.imperum.app.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
 
         <receiver android:name=".RecordingAlarmReceiver" android:exported="false" />
 
