@@ -319,11 +319,34 @@
 
         byKey: function (key) {
             if (!key) return null;
-            var nodes = this.all();
+            var root = document.querySelector(Modal.node ? '#modal' : '#stage');
+            if (!root) return null;
+            var nodes = root.querySelectorAll('.focusable[data-key="' + String(key).replace(/["\\]/g, '\\$&') + '"]');
             for (var i = 0; i < nodes.length; i++) {
-                if (nodes[i].getAttribute('data-key') === key) return nodes[i];
+                if (nodes[i].offsetParent !== null) return nodes[i];
             }
             return null;
+        },
+
+        /** Mögliche Ziele für die Pfeiltasten. In langen Listen nur die Nachbarn, sonst wird es bei Tausenden Postern zäh. */
+        candidates: function (cur) {
+            var list = document.querySelectorAll(Modal.node ? '#modal .focusable' : '#stage .focusable');
+            var parent = cur.parentNode, kids = parent ? parent.children : null;
+            var big = !!(kids && kids.length > 300);
+            var out = [];
+            if (big) {
+                var idx = Array.prototype.indexOf.call(kids, cur);
+                for (var j = Math.max(0, idx - 60); j < Math.min(kids.length, idx + 61); j++) {
+                    var k = kids[j];
+                    if (k.classList.contains('focusable') && k.offsetParent !== null) out.push(k);
+                }
+            }
+            for (var i = 0; i < list.length; i++) {
+                var n = list[i];
+                if (big && n.parentNode === parent) continue;
+                if (n.offsetParent !== null) out.push(n);
+            }
+            return out;
         },
 
         move: function (dir) {
@@ -331,7 +354,7 @@
             if (!this.isValid(cur)) { this.first(); return false; }
             var r = cur.getBoundingClientRect();
             var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-            var nodes = this.all();
+            var nodes = this.candidates(cur);
             var best = null, bestScore = Infinity;
             var zone = cur.getAttribute('data-zone');
             var vertical = dir === 'up' || dir === 'down';
@@ -1240,12 +1263,7 @@
         },
 
         on: function (handlers) { this.handlers = handlers || {}; },
-        emit: function (name, a, b) {
-            var f = this.handlers[name];
-            if (f) { f(a, b); return; }
-            if (name === 'notice' && a) toast(a, 7000);
-            if (name === 'codec') Codec.problem(a);
-        },
+        emit: function (name, a, b) { var f = this.handlers[name]; if (f) f(a, b); },
 
         /** rect in 1920er-Koordinaten oder null für Vollbild */
         open: function (url, rect) {
@@ -1274,8 +1292,6 @@
                         onsubtitlechange: function (duration, text) { self.emit('subtitle', text, duration); }
                     });
                     try { av.setStreamingProperty('USER_AGENT', 'ImperumTV/1.0 (SmartTV)'); } catch (e1) { /* nicht überall verfügbar */ }
-                    // 4K-Fernseher: UHD-Modus einschalten, sonst laufen 4K-Streams nicht oder nur ruckelig
-                    if (Codec.uhdPanel()) { try { av.setStreamingProperty('SET_MODE_4K', 'TRUE'); } catch (e2) { /* älteres Modell */ } }
                     this.setRect(rect);
                     this.applyAspect(rect ? 'fit' : this.aspect());
                     av.prepareAsync(function () {
@@ -1588,6 +1604,7 @@
         top: function () { return this.stack[this.stack.length - 1]; },
 
         show: function (screen, restoring) {
+            screen._dom = null;
             var app = $('#app');
             app.innerHTML = '';
             $('#toast').classList.add('hidden');   // Meldungen vom vorherigen Bildschirm ausblenden
@@ -1641,17 +1658,33 @@
                 cur._scrolls = [];
                 for (var i = 0; i < boxes.length; i++) cur._scrolls.push(boxes[i].scrollTop);
                 if (cur.hide) cur.hide();
+                // Lange Listen (Filme, Serien) aufheben statt später alles neu zu bauen
+                cur._dom = null;
+                if (cur.keepDom) {
+                    var app = $('#app'), frag = document.createDocumentFragment();
+                    while (app.firstChild) frag.appendChild(app.firstChild);
+                    cur._dom = frag;
+                }
             }
             this.stack.push(screen);
             this.show(screen);
         },
 
-        /** Nur den obersten Bildschirm austauschen (z. B. HD- statt 4K-Version) */
-        replace2: function (screen) {
-            var cur = this.stack.pop();
-            if (cur && cur.hide) cur.hide();
-            this.stack.push(screen);
-            this.show(screen);
+        /** Aufgehobenen Bildschirm wieder einsetzen (sofort, ohne Neuaufbau) */
+        revive: function (screen) {
+            var app = $('#app'), frag = screen._dom, saved = screen._scrolls;
+            screen._dom = null;
+            app.innerHTML = '';
+            $('#toast').classList.add('hidden');
+            document.body.classList.remove('preview-mode', 'video-mode');
+            Focus.clear();
+            app.appendChild(frag);
+            var boxes = this.boxes();
+            if (saved) for (var i = 0; i < boxes.length && i < saved.length; i++) boxes[i].scrollTop = saved[i];
+            if (screen.revived) screen.revived();
+            var target = Focus.byKey(screen.focusKey);
+            if (target) Focus.set(target); else Focus.first();
+            if (saved) this.restoreScroll(screen, saved);
         },
 
         replace: function (screen) {
@@ -1670,7 +1703,9 @@
             }
             var cur = this.stack.pop();
             if (cur.hide) cur.hide();
-            this.show(this.top(), true);
+            var top = this.top();
+            if (top._dom && (!top.canRevive || top.canRevive())) this.revive(top);
+            else { top._dom = null; this.show(top, true); }
         },
 
         /** Gemerkten Scroll-Stand halten (auch kurz danach, falls das Gerät verspätet neu aufbaut oder Bilder nachlädt) */
@@ -2911,6 +2946,7 @@
         }
         var batch = batchRender(grid, list, function (item) {
             var node = posterNode(item, fav + '-', Favs.has(fav, item.id), function () {
+                self.opened = item;
                 Nav.push(self.kind === 'movies' ? new MovieDetailScreen(item) : new SeriesDetailScreen(item));
             });
             node._item = item;
@@ -2928,6 +2964,27 @@
     };
     MoviesScreen.prototype.hide = function () {
         this.savedScroll = this.scrollBox ? this.scrollBox.scrollTop : 0;
+    };
+    // Zurück aus Film/Serie: Liste nicht neu bauen (bei Tausenden Postern dauert das sonst ewig)
+    MoviesScreen.prototype.keepDom = true;
+    MoviesScreen.prototype.canRevive = function () {
+        if (this.query) return true;
+        var cat = this.categories()[this.catIndex];
+        return this.catIndex !== 1 && cat !== RESUME_CAT;     // Favoriten/Weiterschauen ändern sich, die sind kurz
+    };
+    /** Nur das geöffnete Poster auffrischen (Favorit-Stern, Fortschritt) */
+    MoviesScreen.prototype.revived = function () {
+        var fav = this.favType(), keys = [this.focusKey];
+        if (this.opened) keys.push(fav + '-' + this.opened.id);
+        for (var i = 0; i < keys.length; i++) {
+            var node = Focus.byKey(keys[i]);
+            if (!node || !node._item) continue;
+            var item = node._item;
+            var fresh = posterNode(item, fav + '-', Favs.has(fav, item.id), function () { });
+            node.innerHTML = '';
+            while (fresh.firstChild) node.appendChild(fresh.firstChild);
+            if (fresh.classList.contains('has-sub')) node.classList.add('has-sub'); else node.classList.remove('has-sub');
+        }
     };
     MoviesScreen.prototype.onKey = function (k) {
         if (k === KEY.YELLOW && Focus.cur && Focus.cur._item) {
@@ -4135,14 +4192,6 @@
                 VodPlayer.pick(function () { self.focusKey = 'set-vodplayer'; Nav.show(self); });
             });
         }
-        if (VodPlayer.available()) {
-            var codecText = function () { var a = Codec.autoPkg(); return a ? 'Direkt mit ' + VodPlayer.nameOf(a) + ' öffnen' : 'Auswahl zeigen (HD-Version, VLC …)'; };
-            row('codec', 'Wenn ein Video (z. B. 4K) nicht läuft', codecText(), function (v) {
-                if (Codec.autoPkg()) Storage.set('codecAuto', '');
-                else { var pl = Codec.preferredPkg(); if (pl) Storage.set('codecAuto', pl.pkg); else toast('Installiere zuerst VLC aus dem Store.', 5000); }
-                v.textContent = codecText();
-            });
-        }
         row('autonext', 'Serien: nächste Folge automatisch', Settings.autoNext ? 'An · Countdown 10 s vor Folgenende' : 'Aus', function (v) {
             Settings.setFlag('autoNext', !Settings.autoNext);
             v.textContent = Settings.autoNext ? 'An · Countdown 10 s vor Folgenende' : 'Aus';
@@ -4263,67 +4312,6 @@
     // =====================================================================
     // Vollbild-Player
     // =====================================================================
-
-    // =====================================================================
-    // 4K & schwierige Formate: Wenn das Gerät etwas nicht abspielen kann, Auswege anbieten
-    // =====================================================================
-
-    var Codec = {
-        UHD_RE: /(^|[^a-z0-9])(4k|uhd|2160p?|ᵁᴴᴰ|ultra ?hd|hdr10\+?|dolby ?vision)([^a-z0-9]|$)/i,
-        _uhd: null,
-        /** Hat der Samsung-Fernseher ein 4K-Panel? */
-        uhdPanel: function () {
-            if (this._uhd === null) {
-                this._uhd = false;
-                try { this._uhd = !!(window.webapis && webapis.productinfo && webapis.productinfo.isUdPanelSupported()); } catch (e) { /* egal */ }
-            }
-            return this._uhd;
-        },
-        looks4k: function (name) { return this.UHD_RE.test(String(name || '')); },
-        /** Titel ohne 4K/HD-Zusätze und Länderkürzel, zum Vergleichen */
-        base: function (name) {
-            return searchNorm(String(name || '').replace(/^[\[(|]?\s*(?:[A-Z]{2}|GER|ENG|DEU)\s*[\])|:-]+\s*/, ''))
-                .replace(/(^|[^a-z0-9])(4k|uhd|2160p?|ᵁᴴᴰ|ultra ?hd|fhd|full ?hd|hd|sd|1080p?|720p?|hdr10?|hevc|h\.?265|x265|dolby ?vision|dv|raw|\+)(?=[^a-z0-9]|$)/g, ' ')
-                .replace(/[^a-z0-9äöüß]+/g, ' ').replace(/\s+/g, ' ').trim();
-        },
-        /** Gleicher Film/Sender ohne 4K (z. B. „Sky Cinema UHD“ → „Sky Cinema HD“) */
-        alternative: function (kind, item) {
-            if (!item || !item.name) return null;
-            var list = kind === 'live' ? Data.channels : kind === 'movie' ? Data.movies : null;
-            if (!list) return null;
-            var key = this.base(item.name);
-            if (!key) return null;
-            var best = null;
-            for (var i = 0; i < list.length; i++) {
-                var c = list[i];
-                if (c.id === item.id || this.looks4k(c.name)) continue;
-                if (this.base(c.name) !== key) continue;
-                // Bei Sendern lieber „HD“ als „SD“
-                if (!best || (/\bhd\b/i.test(c.name) && !/\bhd\b/i.test(best.name))) best = c;
-            }
-            return best;
-        },
-        /** Vom Android-Player gemeldet: Bild oder Ton geht auf diesem Gerät nicht */
-        problem: function (info) {
-            var top = Nav.top();
-            if (top instanceof PlayerScreen) { top.codecProblem(info); return; }
-            toast('Dieser Sender/Film (' + this.describe(info) + ') läuft auf diesem Gerät nicht im eingebauten Player. Im Vollbild gibt es Auswege.', 7000);
-        },
-        describe: function (info) {
-            if (!info) return '4K';
-            var parts = [];
-            if (info.codec && info.codec !== 'unbekannt') parts.push(info.codec);
-            if (info.width > 0 && info.height > 0) parts.push(info.width + '×' + info.height);
-            return parts.join(' · ') || (info.kind === 'audio' ? 'Tonformat' : 'Videoformat');
-        },
-        /** Gemerkter Player für Problemfälle ('' = jedes Mal fragen) */
-        autoPkg: function () { var p = Storage.get('codecAuto', ''); return p && VodPlayer.installed(p) ? p : ''; },
-        preferredPkg: function () {
-            var list = VodPlayer.list();
-            for (var i = 0; i < list.length; i++) if (/videolan|vlc/i.test(list[i].pkg)) return list[i];
-            return list[0] || null;
-        }
-    };
 
     function PlayerScreen(items, index, kind, startAt) {
         this.items = items;
@@ -4521,74 +4509,8 @@
             this.start();
             return;
         }
-        // 4K-Titel (z. B. auf Samsung oder im Browser): gleiche Auswege wie beim Android-Hinweis
-        if (Codec.looks4k(this.item().name)) {
-            this.codecProblem({ kind: 'video', codec: '4K', width: 0, height: 0 }, msg);
-            return;
-        }
         toast('Wiedergabe fehlgeschlagen' + (msg ? ' (' + msg + ')' : '') + '. Versuche es erneut oder wähle etwas anderes.', 7000);
         this.showOverlay();
-    };
-    /** Gerät schafft das Format nicht: HD-Version, VLC oder Ton aus anbieten */
-    PlayerScreen.prototype.codecProblem = function (info, msg) {
-        var self = this, it = this.item(), kind = this.kind;
-        var pos = Player.current();
-        clearTimeout(this.hideTimer);
-        var alt = Codec.alternative(kind, it);
-        var ext = Codec.preferredPkg();
-        // „Immer mit VLC“ gewählt: gleich dorthin
-        var auto = Codec.autoPkg();
-        if (auto && it.type !== 'recording') { this.openExternal(auto, pos); return; }
-
-        var buttons = [];
-        if (alt) buttons.push({ label: '▶  ' + (kind === 'live' ? 'Stattdessen: ' : 'In HD ansehen: ') + alt.name, primary: true, action: function () {
-            self.saveProgress(false);
-            var list = kind === 'live' ? self.items : [alt];
-            var idx = kind === 'live' ? self.items.indexOf(alt) : 0;
-            if (kind === 'live' && idx < 0) { list = [alt]; idx = 0; }
-            Nav.replace2(new PlayerScreen(list, idx, kind, kind === 'live' ? undefined : pos));
-        } });
-        if (ext && it.type !== 'recording') {
-            buttons.push({ label: '▶  Mit ' + ext.name + ' abspielen', primary: !alt, action: function () { self.openExternal(ext.pkg, pos); } });
-            buttons.push({ label: '★  4K & Co. immer mit ' + ext.name, action: function () {
-                Storage.set('codecAuto', ext.pkg);
-                toast('Wenn ein Video hier nicht läuft, öffnet ImperumTV es ab jetzt direkt in ' + ext.name + '.', 6000);
-                self.openExternal(ext.pkg, pos);
-            } });
-        } else if (AB && AB.openUrl && it.type !== 'recording') {
-            buttons.push({ label: '⬇  VLC installieren (kostenlos)', primary: !alt, action: function () {
-                AB.openUrl('market://details?id=org.videolan.vlc');
-                toast('Nach der Installation hier einfach noch einmal auf „Abspielen“ drücken.', 7000);
-            } });
-        }
-        buttons.push({ label: '↻  Noch einmal versuchen', action: function () { self.retries = 0; self.start(); self.showOverlay(); } });
-        buttons.push({ label: 'Zurück', action: function () { self.close(); } });
-
-        var what = Codec.describe(info);
-        var text = info && info.kind === 'audio'
-            ? 'Den Ton (' + what + ') kann dieses Gerät nicht abspielen.'
-            : 'Dieses Video (' + what + ') ist für dieses Gerät zu anspruchsvoll' + (msg ? ' (' + msg + ')' : '') + '.';
-        if (alt) text += ' Es gibt den gleichen ' + (kind === 'live' ? 'Sender' : 'Film') + ' auch ohne 4K.';
-        else if (ext) text += ' ' + ext.name + ' spielt fast jedes Format ab.';
-        else if (Player.tizen) text += ' Auf Fernsehern ohne 4K-Bildschirm laufen 4K-Videos leider nicht. Wähle die HD-Version.';
-        else if (AB && AB.openUrl) text += ' Mit dem kostenlosen VLC-Player klappt es meistens – danach einfach noch einmal abspielen.';
-        Modal.open('Wiedergabe nicht möglich', text, buttons);
-        if (Modal.node) Modal.node.classList.add('modal-list');
-    };
-    /** In VLC & Co. weiterschauen (Filme/Folgen an derselben Stelle, Sender live) */
-    PlayerScreen.prototype.openExternal = function (pkg, pos) {
-        var items = this.items, index = this.index, kind = this.kind, it = this.item();
-        if (kind === 'live') {
-            this.saved = true;
-            Nav.back();
-            toast('Wird in ' + VodPlayer.nameOf(pkg) + ' geöffnet …');
-            AB.openExternal(Api.liveUrl(it.id), pkg, it.name, 0);
-            return;
-        }
-        this.saveProgress(false);
-        this.saved = true;
-        Nav.back();
-        VodPlayer.launch(pkg, items, index, kind, pos > 5 ? pos : 0);
     };
     PlayerScreen.prototype.showSubtitle = function (text, ms) {
         var s = $('#subtitle');
@@ -5009,7 +4931,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Codec: Codec, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();

@@ -36,10 +36,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -80,10 +77,6 @@ class MainActivity : Activity() {
     @Volatile private var cachedDuration = 0.0
     private var subtitleIndex = -1
     private var readySent = false
-    /** Ton ließ sich nicht abspielen → einmal ohne Ton weiterprobiert */
-    private var audioOffRetry = false
-    /** Bild-Decoder ging nicht → einmal mit anderem Decoder probiert */
-    private var videoRetry = false
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -111,21 +104,7 @@ class MainActivity : Activity() {
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(20_000)
         httpFactory = http
-        // 4K/HEVC & Co.: notfalls anderen Decoder nehmen, FFmpeg für Ton (DTS, Dolby, TrueHD …), Grenzen des Geräts nicht blind glauben
-        val renderers = DefaultRenderersFactory(this)
-            .setEnableDecoderFallback(true)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-        val selector = DefaultTrackSelector(this)
-        selector.setParameters(
-            selector.buildUponParameters()
-                .setExceedRendererCapabilitiesIfNecessary(true)
-                .setExceedVideoConstraintsIfNecessary(true)
-                .setExceedAudioConstraintsIfNecessary(true)
-                .setAllowVideoMixedMimeTypeAdaptiveness(true)
-                .setAllowVideoNonSeamlessAdaptiveness(true)
-        )
-        player = ExoPlayer.Builder(this, renderers)
-            .setTrackSelector(selector)
+        player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, http)))
             .build()
         player.addListener(object : Player.Listener {
@@ -155,7 +134,6 @@ class MainActivity : Activity() {
                     player.prepare()
                     return
                 }
-                if (handleCodecError(error)) return
                 emit("error", error.errorCodeName)
             }
         })
@@ -444,63 +422,6 @@ class MainActivity : Activity() {
         cachedDuration = if (d == C.TIME_UNSET || d <= 0 || player.isCurrentMediaItemLive) 0.0 else d / 1000.0
     }
 
-    /** Bild oder Ton kann das Gerät nicht: erst selbst retten, sonst der Oberfläche Bescheid geben */
-    private fun handleCodecError(error: PlaybackException): Boolean {
-        val code = error.errorCode
-        val decoderProblem = code in 4001..4005 || code == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
-            code == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
-        if (!decoderProblem) return false
-        val renderer = (error as? ExoPlaybackException)?.takeIf { it.type == ExoPlaybackException.TYPE_RENDERER }
-        val format = renderer?.rendererFormat
-        val mime = format?.sampleMimeType ?: ""
-        val isAudio = mime.startsWith("audio/") || code == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
-            code == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
-        if (isAudio && !audioOffRetry) {
-            // Ton geht nicht → Bild ohne Ton weiterlaufen lassen
-            audioOffRetry = true
-            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                .build()
-            player.prepare()
-            player.playWhenReady = true
-            emit("notice", "Der Ton (${codecName(mime)}) läuft auf diesem Gerät nicht – das Bild läuft ohne Ton. Mit VLC gibt es Ton.")
-            return true
-        }
-        if (!isAudio && !videoRetry) {
-            // Einmal neu starten: mit Decoder-Ausweiche nimmt ExoPlayer dann z. B. den Software-Decoder
-            videoRetry = true
-            player.prepare()
-            player.playWhenReady = true
-            return true
-        }
-        val info = JSONObject()
-        info.put("kind", if (isAudio) "audio" else "video")
-        info.put("codec", codecName(mime))
-        info.put("width", format?.width ?: player.videoFormat?.width ?: 0)
-        info.put("height", format?.height ?: player.videoFormat?.height ?: 0)
-        info.put("code", error.errorCodeName)
-        handler.post {
-            webView.evaluateJavascript("window.__androidPlayerEvent && window.__androidPlayerEvent('codec', $info)", null)
-        }
-        return true
-    }
-
-    private fun codecName(mime: String): String = when {
-        mime.contains("hevc") || mime.contains("h265") -> "HEVC / H.265"
-        mime.contains("avc") -> "H.264"
-        mime.contains("av01") -> "AV1"
-        mime.contains("vp9") -> "VP9"
-        mime.contains("dolby-vision") -> "Dolby Vision"
-        mime.contains("eac3") -> "Dolby Digital Plus"
-        mime.contains("ac3") -> "Dolby Digital"
-        mime.contains("ac4") -> "Dolby AC-4"
-        mime.contains("true-hd") || mime.contains("truehd") -> "Dolby TrueHD"
-        mime.contains("dts") -> "DTS"
-        mime.contains("opus") -> "Opus"
-        mime.isEmpty() -> "unbekannt"
-        else -> mime.substringAfter('/').uppercase()
-    }
-
     private fun emit(name: String, value: Any?) {
         val js = when (value) {
             null -> "null"
@@ -586,13 +507,10 @@ class MainActivity : Activity() {
             handler.post {
                 readySent = false
                 subtitleIndex = -1
-                audioOffRetry = false
-                videoRetry = false
                 // Untertitel zunächst aus, Tonspur automatisch
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .clearOverrides()
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                     .build()
                 placeVideo(x, y, w, h)
                 player.setMediaItem(MediaItem.fromUri(url))
