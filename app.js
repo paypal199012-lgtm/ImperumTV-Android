@@ -167,6 +167,7 @@
         back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
         search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/>',
         resume: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.2 3.8v4.6h4.6"/><path d="M10 8.6l5.2 3.4-5.2 3.4z"/>',
+        lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
         rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
         gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M5.5 18.5l1.9-1.9M16.6 7.4l1.9-1.9"/><circle cx="12" cy="12" r="6.2"/>',
         epg: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/><circle cx="5.2" cy="9" r=".4"/><circle cx="5.2" cy="13" r=".4"/><circle cx="5.2" cy="17" r=".4"/>'
@@ -496,7 +497,14 @@
         /** Einträge der aktuellen Wiedergabeliste, neueste zuerst */
         all: function () {
             var acc = this.accKey();
-            return this.raw().filter(function (e) { return e.acc === acc; });
+            var list = this.raw().filter(function (e) { return e.acc === acc; });
+            if (Parental.enabled() && !Parental.unlocked()) {
+                var hidden = {};
+                Data.movies.forEach(function (m) { if (Parental.catProtected('movie', m.cat)) hidden['movie:' + m.id] = true; });
+                Data.series.forEach(function (x) { if (Parental.catProtected('series', x.cat)) hidden['series:' + x.id] = true; });
+                list = list.filter(function (e) { return !hidden[e.key]; });
+            }
+            return list;
         },
         keyFor: function (kind, it) {
             if (kind === 'episode') return 'series:' + (it.series ? it.series.id : 'ep' + it.id);
@@ -874,7 +882,7 @@
             return ready.then(function () {
                 // Stand der Testphase / Aktivierung (ältere Datenbank ohne diese Funktion: einfach weiter)
                 var status = self.rpc('device_status', args).then(function (rows) {
-                    if (rows && rows.length) License.set(rows[0]);
+                    if (rows && rows.length) { License.set(rows[0]); Parental.onStatus(rows[0].parental_reset_at); }
                 }, function (e) { if (e.status !== 404) throw e; });
                 return status.then(function () { return self.rpc('get_playlists', args); }).then(null, function (e) {
                     // Ältere Datenbank mit nur einer Wiedergabeliste
@@ -1582,9 +1590,20 @@
             if (sq) activeIndex = -1;
         }
         scroll.appendChild(h('div', 'col-head', 'Kategorien'));
+        var kind = search && search.kind;
         cats.forEach(function (name, i) {
-            var item = h('div', 'cat' + (i === activeIndex ? ' active' : ''), name);
-            focusable(item, 'cat-' + i, function () { onSelect(i); }, 'cats');
+            var item = h('div', 'cat' + (i === activeIndex ? ' active' : ''));
+            if (kind && Parental.catProtected(kind, name)) {
+                item.classList.add('locked');
+                item.innerHTML = icon('lock', 24) + '<span></span>';
+                item.lastChild.textContent = name;
+            } else {
+                item.textContent = name;
+            }
+            focusable(item, 'cat-' + i, function () {
+                if (kind && Parental.catLocked(kind, name)) Parental.ask('PIN für „' + name + '“', function () { onSelect(i); });
+                else onSelect(i);
+            }, 'cats');
             scroll.appendChild(item);
         });
         col.appendChild(scroll);
@@ -1879,6 +1898,7 @@
             if (firstFocus) Focus.set(firstFocus);
         },
         close: function () {
+            this.pinInput = null;
             if (!this.node) return;
             if (document.activeElement && this.node.contains(document.activeElement)) document.activeElement.blur();
             this.node.parentNode.removeChild(this.node);
@@ -1974,6 +1994,159 @@
         box.appendChild(row);
         changed();
         Modal.openBox(box, Keyboard.first(kb));
+    }
+
+    // =====================================================================
+    // Kindersicherung: PIN schützt Erwachsenen- und ausgewählte Kategorien.
+    // Der Admin kann die PIN auf der Website zurücksetzen (Gerät merkt das beim Abgleich).
+    // =====================================================================
+
+    var Parental = {
+        ADULT: /(^|[^a-z])(xxx|adult|adults|erwachsene?|for adults|18\s*\+|\+\s*18|porn|porno|sex|sexy|erotik|erotic|hot\s*club|playboy|hustler|brazzers|redlight|private)([^a-z]|$)/i,
+        unlockedUntil: 0,
+        lastReset: undefined,     // letzter Stand von der Website (undefined = noch unbekannt)
+
+        enabled: function () { return !!Storage.get('parentalPin', ''); },
+        hash: function (pin) { return 'p' + hash32('imperum-pin:' + pin + ':' + Device.key, 7).toString(16); },
+        check: function (pin) { return this.hash(pin) === Storage.get('parentalPin', ''); },
+        autoAdult: function () { return Storage.get('parentalAdult', true) !== false; },
+        cats: function () { var c = Storage.get('parentalCats', []); return Array.isArray(c) ? c : []; },
+        unlocked: function () { return Date.now() < this.unlockedUntil; },
+        lock: function () { this.unlockedUntil = 0; },
+        unlock: function () { this.unlockedUntil = Date.now() + 60 * 60 * 1000; },   // 1 Stunde frei
+
+        /** Ist diese Kategorie geschützt? kind: 'live', 'movie' oder 'series' */
+        catProtected: function (kind, cat) {
+            if (!cat || !this.enabled()) return false;
+            if (this.autoAdult() && this.ADULT.test(cat)) return true;
+            return this.cats().indexOf(kind + ':' + cat) >= 0;
+        },
+        /** Gerade gesperrt (geschützt und nicht mit PIN geöffnet) */
+        catLocked: function (kind, cat) { return !this.unlocked() && this.catProtected(kind, cat); },
+        /** Liste ohne gesperrte Inhalte */
+        visible: function (kind, list) {
+            if (!this.enabled() || this.unlocked()) return list;
+            var self = this;
+            return list.filter(function (it) { return !self.catProtected(kind, it.cat); });
+        },
+        toggleCat: function (kind, cat) {
+            var c = this.cats(), k = kind + ':' + cat, i = c.indexOf(k);
+            if (i >= 0) c.splice(i, 1); else c.push(k);
+            Storage.set('parentalCats', c);
+            return i < 0;
+        },
+        setPin: function (pin) {
+            Storage.set('parentalPin', this.hash(pin));
+            // Merken, welcher Rücksetz-Stand schon bekannt ist (alte Rücksetzungen zählen nicht)
+            Storage.set('parentalResetSeen', this.lastReset === undefined ? '?' : (this.lastReset || ''));
+            this.report(true);
+        },
+        clear: function () {
+            Storage.remove('parentalPin');
+            this.lock();
+            this.report(false);
+        },
+        report: function (on) {
+            Remote.rpc('device_parental', { p_mac: Device.mac, p_key: Device.key, p_on: on }).then(null, function () { /* offline: egal */ });
+        },
+        /** Wird bei jedem Abgleich mit der Website aufgerufen */
+        onStatus: function (resetAt) {
+            var now = resetAt || '';
+            this.lastReset = now;
+            if (!this.enabled()) return;
+            var seen = Storage.get('parentalResetSeen', '?');
+            if (seen === '?') { Storage.set('parentalResetSeen', now); return; }
+            if (now && now !== seen) {
+                Storage.remove('parentalPin');
+                Storage.set('parentalResetSeen', now);
+                this.lock();
+                toast('Die Kindersicherung wurde vom Anbieter zurückgesetzt. Du kannst in den Einstellungen eine neue PIN vergeben.', 8000);
+            }
+        },
+        /** PIN abfragen, dann onOk. Ohne Kindersicherung oder bereits geöffnet: sofort. */
+        ask: function (title, onOk, force) {
+            var self = this;
+            if (!this.enabled() || (!force && this.unlocked())) { onOk(); return; }
+            pinDialog(title || 'PIN eingeben', 'Diese Inhalte sind mit der Kindersicherung geschützt.', function (pin, fail) {
+                if (!self.check(pin)) { fail('Falsche PIN. Bitte noch einmal.'); return false; }
+                self.unlock();
+                onOk();
+                return true;
+            }, true);
+        }
+    };
+
+    /**
+     * PIN-Eingabe mit Ziffernblock (Pfeiltasten + OK) oder den Zifferntasten der Fernbedienung.
+     * onPin(pin, fail) gibt true zurück, wenn das Fenster schließen soll.
+     */
+    function pinDialog(title, text, onPin, showForgot) {
+        var box = h('div', 'modal-box pin-box');
+        box.appendChild(h('div', 'modal-title', title));
+        var info = h('div', 'modal-text', text || '');
+        box.appendChild(info);
+        var dots = h('div', 'pin-dots');
+        var dotNodes = [];
+        for (var i = 0; i < 4; i++) { var dn = h('span', 'pin-dot'); dots.appendChild(dn); dotNodes.push(dn); }
+        box.appendChild(dots);
+        var err = h('div', 'pin-error', '');
+        box.appendChild(err);
+        var pin = '';
+        function draw() { for (var k = 0; k < 4; k++) dotNodes[k].className = 'pin-dot' + (k < pin.length ? ' on' : ''); }
+        function fail(msg) {
+            err.textContent = msg;
+            pin = '';
+            draw();
+            dots.classList.remove('shake');
+            void dots.offsetWidth;
+            dots.classList.add('shake');
+        }
+        function add(d) {
+            if (pin.length >= 4) return;
+            pin += d;
+            err.textContent = '';
+            draw();
+            if (pin.length === 4) {
+                var entered = pin;
+                setTimeout(function () { if (onPin(entered, fail)) closePin(); }, 120);
+            }
+        }
+        function closePin() { Modal.pinInput = null; Modal.close(); }
+        var pad = h('div', 'pin-pad');
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '←', '0', '✕'].forEach(function (lab) {
+            var b = h('div', 'pin-key' + (lab === '←' || lab === '✕' ? ' small' : ''), lab);
+            focusable(b, 'pin-' + lab, function () {
+                if (lab === '←') { pin = pin.slice(0, -1); draw(); }
+                else if (lab === '✕') closePin();
+                else add(lab);
+            }, 'pin');
+            pad.appendChild(b);
+        });
+        box.appendChild(pad);
+        if (showForgot) {
+            box.appendChild(h('div', 'pin-forgot', 'PIN vergessen? Dein Anbieter kann sie für die MAC-Adresse ' + Device.macText() + ' zurücksetzen.'));
+        }
+        Modal.openBox(box, pad.querySelector('[data-key="pin-5"]') || pad.firstChild);
+        Modal.pinInput = add;
+        // Neuer Stand von der Website, z. B. gerade zurückgesetzt
+        if (showForgot) Remote.load().then(null, function () { });
+    }
+
+    /** Neue PIN zweimal eingeben lassen */
+    function newPinFlow(done) {
+        pinDialog('Neue PIN', 'Wähle eine 4-stellige PIN für die Kindersicherung.', function (first) {
+            setTimeout(function () {
+                pinDialog('PIN wiederholen', 'Gib dieselbe PIN noch einmal ein.', function (second, fail) {
+                    if (second !== first) { fail('Die PINs stimmen nicht überein. Noch einmal.'); return false; }
+                    Parental.setPin(second);
+                    Parental.unlock();
+                    toast('Kindersicherung ist an. Erwachsenen-Kategorien sind jetzt geschützt.', 5000);
+                    if (done) done();
+                    return true;
+                });
+            }, 50);
+            return true;
+        });
     }
 
     // =====================================================================
@@ -2138,11 +2311,12 @@
         return ['Alle', '★ Favoriten'].concat(cats);
     };
     LiveScreen.prototype.filter = function () {
-        if (this.query) return Data.channels.filter(searchMatcher(this.query));
+        var all = Parental.visible('live', Data.channels);
+        if (this.query) return all.filter(searchMatcher(this.query));
         var cats = this.categories(), cat = cats[this.catIndex];
-        if (this.catIndex === 0) return Data.channels.slice();
-        if (this.catIndex === 1) return Data.channels.filter(function (c) { return Favs.has('live', c.id); });
-        return Data.channels.filter(function (c) { return c.cat === cat; });
+        if (this.catIndex === 0) return all.slice();
+        if (this.catIndex === 1) return all.filter(function (c) { return Favs.has('live', c.id); });
+        return all.filter(function (c) { return c.cat === cat; });
     };
     LiveScreen.prototype.render = function (root) {
         var self = this;
@@ -2158,7 +2332,7 @@
             Nav.show(self);
             var first = $('.col-list .row');
             if (first) Focus.set(first);
-        }, { query: this.query, onClick: function () { self.openSearch(); } }));
+        }, { query: this.query, kind: 'live', onClick: function () { self.openSearch(); } }));
 
         var listCol = h('div', 'col col-list');
         var scroll = h('div', 'scroll');
@@ -2207,7 +2381,7 @@
     LiveScreen.prototype.openSearch = function () {
         var self = this;
         openSearchDialog('Sender suchen', this.query, function (q) {
-            return Data.channels.filter(searchMatcher(q)).length;
+            return Parental.visible('live', Data.channels).filter(searchMatcher(q)).length;
         }, function (q) { self.applySearch(q, '.col-list .row'); });
     };
     LiveScreen.prototype.choose = function (ch, index) {
@@ -2285,7 +2459,8 @@
         this.kind = kind;          // 'movies' oder 'series'
         this.catIndex = 0;
     }
-    MoviesScreen.prototype.items = function () { return this.kind === 'movies' ? Data.movies : Data.series; };
+    MoviesScreen.prototype.allItems = function () { return this.kind === 'movies' ? Data.movies : Data.series; };
+    MoviesScreen.prototype.items = function () { return Parental.visible(this.favType(), this.allItems()); };
     MoviesScreen.prototype.favType = function () { return this.kind === 'movies' ? 'movie' : 'series'; };
     MoviesScreen.prototype.yearLabel = function () { return 'Filme ' + new Date().getFullYear(); };
     var RESUME_CAT = '▶ Weiter ansehen';
@@ -2301,7 +2476,7 @@
     };
     MoviesScreen.prototype.categories = function () {
         var seen = {}, cats = [];
-        this.items().forEach(function (m) { if (m.cat && !seen[m.cat]) { seen[m.cat] = true; cats.push(m.cat); } });
+        this.allItems().forEach(function (m) { if (m.cat && !seen[m.cat]) { seen[m.cat] = true; cats.push(m.cat); } });
         var base = ['Alle', '★ Favoriten', RESUME_CAT];
         if (this.kind === 'movies') base.push(this.yearLabel());
         return base.concat(cats);
@@ -2352,7 +2527,7 @@
             Nav.show(self);
             var first = $('.poster');
             if (first) Focus.set(first);
-        }, { query: this.query, onClick: function () { self.openSearch(); } }));
+        }, { query: this.query, kind: this.favType(), onClick: function () { self.openSearch(); } }));
 
         var gridCol = h('div', 'col col-grid');
         var scroll = h('div', 'scroll');
@@ -2420,9 +2595,9 @@
         col.appendChild(scroll);
         root.appendChild(col);
 
-        var live = Data.channels.filter(function (c) { return Favs.has('live', c.id); });
-        var movies = Data.movies.filter(function (m) { return Favs.has('movie', m.id); });
-        var series = Data.series.filter(function (s) { return Favs.has('series', s.id); });
+        var live = Parental.visible('live', Data.channels).filter(function (c) { return Favs.has('live', c.id); });
+        var movies = Parental.visible('movie', Data.movies).filter(function (m) { return Favs.has('movie', m.id); });
+        var series = Parental.visible('series', Data.series).filter(function (s) { return Favs.has('series', s.id); });
         var all = live.concat(movies, series);
 
         if (!all.length) {
@@ -3298,9 +3473,10 @@
         // Viele Kategorien: als Liste mit bis zu 12 Einträgen ab der aktuellen
         var start = Math.max(0, Math.min(this.catIndex - 2, cats.length - 12));
         var buttons = cats.slice(start, start + 12).map(function (name, i) {
-            return { label: name, primary: start + i === self.catIndex, action: function () {
-                self.catIndex = start + i; self.chIndex = 0; self.rowTop = 0; self.col = 'prog';
-                Nav.show(self);
+            var prot = Parental.catProtected('live', name);
+            return { label: (prot ? '[PIN] ' : '') + name, primary: start + i === self.catIndex, action: function () {
+                function go() { self.catIndex = start + i; self.chIndex = 0; self.rowTop = 0; self.col = 'prog'; Nav.show(self); }
+                if (Parental.catLocked('live', name)) Parental.ask('PIN für „' + name + '“', go); else go();
             } };
         });
         if (start + 12 < cats.length) buttons.push({ label: 'Weitere …', action: function () { self.catIndex = Math.min(cats.length - 1, start + 12); self.chooseCategory(); } });
@@ -3455,9 +3631,9 @@
             return;
         }
         var match = searchMatcher(q);
-        var live = Data.channels.filter(match).slice(0, 40);
-        var movies = Data.movies.filter(match).slice(0, 40);
-        var series = Data.series.filter(match).slice(0, 40);
+        var live = Parental.visible('live', Data.channels).filter(match).slice(0, 40);
+        var movies = Parental.visible('movie', Data.movies).filter(match).slice(0, 40);
+        var series = Parental.visible('series', Data.series).filter(match).slice(0, 40);
         if (!live.length && !movies.length && !series.length) {
             box.appendChild(h('div', 'empty-note', 'Nichts gefunden für „' + this.query + '“.'));
             return;
@@ -3513,12 +3689,110 @@
                 VodPlayer.pick(function () { self.focusKey = 'set-vodplayer'; Nav.show(self); });
             });
         }
+        var me = this;
+        row('parental', 'Kindersicherung', Parental.enabled() ? 'An · PIN gesetzt' : 'Aus', function () {
+            if (!Parental.enabled()) {
+                newPinFlow(function () { me.focusKey = 'set-parental'; Nav.push(new ParentalScreen()); });
+            } else {
+                Parental.ask('PIN eingeben', function () { Nav.push(new ParentalScreen()); }, true);
+            }
+        });
         row('lists', 'Wiedergabelisten', 'Liste wechseln oder neue hinzufügen', function () { Nav.push(new PlaylistsScreen()); });
         row('account', 'Konto', License.activated() ? 'Aktiviert (unbegrenzt)' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
         row('device', 'Gerät', 'MAC ' + Device.macText() + '  ·  Schlüssel ' + Device.key, function () { Nav.push(new PlaylistsScreen()); });
         box.appendChild(h('div', 'set-note', 'Bleibt ein Sender schwarz oder hängt, stelle das Live-Format um.'));
         root.appendChild(box);
         if (!this.focusKey) this.focusKey = 'set-reload';
+    };
+
+    // =====================================================================
+    // Kindersicherung: Einstellungen
+    // =====================================================================
+
+    function ParentalScreen() { }
+    ParentalScreen.prototype.render = function (root) {
+        var self = this;
+        root.appendChild(topbar('Kindersicherung', 'Geschützte Kategorien brauchen die PIN'));
+        var box = h('div', 'settings');
+        function row(key, label, value, action) {
+            var r = h('div', 'set-row');
+            r.appendChild(h('div', 'set-label', label));
+            r.appendChild(h('div', 'set-value', value || ''));
+            focusable(r, 'par-' + key, function () { self.focusKey = 'par-' + key; action(); }, 'setlist');
+            box.appendChild(r);
+        }
+        row('adult', 'Erwachsenen-Kategorien automatisch sperren', Parental.autoAdult() ? 'An' : 'Aus', function () {
+            Storage.set('parentalAdult', !Parental.autoAdult());
+            Nav.show(self);
+        });
+        var counts = { live: 0, movie: 0, series: 0 };
+        Parental.cats().forEach(function (k) { var t = k.split(':')[0]; if (counts[t] !== undefined) counts[t]++; });
+        row('live', 'Live-TV-Kategorien sperren', counts.live + ' ausgewählt', function () { Nav.push(new ParentalCatsScreen('live')); });
+        row('movie', 'Film-Kategorien sperren', counts.movie + ' ausgewählt', function () { Nav.push(new ParentalCatsScreen('movie')); });
+        row('series', 'Serien-Kategorien sperren', counts.series + ' ausgewählt', function () { Nav.push(new ParentalCatsScreen('series')); });
+        row('change', 'PIN ändern', '', function () { newPinFlow(function () { Nav.show(self); }); });
+        row('off', 'Kindersicherung ausschalten', '', function () {
+            Modal.open('Kindersicherung ausschalten?', 'Danach sind alle Kategorien ohne PIN zu sehen.', [
+                { label: 'Ausschalten', primary: true, action: function () { Parental.clear(); toast('Kindersicherung ist aus.'); Nav.back(); } },
+                { label: 'Abbrechen' }
+            ]);
+        });
+        box.appendChild(h('div', 'set-note', 'Automatisch gesperrt werden Kategorien mit Namen wie „XXX“, „Adult“, „18+“ oder „Erotik“. ' +
+            'Nach der PIN bleibt alles eine Stunde offen oder bis die App geschlossen wird. ' +
+            'PIN vergessen? Dein Anbieter kann sie für die MAC-Adresse ' + Device.macText() + ' zurücksetzen.'));
+        root.appendChild(box);
+        if (!this.focusKey) this.focusKey = 'par-adult';
+    };
+
+    /** Kategorien zum Sperren an- und abhaken */
+    function ParentalCatsScreen(kind) { this.kind = kind; }
+    ParentalCatsScreen.prototype.render = function (root) {
+        var self = this, kind = this.kind;
+        var title = kind === 'live' ? 'Live-TV-Kategorien sperren' : kind === 'movie' ? 'Film-Kategorien sperren' : 'Serien-Kategorien sperren';
+        root.appendChild(topbar(title, 'OK: sperren / freigeben'));
+        var list = kind === 'live' ? Data.channels : kind === 'movie' ? Data.movies : Data.series;
+        var loaded = kind === 'live' || (kind === 'movie' ? Data.moviesLoaded : Data.seriesLoaded);
+        if (!loaded) {
+            loader(true, (kind === 'movie' ? 'Filme' : 'Serien') + ' werden geladen …');
+            (kind === 'movie' ? Data.loadMovies() : Data.loadSeries()).then(function () {
+                loader(false);
+                if (Nav.top() === self) Nav.show(self);
+            }, function (e) { loader(false); toast(e.message || String(e), 6000); });
+            return;
+        }
+        var seen = {}, cats = [];
+        list.forEach(function (it) { if (it.cat && !seen[it.cat]) { seen[it.cat] = true; cats.push(it.cat); } });
+        var col = h('div', 'col col-list par-cats');
+        var scroll = h('div', 'scroll');
+        col.appendChild(scroll);
+        root.appendChild(col);
+        if (!cats.length) scroll.appendChild(h('div', 'empty-note', 'Keine Kategorien gefunden.'));
+        batchRender(scroll, cats, function (cat, i) {
+            var r = h('div', 'row par-row');
+            var mark = h('div', 'par-mark');
+            function draw() {
+                var own = Parental.cats().indexOf(kind + ':' + cat) >= 0;
+                var auto = Parental.autoAdult() && Parental.ADULT.test(cat);
+                mark.innerHTML = (own || auto) ? icon('lock', 30) : '';
+                r.classList.toggle('on', own || auto);
+                note.textContent = auto && !own ? 'automatisch' : '';
+            }
+            r.appendChild(mark);
+            r.appendChild(h('div', 'name', cat));
+            var note = h('div', 'par-note', '');
+            r.appendChild(note);
+            draw();
+            return focusable(r, 'pc-' + i, function () {
+                if (Parental.autoAdult() && Parental.ADULT.test(cat) && Parental.cats().indexOf(kind + ':' + cat) < 0) {
+                    toast('„' + cat + '“ ist automatisch gesperrt. Das lässt sich unter „Erwachsenen-Kategorien automatisch sperren“ abschalten.', 5000);
+                    return;
+                }
+                var on = Parental.toggleCat(kind, cat);
+                draw();
+                toast(on ? '„' + cat + '“ ist jetzt gesperrt' : '„' + cat + '“ ist wieder frei');
+            }, 'list');
+        }, 80);
+        if (!this.focusKey) this.focusKey = 'pc-0';
     };
 
     // =====================================================================
@@ -3921,7 +4195,12 @@
         if (!$('#loader').classList.contains('hidden')) { e.preventDefault(); return; }
 
         if (Modal.node) {
-            if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { Modal.close(); e.preventDefault(); return; }
+            if (Modal.pinInput && ((k >= 48 && k <= 57) || (k >= 96 && k <= 105))) {
+                Modal.pinInput(String(k >= 96 ? k - 96 : k - 48));
+                e.preventDefault();
+                return;
+            }
+            if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { Modal.pinInput = null; Modal.close(); e.preventDefault(); return; }
             if (k === KEY.LEFT || k === KEY.UP) { Focus.move(k === KEY.LEFT ? 'left' : 'up'); e.preventDefault(); return; }
             if (k === KEY.RIGHT || k === KEY.DOWN) { Focus.move(k === KEY.RIGHT ? 'right' : 'down'); e.preventDefault(); return; }
             if (k === KEY.ENTER) { Focus.activate(); e.preventDefault(); return; }
@@ -3972,6 +4251,7 @@
         // App in den Hintergrund: Video anhalten
         function lifecycle(hidden) {
             if (hidden) {
+                Parental.lock();
                 var top = Nav.top();
                 if (top && (top instanceof PlayerScreen || top instanceof LiveScreen)) {
                     if (top instanceof PlayerScreen) top.saveProgress(false);   // beim Zurückkommen geht es dort weiter
@@ -4046,7 +4326,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Resume: Resume,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Resume: Resume, Parental: Parental,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
