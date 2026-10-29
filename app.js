@@ -4270,7 +4270,7 @@
         var dur = Player.duration(), left = dur - t;
         var hasNext = this.index < this.items.length - 1;
         var next = hasNext && Settings.autoNext && !this.nextCancelled && dur > 300 && left <= 30 && left > 1;
-        var intro = Settings.introBtn && !this.introDone && t >= 3 && t < 150 && (!(dur > 0) || t < dur * 0.3);
+        var intro = Settings.introBtn && !this.introDone && t >= 2 && t < 10;   // nur 8 Sekunden lang
         this.showPop(next ? 'next' : intro ? 'intro' : null);
     };
     PlayerScreen.prototype.showPop = function (kind) {
