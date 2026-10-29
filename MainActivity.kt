@@ -230,7 +230,12 @@ class MainActivity : Activity() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             val keyboardOpen = imm.isAcceptingText && (event.keyCode == KeyEvent.KEYCODE_ENTER)
             if (!keyboardOpen) {
-                if (event.action == KeyEvent.ACTION_DOWN) sendKey(code)
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    sendKey(code, event.repeatCount > 0)
+                } else if (event.action == KeyEvent.ACTION_UP && code == 13) {
+                    // Loslassen von OK melden (für „lange drücken = Favorit“)
+                    webView.evaluateJavascript("window.__androidKeyUp && window.__androidKeyUp(13)", null)
+                }
                 return true
             }
         }
@@ -242,8 +247,8 @@ class MainActivity : Activity() {
         sendKey(10009)
     }
 
-    private fun sendKey(code: Int) {
-        webView.evaluateJavascript("window.__androidKey && window.__androidKey($code)", null)
+    private fun sendKey(code: Int, repeat: Boolean = false) {
+        webView.evaluateJavascript("window.__androidKey && window.__androidKey($code, $repeat)", null)
     }
 
     // ---------- Lebenszyklus ----------
@@ -446,6 +451,18 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun duration(): Double = cachedDuration
+
+        /** Bildformat: fit = ganzes Bild, zoom = Bildschirm füllen, fill = strecken */
+        @JavascriptInterface
+        fun setResize(mode: String) {
+            handler.post {
+                playerView.resizeMode = when (mode) {
+                    "zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                }
+            }
+        }
 
         /** Zu einer festen Stelle springen (für "Weiterschauen") */
         @JavascriptInterface
