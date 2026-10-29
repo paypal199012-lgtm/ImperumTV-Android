@@ -782,6 +782,27 @@ class MainActivity : Activity() {
             }
         }
 
+        /** Trailer: zuerst die YouTube-App, sonst Browser. false = nichts gefunden (dann zeigt die App ihn selbst) */
+        @JavascriptInterface
+        fun openYoutube(id: String): Boolean {
+            val clean = id.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+            if (clean.isEmpty()) return false
+            val tries = listOf(
+                Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$clean")),
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$clean"))
+            )
+            for (intent in tries) {
+                try {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
+                    return true
+                } catch (e: Exception) {
+                    // nächste Möglichkeit
+                }
+            }
+            return false
+        }
+
         // ---------- Aufnahmen ----------
 
         /** Aufnahme planen. Rückgabe: Nummer oder "!Fehlertext" */

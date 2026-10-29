@@ -757,3 +757,32 @@ input { -webkit-user-select: text; user-select: text; }
 .par-row .par-note { float: right; font-size: 22px; color: #a7a39a; margin-right: 20px; }
 .par-row.on .name { color: #f4dc9e; }
 
+
+/* ---------- Bewertung, Sortieren, Trailer ---------- */
+.poster .img .rate { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.72); color: #f4dc9e; font-size: 20px; font-weight: bold;
+    padding: 2px 9px; border-radius: 6px; }
+.cat-sort { margin-top: 2px; font-size: 24px; }
+.meta-rate { color: #d9b066; font-weight: bold; margin-right: 18px; }
+.trailer { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #000; }
+.trailer-frame { position: absolute; left: 0; top: 0; width: 1500px; height: 1080px; border: 0; background: #000; }
+.trailer-side { position: absolute; left: 1500px; top: 0; right: 0; bottom: 0; padding: 60px 30px; box-sizing: border-box;
+    background: rgba(16,18,22,.96); text-align: center; }
+.trailer-title { font-size: 28px; font-weight: bold; color: #f4dc9e; margin-bottom: 30px; line-height: 36px; }
+.trailer-qr { background: #fff; display: inline-block; padding: 12px; border-radius: 10px; }
+.trailer-qr svg { display: block; }
+.trailer-note { font-size: 22px; color: #a7a39a; margin: 18px 0 40px; line-height: 30px; }
+.trailer-side .button { margin: 0; }
+
+/* ---------- Serien: Intro überspringen / Nächste Folge ---------- */
+#player-pop { position: absolute; right: 70px; bottom: 90px; min-width: 420px; max-width: 640px; padding: 22px 26px; box-sizing: border-box;
+    background: rgba(16,18,22,.92); border: 2px solid rgba(217,176,102,.6); border-radius: 14px; text-align: right; }
+#player-ui.player-ui-visible ~ #player-pop { bottom: 290px; }
+.pp-title { font-size: 32px; font-weight: bold; color: #f4dc9e; text-align: left; }
+.pp-sub { font-size: 24px; color: #ddd; margin: 6px 0 14px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-bar { height: 6px; background: rgba(255,255,255,.2); border-radius: 3px; margin-bottom: 18px; }
+.pp-bar .bar { height: 6px; width: 0; background: #d9b066; border-radius: 3px; transition: width 1s linear; }
+.pp-btn { display: inline-block; padding: 14px 28px; margin-left: 12px; border-radius: 40px; font-size: 27px; font-weight: bold;
+    background: rgba(255,255,255,.12); color: #f2efe8; }
+.pp-btn.primary { background: #d9b066; color: #1a1408; }
+.pp-btn.focused { background: #f4dc9e; color: #1a1408; box-shadow: 0 0 0 3px rgba(244,220,158,.5); }
+.pp-hint { font-size: 20px; color: rgba(255,255,255,.55); margin-top: 12px; }

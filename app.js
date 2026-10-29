@@ -173,6 +173,7 @@
         list: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/>',
         back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
         search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/>',
+        sort: '<path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5"/>',
         resume: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.2 3.8v4.6h4.6"/><path d="M10 8.6l5.2 3.4-5.2 3.4z"/>',
         lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
         rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
@@ -481,6 +482,10 @@
     // =====================================================================
 
     var Settings = {
+        autoNext: Storage.get('autoNext', true),     // Serien: nächste Folge automatisch
+        introBtn: Storage.get('introBtn', true),     // Serien: Knopf „Intro überspringen“
+        introSec: 85,
+        setFlag: function (name, on) { this[name] = on; Storage.set(name, on); },
         liveExt: Storage.get('liveExt', 'ts'),   // 'ts' oder 'm3u8'
         setLiveExt: function (ext) { this.liveExt = ext; Storage.set('liveExt', ext); }
     };
@@ -963,6 +968,25 @@
         return m ? firstYear(m[0]) : null;
     }
 
+    /** Bewertung als Zahl 0–10 (Anbieter liefern „7.5“, „75“ oder nur rating_5based) */
+    function parseRating(r, r5) {
+        var v = parseFloat(r);
+        if (v > 10 && v <= 100) v = v / 10;
+        if (!(v > 0) || v > 10) v = parseFloat(r5) * 2;
+        if (!(v > 0) || v > 10) return 0;
+        return Math.round(v * 10) / 10;
+    }
+    function ratingText(v) { return v > 0 ? '★ ' + v.toFixed(1) : ''; }
+
+    /** YouTube-Kennung aus dem, was der Anbieter liefert (ID oder ganzer Link) */
+    function trailerId(v) {
+        v = str(v);
+        if (!v) return '';
+        var m = /(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/.exec(v);
+        if (m) return m[1];
+        return /^[A-Za-z0-9_-]{11}$/.test(v) ? v : '';
+    }
+
     function parseInfo(d) {
         d = d || {};
         function pick() {
@@ -978,8 +1002,10 @@
             cast: pick('cast', 'actors'),
             director: pick('director'),
             cover: pick('movie_image', 'cover_big', 'cover'),
-            backdrop: ''
+            backdrop: '',
+            trailer: trailerId(pick('youtube_trailer', 'trailer', 'youtube'))
         };
+        info.score = parseRating(info.rating, d.rating_5based);
         var date = pick('releasedate', 'releaseDate', 'release_date', 'year');
         if (date) info.year = date.slice(0, 4);
         var parts = /^(\d+):(\d+):\d+$/.exec(info.duration);
@@ -1060,6 +1086,7 @@
                         cat: cats[String(s.category_id)] || '',
                         ext: str(s.container_extension) || 'mp4',
                         year: year,
+                        rating: parseRating(s.rating, s.rating_5based),
                         added: parseInt(s.added, 10) || 0
                     };
                 }).filter(function (m) { return !isNaN(m.id); });
@@ -1074,12 +1101,15 @@
                 var cats = self.catMap(res[0]);
                 var list = Array.isArray(res[1]) ? res[1] : [];
                 self.series = list.map(function (s) {
+                    var name = str(s.name) || 'Serie ' + s.series_id;
                     return {
                         type: 'series',
                         id: parseInt(s.series_id, 10),
-                        name: str(s.name) || 'Serie ' + s.series_id,
+                        name: name,
                         logo: str(s.cover),
                         cat: cats[String(s.category_id)] || '',
+                        year: firstYear(str(s.releaseDate)) || firstYear(str(s.release_date)) || firstYear(str(s.year)) || yearFromName(name),
+                        rating: parseRating(s.rating, s.rating_5based),
                         added: parseInt(s.last_modified, 10) || 0
                     };
                 }).filter(function (s) { return !isNaN(s.id); });
@@ -1676,6 +1706,13 @@
             scroll.appendChild(si);
             if (sq) activeIndex = -1;
         }
+        if (search && search.sort) {
+            var so = h('div', 'cat cat-search cat-sort');
+            so.innerHTML = icon('sort', 30) + '<span></span>';
+            so.lastChild.textContent = search.sort.label;
+            focusable(so, 'cat-sort', search.sort.onClick, 'cats');
+            scroll.appendChild(so);
+        }
         scroll.appendChild(h('div', 'col-head', 'Kategorien'));
         var kind = search && search.kind;
         cats.forEach(function (name, i) {
@@ -1702,6 +1739,7 @@
         var img = h('div', 'img');
         if (item.logo) img.style.backgroundImage = 'url("' + item.logo.replace(/"/g, '%22') + '")';
         if (isFav) img.appendChild(h('div', 'fav', '★'));
+        if (item.rating > 0) img.appendChild(h('div', 'rate', ratingText(item.rating)));
         var e = null;
         if (item.type === 'movie') { e = Resume.forItem('movie', item); if (e && e.pos < 30) e = null; }
         else if (item.type === 'series') e = Resume.forSeries(item.id);
@@ -2659,7 +2697,70 @@
             return items.filter(searchMatcher(q)).length;
         }, function (q) { self.applySearch(q, '.poster'); });
     };
+    // ---------- Sortieren ----------
+    var SORTS = [
+        { id: 'default', name: 'Standard', note: 'Reihenfolge des Anbieters' },
+        { id: 'new', name: 'Neueste zuerst', note: 'Zuletzt beim Anbieter hinzugefügt' },
+        { id: 'rating', name: 'Beste Bewertung', note: 'Höchste Bewertung oben' },
+        { id: 'year', name: 'Erscheinungsjahr', note: 'Neueste Jahrgänge oben' },
+        { id: 'az', name: 'A – Z', note: 'Alphabetisch' }
+    ];
+    /** Name zum Sortieren: ohne Länderkürzel vorne („DE - “), Umlaute wie ae/oe/ue */
+    function sortKey(item) {
+        if (item._sk === undefined) {
+            item._sk = searchNorm(String(item.name || '').replace(/^[\[(|]?\s*(?:[A-Z]{2}|GER|ENG|DEU|4K)\s*[\])|:-]+\s*/, ''))
+                .replace(/^[^a-z0-9äöüß]+/, '')
+                .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+        }
+        return item._sk;
+    }
+    MoviesScreen.prototype.sortId = function () {
+        var id = Storage.get('sort.' + this.kind, 'default');
+        for (var i = 0; i < SORTS.length; i++) if (SORTS[i].id === id) return id;
+        return 'default';
+    };
+    MoviesScreen.prototype.sortName = function () {
+        var id = this.sortId();
+        for (var i = 0; i < SORTS.length; i++) if (SORTS[i].id === id) return SORTS[i].name;
+        return 'Standard';
+    };
+    MoviesScreen.prototype.sortList = function (list) {
+        var id = this.sortId();
+        if (id === 'default' || list.length < 2) return list;
+        var rows = list.map(function (m, i) { return { m: m, i: i }; });
+        function byName(a, b) { var x = sortKey(a.m), y = sortKey(b.m); return x < y ? -1 : x > y ? 1 : a.i - b.i; }
+        var cmp = {
+            az: byName,
+            'new': function (a, b) { return (b.m.added || 0) - (a.m.added || 0) || a.i - b.i; },
+            rating: function (a, b) { return (b.m.rating || 0) - (a.m.rating || 0) || a.i - b.i; },
+            year: function (a, b) { return (b.m.year || 0) - (a.m.year || 0) || (b.m.rating || 0) - (a.m.rating || 0) || a.i - b.i; }
+        }[id];
+        rows.sort(cmp);
+        return rows.map(function (r) { return r.m; });
+    };
+    MoviesScreen.prototype.sortMenu = function () {
+        var self = this, cur = this.sortId();
+        var buttons = SORTS.map(function (o) {
+            return { label: (o.id === cur ? '✓  ' : '      ') + o.name + '  ·  ' + o.note, primary: o.id === cur, action: function () {
+                Storage.set('sort.' + self.kind, o.id);
+                self.focusKey = 'cat-sort';
+                self.savedScroll = 0;
+                Nav.show(self);
+                toast('Sortiert: ' + o.name);
+            } };
+        });
+        buttons.push({ label: 'Schließen', action: function () { } });
+        Modal.open('Sortieren', this.kind === 'movies' ? 'Gilt für alle Film-Kategorien.' : 'Gilt für alle Serien-Kategorien.', buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+        var sel = Modal.node && Modal.node.querySelector('.button.primary');
+        if (sel) Focus.set(sel);
+    };
     MoviesScreen.prototype.filter = function () {
+        var cat0 = this.categories()[this.catIndex];
+        var list = this.filterRaw();
+        return !this.query && cat0 === RESUME_CAT ? list : this.sortList(list);
+    };
+    MoviesScreen.prototype.filterRaw = function () {
         if (this.query) return this.items().filter(searchMatcher(this.query));
         var items = this.items(), fav = this.favType();
         var cats = this.categories(), cat = cats[this.catIndex];
@@ -2699,7 +2800,8 @@
             Nav.show(self);
             var first = $('.poster');
             if (first) Focus.set(first);
-        }, { query: this.query, kind: this.favType(), onClick: function () { self.openSearch(); } }));
+        }, { query: this.query, kind: this.favType(), onClick: function () { self.openSearch(); },
+             sort: { label: 'Sortieren: ' + this.sortName(), onClick: function () { self.sortMenu(); } } }));
 
         var gridCol = h('div', 'col col-grid');
         var scroll = h('div', 'scroll');
@@ -2984,6 +3086,59 @@
     }
 
     // =====================================================================
+    // Trailer (YouTube): Android → YouTube-App, Samsung → YouTube-App, sonst eingebettet
+    // =====================================================================
+
+    var Trailer = {
+        url: function (id) { return 'https://www.youtube.com/watch?v=' + id; },
+        play: function (id, title) {
+            if (AB && AB.openYoutube) {
+                try { if (AB.openYoutube(id)) return; } catch (e) { /* weiter unten */ }
+            }
+            if (typeof tizen !== 'undefined' && tizen.application && tizen.ApplicationControl && tizen.ApplicationControlData) {
+                try {
+                    var ctrl = new tizen.ApplicationControl('http://tizen.org/appcontrol/operation/view', null, null, null,
+                        [new tizen.ApplicationControlData('PAYLOAD', [JSON.stringify({ values: 'v=' + id })])]);
+                    tizen.application.launchAppControl(ctrl, '9Ur5IzDKqV.TizenYouTube', function () { },
+                        function () { Nav.push(new TrailerScreen(id, title)); });
+                    return;
+                } catch (e) { /* YouTube-App fehlt: eingebettet zeigen */ }
+            }
+            Nav.push(new TrailerScreen(id, title));
+        },
+        /** Knopf „▶ Trailer“ für die Detailseiten */
+        button: function (id, title) {
+            var b = h('div', 'button', '▷  Trailer');
+            focusable(b, 'trailer', function () { Trailer.play(id, title); }, 'buttons');
+            return b;
+        }
+    };
+
+    function TrailerScreen(id, title) { this.id = id; this.title = title; }
+    TrailerScreen.prototype.render = function (root) {
+        var wrap = h('div', 'trailer');
+        var frame = document.createElement('iframe');
+        frame.className = 'trailer-frame';
+        frame.setAttribute('allow', 'autoplay; encrypted-media; fullscreen');
+        frame.setAttribute('allowfullscreen', 'true');
+        frame.setAttribute('frameborder', '0');
+        frame.src = 'https://www.youtube-nocookie.com/embed/' + this.id + '?autoplay=1&rel=0&playsinline=1&modestbranding=1';
+        wrap.appendChild(frame);
+        var side = h('div', 'trailer-side');
+        side.appendChild(h('div', 'trailer-title', 'Trailer: ' + this.title));
+        var qr = h('div', 'trailer-qr');
+        try { qr.innerHTML = window.ImperumQR.svg(Trailer.url(this.id), 200); } catch (e) { qr.classList.add('hidden'); }
+        side.appendChild(qr);
+        side.appendChild(h('div', 'trailer-note', 'Läuft der Trailer nicht? QR-Code mit dem Handy scannen.'));
+        var back = h('div', 'button', 'Zurück');
+        focusable(back, 'tr-back', function () { Nav.back(); }, 'buttons');
+        side.appendChild(back);
+        wrap.appendChild(side);
+        root.appendChild(wrap);
+        this.focusKey = 'tr-back';
+    };
+
+    // =====================================================================
     // Film-Detailseite
     // =====================================================================
 
@@ -3039,7 +3194,9 @@
             var back = info.backdrop || info.cover || m.logo;
             if (back) bg.style.backgroundImage = 'url("' + back.replace(/"/g, '%22') + '")';
             meta.textContent = info.meta || (m.year ? String(m.year) : '');
-            rating.textContent = info.rating ? '★ ' + info.rating : '';
+            var score = info.score || m.rating;
+            rating.textContent = score ? ratingText(score) + ' / 10' : '';
+            if (info.trailer && !$('[data-key="trailer"]', body)) fav.parentNode.insertBefore(Trailer.button(info.trailer, m.name), fav.nextSibling);
             plot.textContent = info.plot || '';
             credits.textContent = info.director ? 'Regie: ' + info.director : '';
             castBox.innerHTML = '';
@@ -3108,7 +3265,12 @@
         if (info.cover) cover.style.backgroundImage = 'url("' + info.cover.replace(/"/g, '%22') + '")';
         var back = info.backdrop || info.cover || s.logo;
         if (back) bg.style.backgroundImage = 'url("' + back.replace(/"/g, '%22') + '")';
-        if (info.meta) body.appendChild(h('div', 'meta', info.meta));
+        var sScore = info.score || s.rating;
+        if (info.meta || sScore) {
+            var sm = h('div', 'meta', info.meta || '');
+            if (sScore) { var rs = h('span', 'meta-rate', ratingText(sScore)); sm.insertBefore(rs, sm.firstChild); }
+            body.appendChild(sm);
+        }
         if (info.plot) { body.appendChild(h('div', 'splot', info.plot)); body.classList.add('with-plot'); }
         // Besetzung links unter dem Cover
         var castNames = People.names(info.cast, 6);
@@ -3140,6 +3302,7 @@
             fav.textContent = on ? '★  Favorit' : '☆  Zu Favoriten';
         }, 'buttons');
         body.appendChild(fav);
+        if (info.trailer) body.appendChild(Trailer.button(info.trailer, s.name));
         if (VodPlayer.available()) body.appendChild(playerButton(this));
 
         // Staffeln
@@ -3861,6 +4024,14 @@
                 VodPlayer.pick(function () { self.focusKey = 'set-vodplayer'; Nav.show(self); });
             });
         }
+        row('autonext', 'Serien: nächste Folge automatisch', Settings.autoNext ? 'An · Countdown 10 s vor Folgenende' : 'Aus', function (v) {
+            Settings.setFlag('autoNext', !Settings.autoNext);
+            v.textContent = Settings.autoNext ? 'An · Countdown 10 s vor Folgenende' : 'Aus';
+        });
+        row('intro', 'Serien: „Intro überspringen“', Settings.introBtn ? 'An · springt ' + Settings.introSec + ' s weiter' : 'Aus', function (v) {
+            Settings.setFlag('introBtn', !Settings.introBtn);
+            v.textContent = Settings.introBtn ? 'An · springt ' + Settings.introSec + ' s weiter' : 'Aus';
+        });
         var me = this;
         row('parental', 'Kindersicherung', Parental.enabled() ? 'An · PIN gesetzt' : 'Aus', function () {
             if (!Parental.enabled()) {
@@ -4032,6 +4203,8 @@
         }
         this.startAt = undefined;
         this.seekPending = at > 5 ? at : 0;
+        if (this.popFor !== this.index) { this.popFor = this.index; this.introDone = false; this.nextCancelled = false; }
+        this.showPop(null);
         Player.on({
             buffer: function (b) { self.buffering = b; },
             time: function (t) {
@@ -4039,6 +4212,7 @@
                 if (self.overlay) self.updateBar();
                 if (self.seekPending && t >= self.seekPending - 15) self.seekPending = 0;   // Sprung ist angekommen
                 if (Date.now() - self.lastSave > 10000) self.saveProgress(false);
+                self.extras(t);
             },
             ready: function () {
                 Player.applyPreferences();
@@ -4073,14 +4247,93 @@
         }
     };
     PlayerScreen.prototype.onEnd = function () {
-        if (this.kind === 'episode' && this.index < this.items.length - 1) {
-            this.index++;
-            toast('Nächste Folge: ' + this.item().name);
-            this.start();
-            this.showOverlay();
+        this.showPop(null);
+        if (this.kind === 'episode' && this.index < this.items.length - 1 && Settings.autoNext && !this.nextCancelled) {
+            this.goNext();
         } else if (this.kind !== 'live') {
             Nav.back();
         }
+    };
+    PlayerScreen.prototype.goNext = function () {
+        if (this.index >= this.items.length - 1) return;
+        this.saveProgress(true);
+        this.showPop(null);
+        this.index++;
+        toast('Nächste Folge: ' + this.item().name);
+        this.start();
+        this.showOverlay();
+    };
+
+    // ---------- Einblendungen bei Serien: „Intro überspringen“ und „Nächste Folge in … s“ ----------
+    PlayerScreen.prototype.extras = function (t) {
+        if (this.kind !== 'episode' || !this.resumable() || this.seekPending) return;
+        var dur = Player.duration(), left = dur - t;
+        var hasNext = this.index < this.items.length - 1;
+        var next = hasNext && Settings.autoNext && !this.nextCancelled && dur > 300 && left <= 30 && left > 1;
+        var intro = Settings.introBtn && !this.introDone && t >= 3 && t < 150 && (!(dur > 0) || t < dur * 0.3);
+        this.showPop(next ? 'next' : intro ? 'intro' : null);
+    };
+    PlayerScreen.prototype.showPop = function (kind) {
+        var self = this;
+        if (this.pop === kind) return;
+        this.pop = kind;
+        clearInterval(this.popTimer);
+        var box = $('#player-pop');
+        if (!box) {
+            box = h('div', 'hidden');
+            box.id = 'player-pop';
+            var ui = $('#player-ui');
+            ui.parentNode.insertBefore(box, ui.nextSibling);
+        }
+        var hadFocus = Focus.cur && box.contains(Focus.cur);
+        box.innerHTML = '';
+        if (!kind) {
+            box.classList.add('hidden');
+            if (hadFocus) { Focus.cur = null; if (this.overlay) this.renderOverlay(); }
+            return;
+        }
+        box.classList.remove('hidden');
+        function button(key, label, primary, action) {
+            var b = h('div', 'pp-btn' + (primary ? ' primary' : ''), label);
+            focusable(b, key, action, 'pop');
+            box.appendChild(b);
+            return b;
+        }
+        if (kind === 'intro') {
+            button('pp-intro', '⏭  Intro überspringen', true, function () { self.skipIntro(); });
+            box.appendChild(h('div', 'pp-hint', 'OK drücken'));
+            return;
+        }
+        var n = this.items[this.index + 1];
+        var count = 10;
+        var title = h('div', 'pp-title', 'Nächste Folge in ' + count + ' s');
+        box.appendChild(title);
+        box.appendChild(h('div', 'pp-sub', 'S' + n.season + ' F' + (n.num || this.index + 2) + ' · ' + n.name));
+        var bar = h('div', 'pp-bar'), fill = h('div', 'bar');
+        bar.appendChild(fill);
+        box.appendChild(bar);
+        button('pp-next', '▶  Jetzt ansehen', true, function () { self.goNext(); });
+        button('pp-cancel', 'Abbrechen', false, function () { self.cancelNext(); });
+        box.appendChild(h('div', 'pp-hint', 'OK: Jetzt ansehen · Zurück: Abbrechen'));
+        this.popTimer = setInterval(function () {
+            if (Nav.top() !== self) { clearInterval(self.popTimer); return; }
+            if (!Player.isPlaying()) return;           // Pause hält den Countdown an
+            count--;
+            title.textContent = 'Nächste Folge in ' + Math.max(0, count) + ' s';
+            fill.style.width = ((10 - count) * 10) + '%';
+            if (count <= 0) self.goNext();
+        }, 1000);
+    };
+    PlayerScreen.prototype.skipIntro = function () {
+        this.introDone = true;
+        this.showPop(null);
+        Player.seekBy(Settings.introSec);
+        toast('Intro übersprungen (+' + Settings.introSec + ' s)');
+    };
+    PlayerScreen.prototype.cancelNext = function () {
+        this.nextCancelled = true;
+        this.showPop(null);
+        toast('Automatische Wiedergabe abgebrochen');
     };
     PlayerScreen.prototype.onError = function (msg) {
         if (this.kind === 'live' && this.retries < 1) {
@@ -4149,7 +4402,7 @@
             btn('pl-play', Player.isPlaying() ? '❚❚ Pause' : '▶ Weiter', function () { Player.toggle(); self.renderOverlay(); });
             btn('pl-ff', '10 s »', function () { Player.seekBy(10); });
             if (this.kind === 'episode' && this.index < this.items.length - 1) {
-                btn('pl-nextep', 'Nächste Folge', function () { self.saveProgress(true); self.index++; self.start(); });
+                btn('pl-nextep', 'Nächste Folge', function () { self.goNext(); });
             }
         }
         if (this.kind === 'live' && Rec.available()) {
@@ -4315,6 +4568,10 @@
         if (k === KEY.GREEN) { this.trackMenu('audio'); return true; }
         if (k === KEY.BLUE) { this.trackMenu('text'); return true; }
 
+        if (!this.overlay && this.pop) {
+            if (k === KEY.ENTER) { if (this.pop === 'intro') this.skipIntro(); else this.goNext(); return true; }
+            if (this.pop === 'next' && (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE)) { this.cancelNext(); return true; }
+        }
         if (!this.overlay) {
             if (k === KEY.ENTER) { this.showOverlay(); return true; }
             if (!live && (k === KEY.LEFT || k === KEY.RIGHT)) { Player.seekBy(k === KEY.RIGHT ? 10 : -10); this.showOverlay(); return true; }
@@ -4331,6 +4588,8 @@
     };
     PlayerScreen.prototype.hide = function () {
         this.saveProgress(false);
+        this.showPop(null);
+        this.popFor = null;
         clearTimeout(this.hideTimer);
         clearTimeout(this.subTimer);
         clearInterval(this.watchdog);
