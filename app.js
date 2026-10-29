@@ -175,6 +175,7 @@
         search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/>',
         resume: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.2 3.8v4.6h4.6"/><path d="M10 8.6l5.2 3.4-5.2 3.4z"/>',
         lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+        multi: '<rect x="3" y="4" width="8" height="7" rx="1.2"/><rect x="13" y="4" width="8" height="7" rx="1.2"/><rect x="3" y="13" width="8" height="7" rx="1.2"/><rect x="13" y="13" width="8" height="7" rx="1.2"/>',
         rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
         gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M5.5 18.5l1.9-1.9M16.6 7.4l1.9-1.9"/><circle cx="12" cy="12" r="6.2"/>',
         epg: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/><circle cx="5.2" cy="9" r=".4"/><circle cx="5.2" cy="13" r=".4"/><circle cx="5.2" cy="17" r=".4"/>'
@@ -1050,7 +1051,8 @@
                         logo: str(s.stream_icon),
                         cat: cats[String(s.category_id)] || '',
                         ext: str(s.container_extension) || 'mp4',
-                        year: year
+                        year: year,
+                        added: parseInt(s.added, 10) || 0
                     };
                 }).filter(function (m) { return !isNaN(m.id); });
                 self.moviesLoaded = true;
@@ -1069,7 +1071,8 @@
                         id: parseInt(s.series_id, 10),
                         name: str(s.name) || 'Serie ' + s.series_id,
                         logo: str(s.cover),
-                        cat: cats[String(s.category_id)] || ''
+                        cat: cats[String(s.category_id)] || '',
+                        added: parseInt(s.last_modified, 10) || 0
                     };
                 }).filter(function (s) { return !isNaN(s.id); });
                 self.seriesLoaded = true;
@@ -1548,6 +1551,10 @@
             var cur = this.top();
             if (cur) {
                 cur.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : null;
+                // Scroll-Stand aller Listen merken, damit „Zurück“ genau dorthin führt
+                var boxes = document.querySelectorAll('#app .scroll');
+                cur._scrolls = [];
+                for (var i = 0; i < boxes.length; i++) cur._scrolls.push(boxes[i].scrollTop);
                 if (cur.hide) cur.hide();
             }
             this.stack.push(screen);
@@ -1570,7 +1577,27 @@
             }
             var cur = this.stack.pop();
             if (cur.hide) cur.hide();
-            this.show(this.top());
+            var top = this.top();
+            this.show(top);
+            this.restoreScroll(top);
+        },
+
+        /** Gemerkten Scroll-Stand wiederherstellen (auch kurz danach, falls das Gerät verspätet neu aufbaut) */
+        restoreScroll: function (screen) {
+            var saved = screen._scrolls;
+            screen._scrolls = null;
+            if (!saved || !saved.length) return;
+            function apply() {
+                if (Nav.top() !== screen) return;
+                var boxes = document.querySelectorAll('#app .scroll');
+                for (var i = 0; i < boxes.length && i < saved.length; i++) {
+                    if (saved[i] && Math.abs(boxes[i].scrollTop - saved[i]) > 2) boxes[i].scrollTop = saved[i];
+                }
+                if (Focus.cur && document.body.contains(Focus.cur)) ensureVisible(Focus.cur);
+            }
+            apply();
+            setTimeout(apply, 80);
+            setTimeout(apply, 450);
         }
     };
 
@@ -2333,6 +2360,7 @@
             ['search', 'search', 'SUCHE', function () { Nav.push(new SearchScreen()); }]
         );
         if (Rec.available()) tileList.push(['recs', 'rec', 'AUFNAHMEN', function () { Nav.push(new RecordingsScreen()); }]);
+        if (MultiScreen.available()) tileList.push(['multi', 'multi', 'MULTI-VIEW', function () { MultiScreen.open(); }]);
         tileList.push(
             ['account', 'user', 'KONTO', function () { Nav.push(new AccountScreen()); }],
             ['settings', 'gear', 'EINSTELLUNGEN', function () { Nav.push(new SettingsScreen()); }],
@@ -2549,6 +2577,14 @@
     MoviesScreen.prototype.favType = function () { return this.kind === 'movies' ? 'movie' : 'series'; };
     MoviesScreen.prototype.yearLabel = function () { return 'Filme ' + new Date().getFullYear(); };
     var RESUME_CAT = '▶ Weiter ansehen';
+    var NEW_CAT = 'Zuletzt hinzugefügt';
+    /** Die neuesten Titel des Anbieters (nach Datum, sonst nach Reihenfolge der Liste) */
+    MoviesScreen.prototype.newItems = function () {
+        var items = this.items();
+        var dated = items.filter(function (m) { return m.added > 0; });
+        if (dated.length < items.length / 2) return items.slice(-150).reverse();
+        return dated.slice().sort(function (a, b) { return b.added - a.added; }).slice(0, 150);
+    };
     /** Angefangene Filme bzw. Serien, zuletzt geschaute zuerst */
     MoviesScreen.prototype.resumeItems = function () {
         var byId = {}, out = [], movies = this.kind === 'movies';
@@ -2562,7 +2598,7 @@
     MoviesScreen.prototype.categories = function () {
         var seen = {}, cats = [];
         this.allItems().forEach(function (m) { if (m.cat && !seen[m.cat]) { seen[m.cat] = true; cats.push(m.cat); } });
-        var base = ['Alle', '★ Favoriten', RESUME_CAT];
+        var base = ['Alle', '★ Favoriten', RESUME_CAT, NEW_CAT];
         if (this.kind === 'movies') base.push(this.yearLabel());
         return base.concat(cats);
     };
@@ -2580,6 +2616,7 @@
         if (this.catIndex === 0) return items.slice();
         if (this.catIndex === 1) return items.filter(function (m) { return Favs.has(fav, m.id); });
         if (cat === RESUME_CAT) return this.resumeItems();
+        if (cat === NEW_CAT) return this.newItems();
         if (this.kind === 'movies' && cat === this.yearLabel()) {
             var year = new Date().getFullYear();
             return items.filter(function (m) { return m.year === year; });
@@ -3794,6 +3831,183 @@
     };
 
     // =====================================================================
+    // Multi-View: 2 oder 4 Sender gleichzeitig (nur Android)
+    // =====================================================================
+
+    function MultiScreen() {
+        this.count = Storage.get('multiCount', 4) === 2 ? 2 : 4;
+        var saved = Storage.get('multiSlots', []);
+        this.slots = Array.isArray(saved) ? saved : [];
+        this.audio = 0;
+        this.playing = {};
+    }
+    MultiScreen.available = function () { return !!(AB && AB.multiOpen); };
+    /** Erst fragen: 2 oder 4 Sender */
+    MultiScreen.open = function () {
+        var last = Storage.get('multiCount', 0);
+        Modal.open('Multi-View', 'Wie viele Sender möchtest du gleichzeitig sehen?', [
+            { label: '2 Sender nebeneinander', primary: last !== 4, action: function () { Storage.set('multiCount', 2); Nav.push(new MultiScreen()); } },
+            { label: '4 Sender (2 × 2)', primary: last === 4, action: function () { Storage.set('multiCount', 4); Nav.push(new MultiScreen()); } },
+            { label: 'Abbrechen' }
+        ]);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+        var sel = Modal.node && Modal.node.querySelector('.button.primary');
+        if (sel) Focus.set(sel);
+    };
+    /** Lage der Kacheln in 1920er-Koordinaten */
+    MultiScreen.prototype.rects = function () {
+        if (this.count === 2) return [{ x: 6, y: 272, w: 951, h: 535 }, { x: 963, y: 272, w: 951, h: 535 }];
+        return [{ x: 4, y: 4, w: 954, h: 534 }, { x: 962, y: 4, w: 954, h: 534 },
+                { x: 4, y: 542, w: 954, h: 534 }, { x: 962, y: 542, w: 954, h: 534 }];
+    };
+    MultiScreen.prototype.channel = function (i) {
+        var id = this.slots[i];
+        if (id === undefined || id === null) return null;
+        var list = Parental.visible('live', Data.channels);
+        for (var k = 0; k < list.length; k++) if (list[k].id === id) return list[k];
+        return null;
+    };
+    MultiScreen.prototype.render = function (root) {
+        var self = this;
+        document.body.classList.add('preview-mode');
+        var wrap = h('div', 'mv');
+        this.tiles = [];
+        this.rects().forEach(function (r, i) {
+            var t = h('div', 'mv-tile');
+            t.style.left = r.x + 'px'; t.style.top = r.y + 'px'; t.style.width = r.w + 'px'; t.style.height = r.h + 'px';
+            var ch = self.channel(i);
+            if (ch) {
+                t.appendChild(h('div', 'mv-name', ch.name));
+                t.appendChild(h('div', 'mv-state', ''));
+            } else {
+                t.classList.add('empty');
+                t.innerHTML = '<div class="mv-plus">+</div><div class="mv-empty">Sender wählen</div>';
+            }
+            t._onFocus = function () {
+                if (self.audio !== i) { self.audio = i; if (AB.multiAudio) AB.multiAudio(i); }
+            };
+            t._onLong = function () { self.options(i); };
+            focusable(t, 'mv-' + i, function () { self.pick(i); }, 'mv');
+            self.tiles.push(t);
+            wrap.appendChild(t);
+        });
+        root.appendChild(wrap);
+        root.appendChild(h('div', 'mv-hint', 'OK: Sender wählen · OK lang: Vollbild/Entfernen · Ton kommt von der markierten Kachel'));
+        if (!this.focusKey) this.focusKey = 'mv-' + this.audio;
+        var me = this;
+        setTimeout(function () { if (Nav.top() === me) me.startAll(); }, 60);
+    };
+    MultiScreen.prototype.startAll = function () {
+        var self = this;
+        if (AB.multiAudio) AB.multiAudio(this.audio);
+        this.rects().forEach(function (r, i) {
+            var ch = self.channel(i);
+            if (!ch) return;
+            var fr = Player.fractions(r);
+            // 2 Pixel Rand frei lassen, damit der goldene Rahmen sichtbar bleibt
+            AB.multiOpen(i, Api.liveUrl(ch.id), fr.x, fr.y, fr.w, fr.h);
+            self.playing[i] = ch.id;
+        });
+    };
+    MultiScreen.prototype.stopAll = function () {
+        if (AB && AB.multiStopAll) AB.multiStopAll();
+        this.playing = {};
+    };
+    MultiScreen.prototype.state = function (slot, st, msg) {
+        var t = this.tiles && this.tiles[slot];
+        var box = t && $('.mv-state', t);
+        if (!box) return;
+        box.textContent = st === 'buffer' ? 'Lädt …' : st === 'error' ? 'Kein Bild' + (/DECODER|DECODING/i.test(msg || '') ? ' – das Gerät schafft nicht so viele Videos' : '') : '';
+    };
+    MultiScreen.prototype.pick = function (i) {
+        Nav.push(new MultiPickScreen(this, i));
+    };
+    MultiScreen.prototype.options = function (i) {
+        var self = this, ch = this.channel(i);
+        var buttons = [{ label: 'Sender wählen', primary: true, action: function () { self.pick(i); } }];
+        if (ch) {
+            buttons.push({ label: 'Im Vollbild ansehen', action: function () { Nav.push(new PlayerScreen([ch], 0, 'live')); } });
+            buttons.push({ label: 'Kachel leeren', action: function () {
+                self.slots[i] = null; Storage.set('multiSlots', self.slots);
+                if (AB.multiStop) AB.multiStop(i);
+                self.focusKey = 'mv-' + i; Nav.show(self);
+            } });
+        }
+        buttons.push({ label: this.count === 4 ? 'Auf 2 Sender wechseln' : 'Auf 4 Sender wechseln', action: function () {
+            self.stopAll();
+            self.count = self.count === 4 ? 2 : 4;
+            Storage.set('multiCount', self.count);
+            if (self.audio >= self.count) self.audio = 0;
+            self.focusKey = 'mv-' + self.audio;
+            Nav.show(self);
+        } });
+        buttons.push({ label: 'Schließen' });
+        Modal.open(ch ? ch.name : 'Kachel ' + (i + 1), '', buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+    };
+    MultiScreen.prototype.hide = function () {
+        this.stopAll();
+        document.body.classList.remove('preview-mode');
+    };
+    window.__androidMulti = function (slot, st, msg) {
+        var top = Nav.top();
+        if (top instanceof MultiScreen) top.state(slot, st, msg);
+    };
+
+    /** Sender für eine Multi-View-Kachel auswählen */
+    function MultiPickScreen(multi, slot) {
+        this.multi = multi;
+        this.slot = slot;
+        this.catIndex = 0;
+        this.query = '';
+    }
+    MultiPickScreen.prototype.categories = LiveScreen.prototype.categories;
+    MultiPickScreen.prototype.filter = LiveScreen.prototype.filter;
+    MultiPickScreen.prototype.applySearch = applySearch;
+    MultiPickScreen.prototype.openSearch = function () {
+        var self = this;
+        openSearchDialog('Sender suchen', this.query, function (q) {
+            return Parental.visible('live', Data.channels).filter(searchMatcher(q)).length;
+        }, function (q) { self.applySearch(q, '.col-list .row'); });
+    };
+    MultiPickScreen.prototype.render = function (root) {
+        var self = this;
+        root.appendChild(topbar('Sender für Kachel ' + (this.slot + 1), 'OK: auswählen · Zurück: abbrechen'));
+        var columns = h('div', 'columns');
+        columns.appendChild(categoryColumn(this.categories(), this.catIndex, function (i) {
+            self.catIndex = i; self.query = ''; self.focusKey = null;
+            Nav.show(self);
+            var first = $('.col-list .row');
+            if (first) Focus.set(first);
+        }, { query: this.query, kind: 'live', onClick: function () { self.openSearch(); } }));
+        var listCol = h('div', 'col col-list mv-pick');
+        var scroll = h('div', 'scroll');
+        listCol.appendChild(scroll);
+        columns.appendChild(listCol);
+        root.appendChild(columns);
+        var list = this.filter();
+        if (!list.length) scroll.appendChild(h('div', 'empty-note', 'Keine Sender gefunden.'));
+        var current = this.multi.slots[this.slot];
+        batchRender(scroll, list, function (ch) {
+            var row = h('div', 'row' + (ch.id === current ? ' active' : ''));
+            row.appendChild(h('div', 'num', String(ch.num)));
+            var logo = h('img', 'logo');
+            if (ch.logo) logo.src = ch.logo;
+            logo.onerror = function () { logo.style.visibility = 'hidden'; };
+            row.appendChild(logo);
+            row.appendChild(h('div', 'name', ch.name));
+            return focusable(row, 'mp-' + ch.id, function () {
+                self.multi.slots[self.slot] = ch.id;
+                Storage.set('multiSlots', self.multi.slots);
+                self.multi.focusKey = 'mv-' + self.slot;
+                self.multi.audio = self.slot;
+                Nav.back();
+            }, 'list');
+        }, 120);
+        if (!this.focusKey) this.focusKey = list.length ? 'mp-' + list[0].id : 'cat-0';
+    };
+
+    // =====================================================================
     // Kindersicherung: Einstellungen
     // =====================================================================
 
@@ -4341,12 +4555,14 @@
             if (hidden) {
                 Parental.lock();
                 var top = Nav.top();
+                if (top instanceof MultiScreen) top.stopAll();
                 if (top && (top instanceof PlayerScreen || top instanceof LiveScreen)) {
                     if (top instanceof PlayerScreen) top.saveProgress(false);   // beim Zurückkommen geht es dort weiter
                     try { Player.stop(); } catch (e) { /* egal */ }
                 }
             } else {
                 var cur = Nav.top();
+                if (cur instanceof MultiScreen) cur.startAll();
                 if (cur instanceof PlayerScreen) cur.start();
                 else if (cur instanceof LiveScreen && cur.selected) cur.startPreview(cur.selected);
             }
