@@ -733,3 +733,26 @@ input { -webkit-user-select: text; user-select: text; }
 /* Logo oben auf der Startseite (ohne Hintergrund) */
 .home-title { top: -6px; }
 .home-logo { height: 125px; width: auto; display: inline-block; filter: drop-shadow(0 6px 14px rgba(0,0,0,.55)); }
+
+/* ---------- Kindersicherung ---------- */
+.cat.locked svg { vertical-align: middle; margin-right: 10px; position: relative; top: -3px; color: #d9b066; }
+.pin-box { width: 640px; margin-left: -320px; text-align: center; }
+.pin-dots { margin: 26px 0 8px; }
+.pin-dot { display: inline-block; width: 30px; height: 30px; margin: 0 14px; border-radius: 50%; border: 3px solid #d9b066; }
+.pin-dot.on { background: #f4dc9e; border-color: #f4dc9e; }
+.pin-dots.shake { animation: pinShake .4s; }
+@keyframes pinShake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-14px); } 40%, 80% { transform: translateX(14px); } }
+.pin-error { color: #f08a7a; font-size: 24px; min-height: 32px; }
+.pin-pad { width: 420px; margin: 10px auto 0; }
+.pin-key {
+    display: inline-block; width: 118px; height: 84px; line-height: 84px; margin: 8px;
+    border-radius: 16px; background: rgba(255,255,255,.1); font-size: 40px; font-weight: bold; color: #f2efe8;
+}
+.pin-key.small { font-size: 32px; color: #d9b066; }
+.pin-key.focused { background: #f4dc9e; color: #1a1408; transform: scale(1.06); }
+.pin-forgot { margin-top: 18px; font-size: 21px; color: #a7a39a; line-height: 30px; }
+.par-cats { left: 70px; right: 70px; width: auto; top: 110px; bottom: 0; position: absolute; background: rgba(16,18,22,.85); }
+.par-row .par-mark { display: inline-block; width: 44px; color: #d9b066; vertical-align: middle; }
+.par-row .name { display: inline-block; vertical-align: middle; }
+.par-row .par-note { float: right; font-size: 22px; color: #a7a39a; margin-right: 20px; }
+.par-row.on .name { color: #f4dc9e; }
