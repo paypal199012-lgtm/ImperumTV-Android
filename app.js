@@ -513,7 +513,7 @@
     var Settings = {
         autoNext: Storage.get('autoNext', true),     // Serien: nächste Folge automatisch
         introBtn: Storage.get('introBtn', true),     // Serien: Knopf „Intro überspringen“
-        introSec: 85,
+        introSec: 20,
         setFlag: function (name, on) { this[name] = on; Storage.set(name, on); },
         liveExt: Storage.get('liveExt', 'ts'),   // 'ts' oder 'm3u8'
         setLiveExt: function (ext) { this.liveExt = ext; Storage.set('liveExt', ext); }
@@ -3486,6 +3486,9 @@
             scroll.appendChild(n);
         });
         body.appendChild(eps);
+        // Folgenliste immer unter den Staffeln beginnen lassen (Knöpfe können zwei Reihen brauchen)
+        var below = row.offsetTop + row.offsetHeight + 14;
+        if (below > 0) eps.style.top = below + 'px';
 
         if (!this.focusKey) this.focusKey = lastIndex >= 0 ? 'scont' : list.length ? 'ep-' + list[0].id : 'sfav';
     };
