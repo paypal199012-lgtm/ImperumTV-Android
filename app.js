@@ -266,6 +266,12 @@
         var margin = 30 * scale;
         if (nr.top < pr.top + margin) p.scrollTop -= (pr.top + margin - nr.top) / scale;
         else if (nr.bottom > pr.bottom - margin) p.scrollTop += (nr.bottom - pr.bottom + margin) / scale;
+        // Einstellungen: beim letzten Eintrag ganz nach unten (damit der Hinweis darunter sichtbar wird)
+        if (p.classList.contains('settings')) {
+            var all = p.querySelectorAll('.focusable');
+            if (all.length && all[all.length - 1] === node) p.scrollTop = p.scrollHeight;
+            else if (all.length && all[0] === node) p.scrollTop = 0;
+        }
     }
 
     var VERTICAL_LOCK = { cats: true, list: true, grid: true };
@@ -1674,6 +1680,75 @@
             setTimeout(apply, 1600);
         }
     };
+    // =====================================================================
+    // Maus: Mausrad (und Touchpad) scrollt jede Liste, auch ohne Touch-Modus
+    // =====================================================================
+
+    var Wheel = {
+        /** Nächster scrollbarer Kasten unter dem Mauszeiger */
+        box: function (node, horizontal) {
+            while (node && node !== document.body && node !== document.documentElement) {
+                if (node.nodeType === 1 && node.id !== 'stage' && node.id !== 'app') {
+                    var big = horizontal ? node.clientWidth > 200 : node.clientHeight > 150;
+                    var more = horizontal ? node.scrollWidth > node.clientWidth + 2 : node.scrollHeight > node.clientHeight + 2;
+                    if (big && more) {
+                        var ov = window.getComputedStyle(node)[horizontal ? 'overflowX' : 'overflowY'];
+                        if (ov === 'hidden' || ov === 'auto' || ov === 'scroll') return { node: node, native: ov !== 'hidden' };
+                    }
+                }
+                node = node.parentNode;
+            }
+            return null;
+        },
+        /** Bewegung (in Bühnen-Pixeln) an den Kasten bzw. den Bildschirm weitergeben. true = verarbeitet */
+        apply: function (target, dx, dy, nativeOk, notch) {
+            if (Modal.node && !Modal.node.contains(target)) target = Modal.node.querySelector('.vscroll') || Modal.node;
+            var horizontal = Math.abs(dx) > Math.abs(dy);
+            var hit = this.box(target, horizontal);
+            // Mausrad über einer waagerechten Reihe (z. B. Besetzung) ohne senkrechte Liste: seitlich scrollen
+            if (!hit && !horizontal) { hit = this.box(target, true); if (hit) { horizontal = true; dx = dy; } }
+            if (hit) {
+                if (hit.native && nativeOk) return false;       // scrollt der Browser schon selbst
+                if (horizontal) hit.node.scrollLeft += dx; else hit.node.scrollTop += dy;
+                return true;
+            }
+            var top = Nav.top();
+            if (!Modal.node && top && top.onWheel) {
+                // Ein Rad-Klick = ein Schritt (Touchpads mit kleinen Schritten werden aufsummiert)
+                if (notch) {
+                    if (Math.abs(dy) >= Math.abs(dx) && Math.abs(dy) >= 40) { dy = dy > 0 ? 110 : -110; dx = 0; }
+                    else if (Math.abs(dx) >= 40) { dx = dx > 0 ? 200 : -200; dy = 0; }
+                }
+                top.onWheel(dx, dy);
+                return true;
+            }
+            return false;
+        }
+    };
+    document.addEventListener('wheel', function (ev) {
+        var dy = ev.deltaY, dx = ev.deltaX;
+        if (ev.deltaMode === 1) { dy *= 40; dx *= 40; } else if (ev.deltaMode === 2) { dy *= 800; dx *= 800; }
+        if (ev.shiftKey && !dx) { dx = dy; dy = 0; }
+        if (Wheel.apply(ev.target, dx / scale, dy / scale, true, true) && ev.cancelable) ev.preventDefault();
+    }, { passive: false });
+    // Wischen auf Bildschirmen ohne echte Liste (z. B. EPG-Raster)
+    (function () {
+        var lx = null, ly = null;
+        document.addEventListener('touchstart', function (ev) {
+            var t = ev.touches && ev.touches[0];
+            lx = t ? t.clientX : null; ly = t ? t.clientY : null;
+        }, { passive: true });
+        document.addEventListener('touchmove', function (ev) {
+            var top = Nav.top(), t = ev.touches && ev.touches[0];
+            if (!t || ly === null || !top || !top.onWheel || Modal.node) return;
+            if (Wheel.box(ev.target, false) || Wheel.box(ev.target, true)) return;   // echte Liste: Browser wischt selbst
+            var dx = (lx - t.clientX) / scale, dy = (ly - t.clientY) / scale;
+            if (Math.abs(dx) < 25 && Math.abs(dy) < 25) return;
+            lx = t.clientX; ly = t.clientY;
+            top.onWheel(dx, dy);
+        }, { passive: true });
+    })();
+
     // Jede Bedienung beendet das Festhalten der alten Position
     (function () {
         function mark() { Nav.userAt = Date.now(); }
@@ -3771,6 +3846,27 @@
         return true;
     };
 
+    /** Mausrad / Wischen: senkrecht = Sender, waagerecht = Zeit */
+    EpgGridScreen.prototype.onWheel = function (dx, dy) {
+        if (!this.list.length) return;
+        this.wheelY = (this.wheelY || 0) + dy;
+        this.wheelX = (this.wheelX || 0) + dx;
+        var moved = false;
+        while (Math.abs(this.wheelY) >= 110) {
+            var step = this.wheelY > 0 ? 1 : -1;
+            this.wheelY -= step * 110;
+            var next = Math.max(0, Math.min(this.list.length - 1, this.chIndex + step));
+            if (next !== this.chIndex) { this.chIndex = next; moved = true; }
+        }
+        while (Math.abs(this.wheelX) >= 200) {
+            var dir = this.wheelX > 0 ? 1 : -1;
+            this.wheelX -= dir * 200;
+            this.moveTime(dir * HALF_HOUR);
+            moved = true;
+        }
+        if (moved) this.draw();
+    };
+
     EpgGridScreen.prototype.choose = function (ch, p) {
         var self = this;
         if (this.col === 'chan') { this.chooseCategory(); return; }
@@ -4002,7 +4098,7 @@
     function SettingsScreen() { }
     SettingsScreen.prototype.render = function (root) {
         root.appendChild(topbar('Einstellungen', ''));
-        var box = h('div', 'settings');
+        var box = h('div', 'settings vscroll');
         function row(key, label, value, action) {
             var r = h('div', 'set-row');
             r.appendChild(h('div', 'set-label', label));
@@ -4059,7 +4155,7 @@
     ParentalScreen.prototype.render = function (root) {
         var self = this;
         root.appendChild(topbar('Kindersicherung', 'Geschützte Kategorien brauchen die PIN'));
-        var box = h('div', 'settings');
+        var box = h('div', 'settings vscroll');
         function row(key, label, value, action) {
             var r = h('div', 'set-row');
             r.appendChild(h('div', 'set-label', label));
