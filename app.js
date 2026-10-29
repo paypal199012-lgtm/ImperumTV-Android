@@ -60,9 +60,97 @@
         toastTimer = setTimeout(function () { t.classList.add('hidden'); }, ms || 3500);
     }
 
+    /** Lade-Animation: goldenes Logo mit Lichtschimmer, Fortschrittsbalken und Schritten */
+    var Loader = {
+        built: false, steps: null, doneTimer: null,
+        build: function () {
+            var el = $('#loader');
+            el.innerHTML = '';
+            el.appendChild(h('div', 'ld-glow'));
+            var wrap = h('div', 'ld-logo-wrap');
+            var img = h('img', 'ld-logo');
+            img.src = 'img/icon.png';
+            wrap.appendChild(img);
+            wrap.appendChild(h('div', 'ld-shine'));
+            el.appendChild(wrap);
+            var t = h('div', null);
+            t.id = 'loader-text';
+            el.appendChild(t);
+            this.bar = h('div', 'ld-bar');
+            this.fill = h('div', 'ld-fill');
+            this.bar.appendChild(this.fill);
+            el.appendChild(this.bar);
+            this.stepsBox = h('div', 'ld-steps');
+            el.appendChild(this.stepsBox);
+            this.built = true;
+        },
+        /** steps: z. B. ['Anmelden', 'Sender laden', 'Fertig'] – ohne steps läuft der Balken endlos */
+        show: function (text, steps) {
+            if (!this.built) this.build();
+            clearTimeout(this.doneTimer);
+            var el = $('#loader');
+            el.classList.remove('ld-finished');
+            $('#loader-text').textContent = text || 'Lädt …';
+            this.steps = steps || null;
+            this.stepsBox.innerHTML = '';
+            if (steps) {
+                var box = this.stepsBox;
+                steps.forEach(function (name, i) {
+                    if (i) box.appendChild(h('div', 'ld-line'));
+                    var st = h('div', 'ld-step');
+                    st.appendChild(h('span', 'ld-dot'));
+                    st.appendChild(h('span', 'ld-name', name));
+                    box.appendChild(st);
+                });
+                this.bar.classList.add('det');
+                this.fill.style.width = '4%';
+                this.step(0);
+            } else {
+                this.bar.classList.remove('det');
+                this.fill.style.width = '';
+            }
+            el.classList.remove('hidden');
+        },
+        step: function (i) {
+            if (!this.steps) return;
+            var items = this.stepsBox.querySelectorAll('.ld-step');
+            for (var k = 0; k < items.length; k++) {
+                items[k].className = 'ld-step' + (k < i ? ' done' : k === i ? ' active' : '');
+            }
+            this.fill.style.width = Math.max(4, Math.round((i + 0.5) / this.steps.length * 100)) + '%';
+        },
+        /** Zum Schluss kurz „✓ Fertig“ zeigen, dann schließen */
+        done: function (text, then, ms) {
+            var self = this;
+            if (this.steps) this.step(this.steps.length);
+            this.fill.style.width = '100%';
+            $('#loader-text').textContent = '✓  ' + text;
+            $('#loader').classList.add('ld-finished');
+            clearTimeout(this.doneTimer);
+            this.doneTimer = setTimeout(function () { self.hide(); if (then) then(); }, ms || 1100);
+        },
+        hide: function () {
+            clearTimeout(this.doneTimer);
+            $('#loader').classList.add('hidden');
+            $('#loader').classList.remove('ld-finished');
+        }
+    };
     function loader(show, text) {
-        $('#loader-text').textContent = text || 'Lädt …';
-        $('#loader').classList.toggle('hidden', !show);
+        if (show) Loader.show(text); else Loader.hide();
+    }
+
+    /** Anmelden und Sender laden, mit Schritten in der Lade-Animation */
+    function loginWithSteps(acc, title, onOk, onErr, showMs) {
+        var before = Data.channels.length;
+        Loader.show(title, ['Anmelden', 'Sender laden', 'Fertig']);
+        Data.login(acc, function (i) { Loader.step(i); }).then(function () {
+            var n = Data.channels.length, diff = before ? n - before : 0;
+            var text = String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' Sender geladen' + (diff > 0 ? ' (+' + diff + ' neue)' : '');
+            Loader.done(text, onOk, showMs || 500);
+        }, function (e) {
+            Loader.hide();
+            onErr(e);
+        });
     }
 
     // Einfache Symbole als SVG (Fernseher haben nicht immer passende Schriftzeichen)
@@ -896,7 +984,7 @@
             return map;
         },
 
-        login: function (acc) {
+        login: function (acc, progress) {
             Api.acc = acc;
             var self = this;
             return Api.call(null).then(function (json) {
@@ -906,6 +994,7 @@
                 self.status = str(user.status) || 'Active';
                 var exp = parseFloat(user.exp_date);
                 self.expiry = exp > 0 ? new Date(exp * 1000) : null;
+                if (progress) progress(1);
                 return Promise.all([Api.call('get_live_categories'), Api.call('get_live_streams')]);
             }).then(function (res) {
                 var cats = self.catMap(res[0]);
@@ -1659,14 +1748,11 @@
             return;
         }
         var previous = Api.acc;
-        loader(true, 'Verbinde mit „' + p.name + '“ …');
-        Data.login(acc).then(function () {
+        loginWithSteps(acc, 'Verbinde mit „' + p.name + '“ …', function () {
             Storage.set('playlistId', p.id);
-            loader(false);
             Nav.replace(new HomeScreen());
         }, function (e) {
             Api.acc = previous;
-            loader(false);
             toast(e.message || String(e), 8000);
         });
     };
@@ -1950,7 +2036,11 @@
         // Kopfzeile: Krone + ImperumTV in der Mitte, Suche und Neu laden rechts
         var head = h('div', 'home-head');
         var title = h('div', 'home-title');
-        title.innerHTML = icon('crown', 58) + '<span>ImperumTV</span>';
+        // Freigestelltes Logo (ohne Hintergrund), schwebt über der Startseite
+        var logo = h('img', 'home-logo');
+        logo.src = 'img/logo-frei.png';
+        logo.alt = 'ImperumTV';
+        title.appendChild(logo);
         head.appendChild(title);
         var btns = h('div', 'home-head-btns');
         [
@@ -2014,15 +2104,11 @@
     function reloadAll() {
         var acc = Api.acc || Storage.get('account', null);
         if (!acc) return;
-        loader(true, 'Sender werden neu geladen …');
-        Data.login(acc).then(function () {
-            loader(false);
+        loginWithSteps(acc, 'Liste wird aktualisiert …', function () {
             Nav.replace(new HomeScreen());
-            toast('Senderliste aktualisiert');
         }, function (e) {
-            loader(false);
             toast(e.message || String(e), 6000);
-        });
+        }, 1300);
     }
 
     // =====================================================================
@@ -3914,12 +4000,9 @@
         var lastId = Storage.get('playlistId', null);
 
         function start(acc) {
-            loader(true, 'Anmelden und Sender laden …');
-            Data.login(acc).then(function () {
-                loader(false);
+            loginWithSteps(acc, 'ImperumTV wird gestartet …', function () {
                 Nav.replace(new HomeScreen());
             }, function (e) {
-                loader(false);
                 Nav.replace(new PlaylistsScreen(e.message || String(e)));
             });
         }
@@ -3955,12 +4038,9 @@
         var chosen = lastId !== null ? Remote.find(lastId) : null;
         var acc = chosen ? playlistAccount(chosen) : null;
         if (!acc) { Nav.replace(new PlaylistsScreen()); return; }
-        loader(true, 'Anmelden und Sender laden …');
-        Data.login(acc).then(function () {
-            loader(false);
+        loginWithSteps(acc, 'Anmelden und Sender laden …', function () {
             Nav.replace(new HomeScreen());
         }, function (e) {
-            loader(false);
             Nav.replace(new PlaylistsScreen(e.message || String(e)));
         });
     }

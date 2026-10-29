@@ -31,5 +31,6 @@ cp index.html "$OUT/app/src/main/assets/www/index.html"
 cp style.css "$OUT/app/src/main/assets/www/css/style.css"
 cp app.js qrcode.js "$OUT/app/src/main/assets/www/js/"
 cp logo.png "$OUT/app/src/main/assets/www/img/icon.png"
+cp logo-frei.png "$OUT/app/src/main/assets/www/img/logo-frei.png"
 
 echo "Projekt liegt in $OUT"
