@@ -165,6 +165,10 @@ class MainActivity : Activity() {
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             settings.textZoom = 100
+            // Flüssigeres Scrollen: Bereiche knapp außerhalb des Bildes schon vorzeichnen (ab Android 6)
+            if (Build.VERSION.SDK_INT >= 23) settings.offscreenPreRaster = true
+            // Bilder aus dem Zwischenspeicher nehmen, wenn sie schon einmal geladen wurden
+            settings.cacheMode = WebSettings.LOAD_DEFAULT
             settings.setSupportZoom(false)
             settings.builtInZoomControls = false
             isFocusable = true
