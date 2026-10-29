@@ -798,3 +798,11 @@ input { -webkit-user-select: text; user-select: text; }
 /* Demo-Liste */
 .pl-card.pl-demo { border-style: dashed; }
 .pl-card.pl-demo .pl-name { color: #f4dc9e; }
+
+/* ---------- Flüssiges Scrollen (Filme, Serien, Listen) ---------- */
+/* Eigene Grafik-Ebene je Liste: beim Scrollen wird nur verschoben statt alles neu gezeichnet */
+.scroll { will-change: transform; }
+.col-grid .scroll { background: #15171b; }
+.col-list .scroll { background: #101216; }
+/* Markierung ohne weichen Schein (der Schein kostet auf schwachen Geräten viel Rechenzeit) */
+.poster.focused, .row.focused, .erow.focused, .episode.focused { box-shadow: 0 0 0 4px #f4dc9e !important; }
