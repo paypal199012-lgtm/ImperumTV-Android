@@ -67,6 +67,12 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var playerView: PlayerView
     private lateinit var player: ExoPlayer
+    private lateinit var httpFactory: DefaultHttpDataSource.Factory
+
+    /** Multi-View: weitere Player, je einer pro Kachel */
+    private class MultiSlot(val player: ExoPlayer, val view: PlayerView)
+    private val multi = HashMap<Int, MultiSlot>()
+    private var multiAudioSlot = 0
     private val handler = Handler(Looper.getMainLooper())
 
     // Werte, die die Web-Seite jederzeit abfragen darf (werden auf dem Haupt-Thread aktualisiert)
@@ -101,6 +107,7 @@ class MainActivity : Activity() {
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(20_000)
+        httpFactory = http
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, http)))
             .build()
@@ -381,6 +388,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopAllMulti()
         handler.removeCallbacksAndMessages(null)
         player.release()
         webView.destroy()
@@ -431,13 +439,73 @@ class MainActivity : Activity() {
     }
 
     private fun placeVideo(x: Double, y: Double, w: Double, h: Double) {
+        placeView(playerView, x, y, w, h)
+    }
+
+    private fun placeView(view: View, x: Double, y: Double, w: Double, h: Double) {
         val width = root.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         val height = root.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
         val lp = FrameLayout.LayoutParams((w * width).toInt().coerceAtLeast(1), (h * height).toInt().coerceAtLeast(1))
         lp.leftMargin = (x * width).toInt()
         lp.topMargin = (y * height).toInt()
-        playerView.layoutParams = lp
-        playerView.visibility = View.VISIBLE
+        view.layoutParams = lp
+        view.visibility = View.VISIBLE
+    }
+
+    // ---------- Multi-View (2 oder 4 Sender gleichzeitig) ----------
+
+    private fun emitMulti(slot: Int, state: String, msg: String = "") {
+        handler.post {
+            webView.evaluateJavascript(
+                "window.__androidMulti && window.__androidMulti($slot, ${JSONObject.quote(state)}, ${JSONObject.quote(msg)})", null
+            )
+        }
+    }
+
+    private fun multiSlot(slot: Int): MultiSlot {
+        multi[slot]?.let { return it }
+        val p = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, httpFactory)))
+            .build()
+        p.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                when (state) {
+                    Player.STATE_BUFFERING -> emitMulti(slot, "buffer")
+                    Player.STATE_READY -> emitMulti(slot, "ready")
+                    else -> {}
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    p.seekToDefaultPosition()
+                    p.prepare()
+                    return
+                }
+                emitMulti(slot, "error", error.errorCodeName)
+            }
+        })
+        val view = PlayerView(this).apply {
+            useController = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            setShutterBackgroundColor(Color.BLACK)
+            setKeepContentOnPlayerReset(false)
+            isFocusable = false
+        }
+        view.player = p
+        // Unter die Oberfläche legen, damit Rahmen und Namen darüber sichtbar sind
+        root.addView(view, root.indexOfChild(webView).coerceAtLeast(0), FrameLayout.LayoutParams(1, 1))
+        val created = MultiSlot(p, view)
+        multi[slot] = created
+        return created
+    }
+
+    private fun stopAllMulti() {
+        for (s in multi.values) {
+            s.player.release()
+            root.removeView(s.view)
+        }
+        multi.clear()
     }
 
     private fun trackName(format: Format, fallback: String): String {
@@ -723,6 +791,45 @@ class MainActivity : Activity() {
                     webView.evaluateJavascript("window.__androidExternal && window.__androidExternal(-1, -1, false, true)", null)
                 }
             }
+        }
+
+        /** Multi-View: Sender in Kachel slot starten (Lage als Anteil des Bildschirms) */
+        @JavascriptInterface
+        fun multiOpen(slot: Int, url: String, x: Double, y: Double, w: Double, h: Double) {
+            handler.post {
+                player.stop()
+                playerView.visibility = View.GONE
+                val s = multiSlot(slot)
+                placeView(s.view, x, y, w, h)
+                s.player.setMediaItem(MediaItem.fromUri(url))
+                s.player.prepare()
+                s.player.playWhenReady = true
+                s.player.volume = if (slot == multiAudioSlot) 1f else 0f
+            }
+        }
+
+        /** Ton nur von dieser Kachel */
+        @JavascriptInterface
+        fun multiAudio(slot: Int) {
+            handler.post {
+                multiAudioSlot = slot
+                for ((k, s) in multi) s.player.volume = if (k == slot) 1f else 0f
+            }
+        }
+
+        @JavascriptInterface
+        fun multiStop(slot: Int) {
+            handler.post {
+                multi.remove(slot)?.let {
+                    it.player.release()
+                    root.removeView(it.view)
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun multiStopAll() {
+            handler.post { stopAllMulti() }
         }
 
         /** Versionsnummer der installierten App (= Nummer des GitHub-Builds) */

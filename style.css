@@ -756,3 +756,18 @@ input { -webkit-user-select: text; user-select: text; }
 .par-row .name { display: inline-block; vertical-align: middle; }
 .par-row .par-note { float: right; font-size: 22px; color: #a7a39a; margin-right: 20px; }
 .par-row.on .name { color: #f4dc9e; }
+
+/* ---------- Multi-View ---------- */
+.mv { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+.mv-tile { position: absolute; box-sizing: border-box; border: 3px solid rgba(255,255,255,.12); border-radius: 6px; }
+.mv-tile.empty { background: rgba(20,22,27,.92); text-align: center; }
+.mv-tile.focused { border-color: #f4dc9e; box-shadow: 0 0 0 3px rgba(244,220,158,.5); }
+.mv-plus { font-size: 120px; color: #d9b066; margin-top: 120px; line-height: 1; }
+.mv-empty { font-size: 32px; color: #a7a39a; margin-top: 16px; }
+.mv-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 18px; font-size: 26px; font-weight: bold;
+    background: linear-gradient(transparent, rgba(0,0,0,.75)); opacity: 0; }
+.mv-tile.focused .mv-name { opacity: 1; }
+.mv-state { position: absolute; left: 0; right: 0; top: 45%; text-align: center; font-size: 26px; color: #f2efe8; text-shadow: 0 2px 6px #000; }
+.mv-hint { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 20px; color: rgba(255,255,255,.55); text-shadow: 0 1px 4px #000; pointer-events: none; }
+.mv-pick { width: 1500px; }
+.mv-hint { animation: mvHint 7s forwards; } @keyframes mvHint { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
