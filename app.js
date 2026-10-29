@@ -4979,9 +4979,16 @@
     // Tasten verteilen
     // =====================================================================
 
+    var lastRepeatAt = 0;
     function onKeyDown(e) {
         var k = e.keyCode;
         if (k === 461) k = KEY.BACK;          // Zurück-Taste der LG-Fernbedienung
+        // Pfeiltaste gedrückt halten: höchstens alle 90 ms einen Schritt, sonst stauen sich die Tasten und es ruckelt
+        if (e.repeat && (k === KEY.UP || k === KEY.DOWN || k === KEY.LEFT || k === KEY.RIGHT)) {
+            var t = Date.now();
+            if (t - lastRepeatAt < 90) { if (e.preventDefault) e.preventDefault(); return; }
+            lastRepeatAt = t;
+        }
         var active = document.activeElement;
 
         // Eingabefeld mit Bildschirmtastatur
