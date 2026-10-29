@@ -577,7 +577,11 @@ body.touch .scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .search-section { font-size: 30px; color: #f4dc9e; font-weight: bold; margin: 26px 0 6px 24px; }
 
 /* ---------- Einstellungen ---------- */
-.settings { position: absolute; left: 260px; right: 260px; top: 150px; }
+.settings { position: absolute; left: 260px; right: 260px; top: 128px; bottom: 20px; overflow: hidden;
+    padding: 22px 8px 34px; box-sizing: border-box;
+    -webkit-mask-image: linear-gradient(transparent, #000 22px, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(transparent, #000 22px, #000 calc(100% - 28px), transparent); }
+body.touch .settings { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .set-row {
     display: flex; justify-content: space-between; align-items: center;
     background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.12);
