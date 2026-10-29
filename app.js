@@ -284,11 +284,67 @@
         if (key) node.setAttribute('data-key', key);
         if (zone) node.setAttribute('data-zone', zone);
         node._action = action;
-        node.addEventListener('click', function () {   // Maus/Touch beim Testen am PC
+        node.addEventListener('click', function () {   // Maus/Touch
+            if (node._longAt && Date.now() - node._longAt < 900) return;   // war ein langes Tippen
             Focus.set(node);
             if (node.tagName === 'INPUT') node.focus(); else if (action) action();
         });
+        // Langes Tippen mit dem Finger (Handy/Tablet)
+        node.addEventListener('contextmenu', function (ev) {
+            if (!node._onLong) return;
+            ev.preventDefault();
+            node._longAt = Date.now();
+            Focus.set(node);
+            node._onLong();
+        });
         return node;
+    }
+
+    /**
+     * Langes Drücken auf OK. Wird nur genutzt, wenn das Element eine Aktion für langes Drücken hat
+     * und die Fernbedienung das Loslassen meldet (sonst reagiert OK wie bisher sofort).
+     */
+    var LongPress = {
+        upSeen: false, node: null, timer: null, fired: false,
+        start: function (node) {
+            var self = this;
+            this.cancel();
+            this.node = node;
+            this.fired = false;
+            this.timer = setTimeout(function () {
+                self.timer = null;
+                if (self.node && Focus.cur === self.node && self.node._onLong) { self.fired = true; self.node._onLong(); }
+            }, 650);
+        },
+        up: function () {
+            this.upSeen = true;
+            var n = this.node;
+            this.node = null;
+            if (!n) return;
+            if (this.timer) {
+                clearTimeout(this.timer);
+                this.timer = null;
+                if (!this.fired && Focus.cur === n) Focus.activate();
+            }
+        },
+        cancel: function () { if (this.timer) clearTimeout(this.timer); this.timer = null; this.node = null; }
+    };
+
+    /** Favorit umschalten und den Stern am Element aktualisieren */
+    function favToggleNode(node, type, item) {
+        var on = Favs.toggle(type, item.id);
+        var img = $('.img', node);
+        if (img) {
+            var st = $('.fav', node);
+            if (on && !st) img.appendChild(h('div', 'fav', '★'));
+            if (!on && st) st.parentNode.removeChild(st);
+        } else {
+            var s2 = $('.star', node);
+            if (on && !s2) node.appendChild(h('div', 'star', '★'));
+            if (!on && s2) s2.parentNode.removeChild(s2);
+        }
+        toast(on ? item.name + ' zu Favoriten hinzugefügt' : item.name + ' aus Favoriten entfernt');
+        return on;
     }
 
     /** Lange Listen nur stückweise aufbauen, damit der Fernseher flüssig bleibt */
@@ -1043,6 +1099,7 @@
 
             if (this.android) {
                 var fr = this.fractions(rect);
+                this.applyAspect(rect ? 'fit' : this.aspect());
                 AB.open(url, fr.x, fr.y, fr.w, fr.h);
             } else if (this.tizen) {
                 var av = this.av;
@@ -1060,7 +1117,7 @@
                     });
                     try { av.setStreamingProperty('USER_AGENT', 'ImperumTV/1.0 (SmartTV)'); } catch (e1) { /* nicht überall verfügbar */ }
                     this.setRect(rect);
-                    try { av.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX'); } catch (e2) { /* egal */ }
+                    this.applyAspect(rect ? 'fit' : this.aspect());
                     av.prepareAsync(function () {
                         try { av.setSilentSubtitle(true); } catch (e3) { /* egal */ }
                         av.play();
@@ -1075,6 +1132,7 @@
             } else {
                 var v = this.video;
                 this.setRect(rect);
+                this.applyAspect(rect ? 'fit' : this.aspect());
                 v.src = url;
                 var p = v.play();
                 if (p && p.catch) p.catch(function () { /* Autoplay im Browser blockiert */ });
@@ -1154,6 +1212,26 @@
             else if (this.tizen) { try { d = this.av.getDuration() / 1000; } catch (e) { d = 0; } }
             else d = this.video.duration;
             return isFinite(d) && d > 0 && d < 86400 ? d : 0;
+        },
+
+        /** Bildformat: 'fit' = ganzes Bild, 'zoom' = Bildschirm füllen, 'fill' = strecken */
+        ASPECTS: [
+            { id: 'fit', name: 'Original (ganzes Bild)' },
+            { id: 'zoom', name: 'Bildschirm füllen (Zoom)' },
+            { id: 'fill', name: 'Strecken' }
+        ],
+        aspect: function () { return Storage.get('aspect', 'fit'); },
+        setAspect: function (mode) { Storage.set('aspect', mode); this.applyAspect(mode); },
+        applyAspect: function (mode) {
+            if (this.android) { if (AB.setResize) AB.setResize(mode); return; }
+            if (this.tizen) {
+                var m = mode === 'zoom' ? 'PLAYER_DISPLAY_MODE_CROPPED_FULL' : mode === 'fill' ? 'PLAYER_DISPLAY_MODE_FULL_SCREEN' : 'PLAYER_DISPLAY_MODE_LETTER_BOX';
+                try { this.av.setDisplayMethod(m); } catch (e) {
+                    try { this.av.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX'); } catch (e2) { /* egal */ }
+                }
+                return;
+            }
+            if (this.video) this.video.style.objectFit = mode === 'zoom' ? 'cover' : mode === 'fill' ? 'fill' : 'contain';
         },
 
         /** Zu einer festen Stelle springen (Sekunden) */
@@ -1435,6 +1513,8 @@
         if (e && !e.next) img.appendChild(progressNode(Resume.part(e)));
         node.appendChild(img);
         node.appendChild(h('div', 'title', item.name));
+        var favType = item.type === 'live' ? 'live' : item.type === 'movie' ? 'movie' : item.type === 'series' ? 'series' : null;
+        if (favType) node._onLong = function () { favToggleNode(node, favType, item); };
         if (e && item.type === 'series') {
             node.classList.add('has-sub');
             node.appendChild(h('div', 'sub', 'S' + e.season + ' F' + (e.num || '?') + ' · ' + Resume.leftText(e)));
@@ -1958,6 +2038,7 @@
     function applySearch(q, firstSelector) {
         this.query = q;
         this.focusKey = null;
+        this.savedScroll = 0;
         Nav.show(this);
         var first = q ? $(firstSelector) : null;
         var target = first || Focus.byKey('cat-search');
@@ -1980,7 +2061,7 @@
     LiveScreen.prototype.render = function (root) {
         var self = this;
         document.body.classList.add('preview-mode');
-        root.appendChild(topbar('Live TV', 'OK: Vorschau · nochmal OK: Vollbild · Gelb: Favorit'));
+        root.appendChild(topbar('Live TV', 'OK: Vorschau · nochmal OK: Vollbild · OK lang: Favorit'));
 
         var columns = h('div', 'columns');
         var cats = this.categories();
@@ -2012,6 +2093,7 @@
             row.appendChild(h('div', 'name', ch.name));
             if (Favs.has('live', ch.id)) row.appendChild(h('div', 'star', '★'));
             row._channel = ch;
+            row._onLong = function () { favToggleNode(row, 'live', ch); };
             return focusable(row, 'ch-' + ch.id, function () { self.choose(ch, i); }, 'list');
         }, 120);
 
@@ -2162,7 +2244,7 @@
         var self = this;
         var title = this.kind === 'movies' ? 'Filme' : 'Serien';
         var loaded = this.kind === 'movies' ? Data.moviesLoaded : Data.seriesLoaded;
-        root.appendChild(topbar(title, 'OK: Öffnen · Gelb: Favorit'));
+        root.appendChild(topbar(title, 'OK: Öffnen · OK lang: Favorit'));
         if (!loaded) {
             loader(true, title + ' werden geladen …');
             (this.kind === 'movies' ? Data.loadMovies() : Data.loadSeries()).then(function () {
@@ -2180,6 +2262,7 @@
             self.catIndex = i;
             self.query = '';
             self.focusKey = null;
+            self.savedScroll = 0;
             Nav.show(self);
             var first = $('.poster');
             if (first) Focus.set(first);
@@ -2201,14 +2284,25 @@
                 : (this.categories()[this.catIndex] === this.yearLabel() ? 'Dein Anbieter hat keine Filme mit dem Jahr ' + new Date().getFullYear() + ' gekennzeichnet.' : 'Nichts gefunden.');
             grid.appendChild(h('div', 'empty-note', note));
         }
-        batchRender(grid, list, function (item) {
+        var batch = batchRender(grid, list, function (item) {
             var node = posterNode(item, fav + '-', Favs.has(fav, item.id), function () {
                 Nav.push(self.kind === 'movies' ? new MovieDetailScreen(item) : new SeriesDetailScreen(item));
             });
             node._item = item;
             return node;
         }, 60);
+        // Zurück aus einem Film: genau dort weitermachen, wo man war
+        if (this.focusKey) {
+            for (var i = 0; i < list.length; i++) {
+                if (fav + '-' + list[i].id === this.focusKey) { batch.ensure(i); break; }
+            }
+        }
+        if (this.savedScroll) scroll.scrollTop = this.savedScroll;
+        this.scrollBox = scroll;
         if (!this.focusKey) this.focusKey = list.length ? fav + '-' + list[0].id : 'cat-0';
+    };
+    MoviesScreen.prototype.hide = function () {
+        this.savedScroll = this.scrollBox ? this.scrollBox.scrollTop : 0;
     };
     MoviesScreen.prototype.onKey = function (k) {
         if (k === KEY.YELLOW && Focus.cur && Focus.cur._item) {
@@ -2230,7 +2324,7 @@
     function FavoritesScreen() { }
     FavoritesScreen.prototype.render = function (root) {
         var self = this;
-        root.appendChild(topbar('Favoriten', 'OK: Öffnen · Gelb: Entfernen'));
+        root.appendChild(topbar('Favoriten', 'OK: Öffnen · OK lang: Entfernen'));
         var col = h('div', 'col col-grid');
         col.style.left = '0';
         col.style.top = '110px';
@@ -2257,9 +2351,14 @@
                 else Nav.push(new SeriesDetailScreen(item));
             });
             node._item = item; node._type = type;
+            node._onLong = function () {
+                Favs.toggle(type, item.id);
+                toast(item.name + ' aus Favoriten entfernt');
+                self.focusKey = null;
+                Nav.show(self);
+            };
             grid.appendChild(node);
         });
-        void self;
     };
     FavoritesScreen.prototype.onKey = function (k) {
         if (k === KEY.YELLOW && Focus.cur && Focus.cur._item) {
@@ -3524,6 +3623,7 @@
         if (this.kind !== 'live' && this.resumable() && VodPlayer.available()) {
             btn('pl-switch', '⇄ Player', function () { self.switchPlayer(); });
         }
+        btn('pl-aspect', '▭ Format', function () { self.aspectMenu(); });
         btn('pl-audio', '♪ Sprache', function () { self.trackMenu('audio'); });
         btn('pl-sub', 'CC Untertitel', function () { self.trackMenu('text'); });
         if (this.kind !== 'episode' && it.type !== 'recording') {
@@ -3541,6 +3641,23 @@
         var target = Focus.byKey(focusedKey) || Focus.byKey('pl-play');
         if (target) Focus.set(target);
         this.updateBar();
+    };
+    /** Bildformat wählen (gilt für Live TV, Filme und Serien) */
+    PlayerScreen.prototype.aspectMenu = function () {
+        var self = this, cur = Player.aspect();
+        clearTimeout(this.hideTimer);
+        var buttons = Player.ASPECTS.map(function (a) {
+            return { label: (a.id === cur ? '✓  ' : '      ') + a.name, primary: a.id === cur, action: function () {
+                Player.setAspect(a.id);
+                toast('Bildformat: ' + a.name);
+                self.showOverlay();
+            } };
+        });
+        buttons.push({ label: 'Schließen', action: function () { self.showOverlay(); } });
+        Modal.open('▭ Bildformat', 'Die Wahl gilt für alle Sender, Filme und Serien.', buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+        var sel = Modal.node && Modal.node.querySelector('.button.primary');
+        if (sel) Focus.set(sel);
     };
     /** Auswahlliste für Sprache (audio) oder Untertitel (text) */
     PlayerScreen.prototype.trackMenu = function (kind) {
@@ -3726,6 +3843,13 @@
             return;
         }
 
+        // OK auf einem Sender/Film/Serie: kurz = öffnen, lang = Favorit
+        if (k === KEY.ENTER && Focus.cur && Focus.cur._onLong && !(Nav.top() instanceof PlayerScreen)) {
+            e.preventDefault();
+            if (e.repeat) return;                       // Taste wird gehalten
+            if (LongPress.upSeen) { LongPress.start(Focus.cur); return; }
+        }
+
         var top = Nav.top();
         if (top && top.onKey && top.onKey(k, e)) { e.preventDefault(); return; }
 
@@ -3757,6 +3881,7 @@
         Favs.load();
         Player.init();
         document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', function (e) { if (e.keyCode === KEY.ENTER) LongPress.up(); });
 
         // App in den Hintergrund: Video anhalten
         function lifecycle(hidden) {
@@ -3776,9 +3901,10 @@
         window.__androidLifecycle = function (state) { lifecycle(state === 'hidden'); };
 
         // Tasten, die die Android-App weiterreicht (Zurück, Medientasten, Farbtasten)
-        window.__androidKey = function (code) {
-            onKeyDown({ keyCode: code, preventDefault: function () { } });
+        window.__androidKey = function (code, repeat) {
+            onKeyDown({ keyCode: code, repeat: !!repeat, preventDefault: function () { } });
         };
+        window.__androidKeyUp = function (code) { if (code === KEY.ENTER) LongPress.up(); };
 
         // Bedienung per Finger (Handy/Tablet): Listen dürfen wischen
         if ('ontouchstart' in window) document.body.classList.add('touch');

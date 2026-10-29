@@ -672,3 +672,7 @@ body.touch .scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .detail .body.with-plot .episodes { top: 400px; }
 .modal-list .modal-buttons { max-height: 640px; overflow: hidden; position: relative; padding: 4px 0; }
 .modal-list .modal-box { top: 50%; }
+
+/* Langes Tippen soll keinen Text markieren */
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input { -webkit-user-select: text; user-select: text; }
