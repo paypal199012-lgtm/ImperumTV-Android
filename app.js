@@ -119,6 +119,13 @@
             }
             this.fill.style.width = Math.max(4, Math.round((i + 0.5) / this.steps.length * 100)) + '%';
         },
+        /** Balken auf einen festen Wert (0–100) setzen, z. B. beim Update */
+        progress: function (pct, text) {
+            if (!this.built) this.build();
+            this.bar.classList.add('det');
+            this.fill.style.width = Math.max(2, Math.min(100, pct)) + '%';
+            if (text) $('#loader-text').textContent = text;
+        },
         /** Zum Schluss kurz „✓ Fertig“ zeigen, dann schließen */
         done: function (text, then, ms) {
             var self = this;
@@ -746,6 +753,8 @@
         key: 'sb_publishable_LZau0nT_CfDUYqrzlQfM2Q_61r7g-K3',
         // Website, auf der man Wiedergabelisten einträgt und das Gerät aktiviert (Cloudflare)
         website: 'https://holy-mode-e130.imperumtv.workers.dev/',
+        // Hier baut GitHub die Android-App; die App sucht dort nach Updates
+        updateRepo: 'paypal199012-lgtm/ImperumTV-Android',
         // Wird nur angezeigt, der echte Preis steht in der Stripe-Funktion
         price: '9,99 €'
     };
@@ -1770,6 +1779,7 @@
         loginWithSteps(acc, 'Verbinde mit „' + p.name + '“ …', function () {
             Storage.set('playlistId', p.id);
             Nav.replace(new HomeScreen());
+            Updater.autoCheck();
         }, function (e) {
             Api.acc = previous;
             toast(e.message || String(e), 8000);
@@ -1995,6 +2005,81 @@
         changed();
         Modal.openBox(box, Keyboard.first(kb));
     }
+
+    // =====================================================================
+    // Updates aus der App heraus (nur Android): neue APK von GitHub laden und installieren
+    // =====================================================================
+
+    var Updater = {
+        latest: null,
+        checked: false,
+        /** Einmal pro App-Start, kurz nachdem die Startseite da ist */
+        autoCheck: function () {
+            var self = this;
+            if (this.checked || !this.available()) return;
+            this.checked = true;
+            setTimeout(function () { self.check(false); }, 4000);
+        },
+        available: function () { return !!(AB && AB.downloadUpdate && AB.appVersion); },
+        current: function () { try { return AB.appVersion() || 0; } catch (e) { return 0; } },
+        versionText: function (n) { return '1.0.' + n; },
+        /** Bei GitHub nachsehen. manual = vom Benutzer ausgelöst (dann auch „schon aktuell“ melden) */
+        check: function (manual) {
+            var self = this;
+            if (!this.available()) return;
+            if (manual) loader(true, 'Suche nach Updates …');
+            fetch('https://api.github.com/repos/' + REMOTE.updateRepo + '/releases/latest', { cache: 'no-store' }).then(function (res) {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res.json();
+            }).then(function (rel) {
+                if (manual) loader(false);
+                var m = /(\d+)\s*$/.exec(String(rel.tag_name || ''));
+                var latest = m ? parseInt(m[1], 10) : 0;
+                var asset = (rel.assets || []).filter(function (a) { return /\.apk$/i.test(a.name || ''); })[0];
+                var cur = self.current();
+                if (!asset || !latest || latest <= cur) {
+                    if (manual) toast('Du hast schon die neueste Version (' + self.versionText(cur) + ').');
+                    return;
+                }
+                self.latest = { version: latest, url: asset.browser_download_url, size: asset.size || 0 };
+                // Beim automatischen Prüfen nicht stören, wenn gerade etwas läuft
+                if (!manual && (Modal.node || Nav.top() instanceof PlayerScreen)) return;
+                var mb = asset.size ? ' (' + Math.round(asset.size / 1e6) + ' MB)' : '';
+                Modal.open('Update verfügbar', 'Version ' + self.versionText(latest) + ' ist da' + mb + '. Du hast ' + self.versionText(cur) + '.', [
+                    { label: 'Jetzt aktualisieren', primary: true, action: function () { self.install(); } },
+                    { label: 'Später' }
+                ]);
+            }, function () {
+                if (manual) { loader(false); toast('GitHub ist gerade nicht erreichbar. Versuche es später noch einmal.', 5000); }
+            });
+        },
+        install: function () {
+            var self = this;
+            if (!this.latest) return;
+            if (AB.canInstall && !AB.canInstall()) {
+                Modal.open('Installation erlauben', 'Damit ImperumTV sich selbst aktualisieren darf, erlaube einmal „Apps aus dieser Quelle installieren“ für ImperumTV. ' +
+                    'Fire TV: Einstellungen → Mein Fire TV → Entwickleroptionen → Apps unbekannter Herkunft → ImperumTV: AN.', [
+                    { label: 'Einstellungen öffnen', primary: true, action: function () { AB.openInstallSettings(); } },
+                    { label: 'Trotzdem versuchen', action: function () { self.download(); } },
+                    { label: 'Abbrechen' }
+                ]);
+                return;
+            }
+            this.download();
+        },
+        download: function () {
+            Loader.show('Update wird geladen …');
+            Loader.progress(2, 'Update wird geladen … 0 %');
+            AB.downloadUpdate(this.latest.url);
+        }
+    };
+    window.__androidUpdate = function (state, pct, msg) {
+        if (state === 'progress') { Loader.progress(pct, 'Update wird geladen … ' + pct + ' %'); return; }
+        Loader.hide();
+        if (state === 'installing') toast('Tippe jetzt auf „Installieren“. Deine Listen und Einstellungen bleiben erhalten.', 8000);
+        else if (state === 'nosettings') toast('Bitte in den Einstellungen des Geräts „Apps unbekannter Herkunft“ für ImperumTV erlauben.', 8000);
+        else toast('Update fehlgeschlagen' + (msg ? ': ' + msg : '') + '. Alternativ: ' + REMOTE.website.replace(/^https?:\/\//, '') + 'apk', 9000);
+    };
 
     // =====================================================================
     // Kindersicherung: PIN schützt Erwachsenen- und ausgewählte Kategorien.
@@ -3697,6 +3782,9 @@
                 Parental.ask('PIN eingeben', function () { Nav.push(new ParentalScreen()); }, true);
             }
         });
+        if (Updater.available()) {
+            row('update', 'App-Version ' + Updater.versionText(Updater.current()), 'Nach Updates suchen', function () { Updater.check(true); });
+        }
         row('lists', 'Wiedergabelisten', 'Liste wechseln oder neue hinzufügen', function () { Nav.push(new PlaylistsScreen()); });
         row('account', 'Konto', License.activated() ? 'Aktiviert (unbegrenzt)' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
         row('device', 'Gerät', 'MAC ' + Device.macText() + '  ·  Schlüssel ' + Device.key, function () { Nav.push(new PlaylistsScreen()); });
@@ -4282,6 +4370,7 @@
         function start(acc) {
             loginWithSteps(acc, 'ImperumTV wird gestartet …', function () {
                 Nav.replace(new HomeScreen());
+                Updater.autoCheck();
             }, function (e) {
                 Nav.replace(new PlaylistsScreen(e.message || String(e)));
             });
@@ -4320,13 +4409,14 @@
         if (!acc) { Nav.replace(new PlaylistsScreen()); return; }
         loginWithSteps(acc, 'Anmelden und Sender laden …', function () {
             Nav.replace(new HomeScreen());
+            Updater.autoCheck();
         }, function (e) {
             Nav.replace(new PlaylistsScreen(e.message || String(e)));
         });
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Resume: Resume, Parental: Parental,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();

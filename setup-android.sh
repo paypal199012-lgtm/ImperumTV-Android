@@ -23,6 +23,15 @@ cp Recorder.kt "$OUT/app/src/main/java/tv/imperum/app/Recorder.kt"
 # Bilder in der richtigen Auflösung, damit sie auf dem Fernseher scharf und mittig sind
 # (Fire TV nimmt je nach Modell eine andere Größe, deshalb liegt das Logo in allen Ordnern)
 RES="$OUT/app/src/main/res"
+# Freigabe-Ordner für Updates aus der App
+mkdir -p "$RES/xml"
+cat > "$RES/xml/update_paths.xml" <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="updates" path="updates/" />
+    <external-cache-path name="updates_ext" path="updates/" />
+</paths>
+XML
 for d in drawable drawable-mdpi drawable-hdpi drawable-xhdpi; do cp banner.png "$RES/$d/banner.png"; done
 for d in drawable-xxhdpi drawable-xxxhdpi; do cp banner-2x.png "$RES/$d/banner.png"; done
 for d in drawable drawable-mdpi drawable-hdpi drawable-xhdpi drawable-xxhdpi drawable-xxxhdpi; do cp ic_launcher.png "$RES/$d/ic_launcher.png"; done

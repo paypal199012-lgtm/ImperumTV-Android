@@ -25,6 +25,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.core.content.FileProvider
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
@@ -40,6 +41,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.Callable
@@ -285,6 +290,94 @@ class MainActivity : Activity() {
         val dur = num("extra_duration", "duration")
         val done = data?.getStringExtra("end_by") == "playback_completion"
         webView.evaluateJavascript("window.__androidExternal && window.__androidExternal($pos, $dur, $done)", null)
+    }
+
+    // ---------- Update aus der App heraus ----------
+
+    private fun emitUpdate(state: String, pct: Int, msg: String = "") {
+        handler.post {
+            webView.evaluateJavascript(
+                "window.__androidUpdate && window.__androidUpdate(${JSONObject.quote(state)}, $pct, ${JSONObject.quote(msg)})", null
+            )
+        }
+    }
+
+    /** Ordner für die heruntergeladene APK (ab Android 7 über FileProvider, davor muss der Installer sie lesen können) */
+    private fun updateDir(): File {
+        val base = if (Build.VERSION.SDK_INT >= 24) cacheDir else (externalCacheDir ?: cacheDir)
+        return File(base, "updates").apply { mkdirs() }
+    }
+
+    private fun installApk(file: File) {
+        try {
+            val uri = if (Build.VERSION.SDK_INT >= 24) {
+                FileProvider.getUriForFile(this, "$packageName.updates", file)
+            } else {
+                file.setReadable(true, false)
+                Uri.fromFile(file)
+            }
+            val intent = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            emitUpdate("installing", 100)
+        } catch (e: Exception) {
+            emitUpdate("error", 0, e.message ?: "Installation ließ sich nicht starten")
+        }
+    }
+
+    private fun downloadApk(address: String) {
+        Thread {
+            try {
+                val file = File(updateDir(), "ImperumTV.apk")
+                if (file.exists()) file.delete()
+                var conn = URL(address).openConnection() as HttpURLConnection
+                var redirects = 0
+                while (true) {
+                    conn.instanceFollowRedirects = false
+                    conn.connectTimeout = 15_000
+                    conn.readTimeout = 30_000
+                    conn.setRequestProperty("User-Agent", "ImperumTV-Update")
+                    val code = conn.responseCode
+                    if (code in 300..399 && redirects < 8) {
+                        val location = conn.getHeaderField("Location") ?: throw Exception("Weiterleitung ohne Ziel")
+                        val next = URL(conn.url, location)
+                        conn.disconnect()
+                        conn = next.openConnection() as HttpURLConnection
+                        redirects++
+                        continue
+                    }
+                    if (code != 200) throw Exception("Server antwortet mit HTTP $code")
+                    break
+                }
+                val total = conn.getHeaderField("Content-Length")?.toLongOrNull() ?: -1L
+                var done = 0L
+                var last = -1
+                conn.inputStream.use { input ->
+                    FileOutputStream(file).use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            if (total > 0) {
+                                val pct = (done * 100 / total).toInt()
+                                if (pct != last) {
+                                    last = pct
+                                    emitUpdate("progress", pct)
+                                }
+                            }
+                        }
+                    }
+                }
+                conn.disconnect()
+                if (done < 100_000) throw Exception("Die Datei ist unvollständig")
+                handler.post { installApk(file) }
+            } catch (e: Exception) {
+                emitUpdate("error", 0, e.message ?: "Download fehlgeschlagen")
+            }
+        }.start()
     }
 
     override fun onDestroy() {
@@ -630,6 +723,44 @@ class MainActivity : Activity() {
                     webView.evaluateJavascript("window.__androidExternal && window.__androidExternal(-1, -1, false, true)", null)
                 }
             }
+        }
+
+        /** Versionsnummer der installierten App (= Nummer des GitHub-Builds) */
+        @JavascriptInterface
+        fun appVersion(): Int {
+            return try {
+                val info = packageManager.getPackageInfo(packageName, 0)
+                if (Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
+            } catch (e: Exception) {
+                0
+            }
+        }
+
+        /** Darf die App Updates installieren? (ab Android 8 muss man das einmal erlauben) */
+        @JavascriptInterface
+        fun canInstall(): Boolean =
+            Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()
+
+        @JavascriptInterface
+        fun openInstallSettings() {
+            handler.post {
+                try {
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        startActivity(
+                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                } catch (e: Exception) {
+                    emitUpdate("nosettings", 0)
+                }
+            }
+        }
+
+        /** Neue APK laden und den Installer öffnen. Fortschritt kommt über window.__androidUpdate */
+        @JavascriptInterface
+        fun downloadUpdate(url: String) {
+            downloadApk(url)
         }
 
         /** Website im Browser öffnen (Handy/Tablet) */
