@@ -522,6 +522,67 @@
         };
     }
 
+    /**
+     * Poster-Raster, das nur die sichtbaren Reihen (plus Puffer) wirklich anlegt.
+     * Egal wie lang die Liste ist: es gibt immer nur gut 50 Poster auf der Seite – Scrollen bleibt flüssig.
+     * Maße passen zu .poster in style.css (212 × 376 px, Abstand 14 px, Reihe 400 px).
+     */
+    function virtualGrid(scroll, grid, items, make) {
+        var COLW = 226, ROWH = 400, PADT = 10, PADL = 24, PADB = 40, BUF = 2;
+        grid.classList.add('vgrid');
+        var cols = Math.max(1, Math.floor(((scroll.clientWidth || 1500) - PADL) / COLW));
+        var rows = Math.ceil(items.length / cols);
+        grid.style.height = (PADT + rows * ROWH + PADB) + 'px';
+        var nodes = {}, first = -1, last = -1, queued = false;
+
+        function place(n, i) {
+            n.style.left = (PADL + (i % cols) * COLW) + 'px';
+            n.style.top = (PADT + 14 + Math.floor(i / cols) * ROWH) + 'px';
+        }
+        function update(force) {
+            if (!items.length) return;
+            var top = scroll.scrollTop, hgt = scroll.clientHeight || 970;
+            var r0 = Math.max(0, Math.floor((top - PADT) / ROWH) - BUF);
+            var r1 = Math.min(rows - 1, Math.floor((top + hgt - PADT) / ROWH) + BUF);
+            var a = r0 * cols, b = Math.min(items.length - 1, (r1 + 1) * cols - 1);
+            if (!force && a === first && b === last) return;
+            for (var k in nodes) {
+                if (!nodes.hasOwnProperty(k)) continue;
+                var idx = +k;
+                if ((idx < a || idx > b) && nodes[k] !== Focus.cur) { grid.removeChild(nodes[k]); delete nodes[k]; }
+            }
+            var frag = document.createDocumentFragment();
+            for (var i = a; i <= b; i++) {
+                if (nodes[i]) continue;
+                var n = make(items[i], i);
+                n._vIndex = i;
+                place(n, i);
+                nodes[i] = n;
+                frag.appendChild(n);
+            }
+            grid.appendChild(frag);
+            first = a; last = b;
+        }
+        scroll.addEventListener('scroll', function () {
+            if (queued) return;
+            queued = true;
+            (window.requestAnimationFrame || setTimeout)(function () { queued = false; update(); });
+        });
+        grid._vgUpdate = function () { update(); };
+        update(true);
+        return {
+            update: function () { update(); },
+            /** Eintrag i sichtbar machen (z. B. nach „Zurück“) */
+            ensure: function (i) {
+                if (i < 0 || i >= items.length) return;
+                var rowTop = PADT + Math.floor(i / cols) * ROWH;
+                var hgt = scroll.clientHeight || 970;
+                if (rowTop < scroll.scrollTop || rowTop + ROWH > scroll.scrollTop + hgt) scroll.scrollTop = Math.max(0, rowTop - ROWH);
+                update();
+            }
+        };
+    }
+
     // =====================================================================
     // Einstellungen und Favoriten
     // =====================================================================
@@ -1768,7 +1829,14 @@
                     if (!any) break;
                 }
                 box.scrollTop = saved[i];
+                Nav.syncVirtual(box);
             }
+        },
+
+        /** Virtuelles Raster in diesem Kasten sofort an die Scroll-Position anpassen */
+        syncVirtual: function (box) {
+            var g = box.querySelector('.vgrid');
+            if (g && g._vgUpdate) g._vgUpdate();
         },
 
         /** Gemerkten Eintrag suchen, notfalls weitere Stapel nachladen */
@@ -1815,7 +1883,7 @@
             app.appendChild(frag);
             LazyImg.scan(app);
             var boxes = this.boxes();
-            if (saved) for (var i = 0; i < boxes.length && i < saved.length; i++) boxes[i].scrollTop = saved[i];
+            if (saved) for (var i = 0; i < boxes.length && i < saved.length; i++) { boxes[i].scrollTop = saved[i]; this.syncVirtual(boxes[i]); }
             if (screen.revived) screen.revived();
             var target = Focus.byKey(screen.focusKey);
             if (target) Focus.set(target); else Focus.first();
@@ -1855,7 +1923,7 @@
                 if (Nav.top() !== screen || Nav.userAt > since) return;   // Nutzer bedient schon wieder: nicht dazwischenfunken
                 var boxes = Nav.boxes();
                 for (var i = 0; i < boxes.length && i < saved.length; i++) {
-                    if (Math.abs(boxes[i].scrollTop - saved[i]) > 2) boxes[i].scrollTop = saved[i];
+                    if (Math.abs(boxes[i].scrollTop - saved[i]) > 2) { boxes[i].scrollTop = saved[i]; Nav.syncVirtual(boxes[i]); }
                 }
                 // Mit Fernbedienung muss der Fokus sichtbar sein; mit Finger/Maus zählt die Position
                 if (!touch && Focus.cur && document.body.contains(Focus.cur)) ensureVisible(Focus.cur);
@@ -3206,21 +3274,22 @@
                 : (this.categories()[this.catIndex] === this.yearLabel() ? 'Dein Anbieter hat keine Filme mit dem Jahr ' + new Date().getFullYear() + ' gekennzeichnet.' : 'Nichts gefunden.');
             grid.appendChild(h('div', 'empty-note', note));
         }
-        var batch = batchRender(grid, list, function (item) {
+        if (this.savedScroll) scroll.scrollTop = this.savedScroll;
+        var vg = virtualGrid(scroll, grid, list, function (item) {
             var node = posterNode(item, fav + '-', Favs.has(fav, item.id), function () {
                 self.opened = item;
                 Nav.push(self.kind === 'movies' ? new MovieDetailScreen(item) : new SeriesDetailScreen(item));
             });
             node._item = item;
             return node;
-        }, 60);
+        });
+        if (this.savedScroll) { scroll.scrollTop = this.savedScroll; vg.update(); }
         // Zurück aus einem Film: genau dort weitermachen, wo man war
         if (this.focusKey) {
             for (var i = 0; i < list.length; i++) {
-                if (fav + '-' + list[i].id === this.focusKey) { batch.ensure(i); break; }
+                if (fav + '-' + list[i].id === this.focusKey) { vg.ensure(i); break; }
             }
         }
-        if (this.savedScroll) scroll.scrollTop = this.savedScroll;
         this.scrollBox = scroll;
         if (!this.focusKey) this.focusKey = list.length ? fav + '-' + list[0].id : 'cat-0';
     };

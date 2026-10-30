@@ -806,3 +806,7 @@ input { -webkit-user-select: text; user-select: text; }
 .col-list .scroll { background: #101216; }
 /* Markierung ohne weichen Schein (der Schein kostet auf schwachen Geräten viel Rechenzeit) */
 .poster.focused, .row.focused, .erow.focused, .episode.focused { box-shadow: 0 0 0 4px #f4dc9e !important; }
+
+/* Virtuelles Poster-Raster: Poster liegen fest an ihrer Stelle, nur die sichtbaren existieren */
+.grid.vgrid { position: relative; box-sizing: border-box; }
+.grid.vgrid .poster { position: absolute; margin: 0; }
