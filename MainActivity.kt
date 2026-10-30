@@ -41,6 +41,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioCapabilities
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -90,8 +93,37 @@ class MainActivity : Activity() {
     private var subtitleIndex = -1
     private var readySent = false
 
+    // Standbild-Erkennung: läuft der Sender, aber es kommen keine neuen Bilder, wird neu geladen (max. 2× je Sender)
+    private var lastFrames = -1
+    private var frozenSince = 0L
+    private var freezeFixes = 0
+    private var audioWarned = false
+
+    private fun checkFrozen() {
+        if (!player.isPlaying || player.videoFormat == null) { frozenSince = System.currentTimeMillis(); return }
+        val counters = player.videoDecoderCounters ?: return
+        counters.ensureUpdated()
+        val n = counters.renderedOutputBufferCount
+        val now = System.currentTimeMillis()
+        if (n != lastFrames) { lastFrames = n; frozenSince = now; return }
+        if (now - frozenSince > 6_000 && freezeFixes < 2) {
+            freezeFixes++
+            frozenSince = now
+            if (player.isCurrentMediaItemLive) player.seekToDefaultPosition()
+            player.prepare()
+            player.playWhenReady = true
+            emit("notice", "Bild hing – Sender wird neu geladen …")
+        }
+    }
+
+    /** Ist der FFmpeg-Ton-Decoder in dieser Version eingebaut? */
+    private fun ffmpegAvailable(): Boolean = try {
+        Class.forName("androidx.media3.decoder.ffmpeg.FfmpegLibrary").getMethod("isAvailable").invoke(null) as Boolean
+    } catch (e: Throwable) { false }
+
     private val ticker = object : Runnable {
         override fun run() {
+            try { checkFrozen() } catch (e: Throwable) { }
             updateCache()
             if (player.playbackState == Player.STATE_READY && player.isPlaying) {
                 emit("time", cachedPosition)
@@ -125,9 +157,21 @@ class MainActivity : Activity() {
         httpFactory = http
         // Ton, den das Gerät selbst nicht kann (MP2 vieler TV-Sender, Dolby, DTS …): FFmpeg springt ein, falls eingebaut.
         // Bild: klappt der eingebaute Decoder nicht, nimmt der Player den nächsten.
-        val renderers = DefaultRenderersFactory(this)
+        // Ton immer selbst entschlüsseln und als PCM ausgeben: kein „Durchreichen“ von Dolby an den Fernseher
+        // (kann der Fernseher das Format nicht, bleibt es sonst stumm – ohne Fehlermeldung).
+        // FFmpeg zuerst (MP2, Dolby, DTS …), sonst der Decoder des Geräts.
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink? {
+                @Suppress("DEPRECATION")
+                return DefaultAudioSink.Builder(context)
+                    .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .build()
+            }
+        }
             .setEnableDecoderFallback(true)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         // RAW-/Sat-Sender: Bild auch ohne „IDR“-Startbild beginnen, Bildgrenzen selbst erkennen
         val extractors = DefaultExtractorsFactory()
             .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
@@ -149,6 +193,17 @@ class MainActivity : Activity() {
                     else -> {}
                 }
                 updateCache()
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                if (audioWarned) return
+                val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+                if (audio.isEmpty()) return
+                val anyOk = audio.any { g -> (0 until g.length).any { g.isTrackSupported(it) } }
+                if (anyOk) return
+                audioWarned = true
+                val names = audio.map { codecName(it.getTrackFormat(0).sampleMimeType ?: "") }.distinct().joinToString(", ")
+                emit("notice", "Der Ton ($names) wird auf diesem Gerät nicht unterstützt" + (if (ffmpegAvailable()) "." else " (FFmpeg-Ton fehlt in dieser Version)."))
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -960,7 +1015,8 @@ class MainActivity : Activity() {
 
         /** Gerätename für Fehlerberichte */
         @JavascriptInterface
-        fun deviceName(): String = Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE
+        fun deviceName(): String = Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE +
+            (if (ffmpegAvailable()) " · FFmpeg-Ton" else " · ohne FFmpeg")
 
         /** Infos zum gespeicherten Programm: {"at":…, "account":"…", "channels":…, "busy":true/false} */
         @JavascriptInterface
@@ -1014,6 +1070,10 @@ class MainActivity : Activity() {
                 subtitleIndex = -1
                 // Untertitel zunächst aus, Tonspur automatisch (Ton bei jedem Sender wieder an)
                 audioOffRetry = false
+                audioWarned = false
+                lastFrames = -1
+                freezeFixes = 0
+                frozenSince = System.currentTimeMillis()
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .clearOverrides()
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
