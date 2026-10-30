@@ -1424,10 +1424,12 @@
                 var me = this;
                 w.onmessage = function (e) {
                     var d = e.data;
-                    if (d.ready) { me.ready = true; me.dec = !!d.dec; return; }
+                    // Erst nach einer kleinen Probe-Auswertung gilt der Worker als zuverlässig
+                    if (d.ready) { me.dec = !!d.dec; w.postMessage({ id: -1, text: '[{"stream_id":"7","name":"Probe"}]', kind: 'live', cats: {}, chunk: 10 }); return; }
+                    if (d.id === -1) { if (d.end && d.total === 1) me.ready = true; return; }
                     var job = me.wait[d.id];
                     if (!job) return;
-                    if (d.part) { for (var i = 0; i < d.part.length; i++) job.list.push(d.part[i]); return; }
+                    if (d.part) { for (var i = 0; i < d.part.length; i++) job.list.push(d.part[i]); if (job.arm) job.arm(); return; }
                     delete me.wait[d.id];
                     clearTimeout(job.timer);
                     if (d.err) job.reject(new Error(d.err));
@@ -1456,9 +1458,7 @@
             catch (e2) { job.reject(e2); }
         },
         /** Kann der Worker rohe Bytes bekommen (spart das Umwandeln in Text hier)? */
-        wantsBytes: function () {
-            return !!(this.worker() && this.ready && this.dec && typeof ArrayBuffer !== 'undefined');
-        },
+        wantsBytes: function () { return false; },
         /** data: Text oder ArrayBuffer (nur wenn wantsBytes()) */
         run: function (data, kind, cats) {
             var me = this;
@@ -1466,7 +1466,7 @@
                 var isBuf = typeof data !== 'string';
                 var job = { text: isBuf ? null : data, kind: kind, cats: cats || {}, resolve: resolve, reject: reject, timer: null, list: [] };
                 var w = me.worker();
-                if (!w || (isBuf && !me.ready)) {
+                if (!w || !me.ready) {
                     if (isBuf) { try { job.text = new TextDecoder('utf-8').decode(new Uint8Array(data)); } catch (e) { job.text = null; } }
                     setTimeout(function () { me.local(job); }, 0);
                     return;
@@ -1474,7 +1474,15 @@
                 var id = ++me.seq;
                 me.wait[id] = job;
                 // Antwortet der Worker gar nicht, nach 90 s aufgeben bzw. hier weitermachen
-                job.timer = setTimeout(function () { if (me.wait[id]) { delete me.wait[id]; job.list = []; me.local(job); } }, 90000);
+                job.arm = function () {
+                    clearTimeout(job.timer);
+                    job.timer = setTimeout(function () {
+                        if (!me.wait[id]) return;
+                        delete me.wait[id]; job.list = []; me.local(job);
+                        me.broken();                           // hängender Worker: künftig ohne
+                    }, 25000);
+                };
+                job.arm();
                 try {
                     if (isBuf) w.postMessage({ id: id, buf: data, kind: kind, cats: job.cats, chunk: me.CHUNK }, [data]);
                     else w.postMessage({ id: id, text: data, kind: kind, cats: job.cats, chunk: me.CHUNK });
