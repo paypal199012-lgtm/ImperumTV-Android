@@ -74,6 +74,8 @@ class MainActivity : Activity() {
     private lateinit var playerView: PlayerView
     private lateinit var player: ExoPlayer
     private lateinit var httpFactory: DefaultHttpDataSource.Factory
+    /** Oberfläche schon aufgebaut? (Während der Fehlerbericht offen ist, noch nicht) */
+    private val uiReady: Boolean get() = ::webView.isInitialized && ::player.isInitialized
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -97,6 +99,14 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Absturz-Bericht: Fehler merken und beim nächsten Start anzeigen (zum Abfotografieren)
+        installCrashReporter()
+        val report = takeCrashReport()
+        // Gab es beim letzten Start einen Absturz: erst den Bericht zeigen, dann die App aufbauen
+        if (report != null) showCrashReport(report) { buildUi() } else buildUi()
+    }
+
+    private fun buildUi() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
 
@@ -172,7 +182,7 @@ class MainActivity : Activity() {
             settings.loadWithOverviewMode = true
             settings.textZoom = 100
             // Flüssigeres Scrollen: Bereiche knapp außerhalb des Bildes schon vorzeichnen (ab Android 6)
-            if (Build.VERSION.SDK_INT >= 23) settings.offscreenPreRaster = true
+            // (Vorab-Zeichnen außerhalb des Bildes ist aus: kostet auf Fire TV zu viel Grafikspeicher)
             // Bilder aus dem Zwischenspeicher nehmen, wenn sie schon einmal geladen wurden
             settings.cacheMode = WebSettings.LOAD_DEFAULT
             settings.setSupportZoom(false)
@@ -195,6 +205,8 @@ class MainActivity : Activity() {
                     prefs.edit().putLong("renderGone", now).putInt("renderGoneCount", count).apply()
                     try { (view.parent as? ViewGroup)?.removeView(view) } catch (e: Throwable) { }
                     try { view.destroy() } catch (e: Throwable) { }
+                    val why = if (detail.didCrash()) "Oberfläche abgestürzt" else "Oberfläche wegen Speichermangel beendet"
+                    saveCrashReport("$why (${count}x in 1 Min.)\nWebView: ${webViewVersion()}")
                     handler.post {
                         // Dreimal in einer Minute: aufgeben statt endlos neu zu starten
                         if (count >= 3) finish() else recreate()
@@ -268,6 +280,7 @@ class MainActivity : Activity() {
     )
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!uiReady) return super.dispatchKeyEvent(event)
         val code = keyMap[event.keyCode]
         if (code != null) {
             // Ist die Bildschirmtastatur offen, darf sie Zurück/Enter selbst verarbeiten
@@ -288,10 +301,12 @@ class MainActivity : Activity() {
 
     @Deprecated("Wird für ältere Geräte und die Zurück-Geste gebraucht")
     override fun onBackPressed() {
+        if (!uiReady) { super.onBackPressed(); return }
         sendKey(10009)
     }
 
     private fun sendKey(code: Int, repeat: Boolean = false) {
+        if (!uiReady) return
         webView.evaluateJavascript("window.__androidKey && window.__androidKey($code, $repeat)", null)
     }
 
@@ -300,11 +315,13 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         hideSystemBars()
+        if (!uiReady) return
         webView.onResume()
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('visible')", null)
     }
 
     override fun onStop() {
+        if (!uiReady) { super.onStop(); return }
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('hidden')", null)
         player.pause()
         webView.onPause()
@@ -316,7 +333,7 @@ class MainActivity : Activity() {
     @Deprecated("Einfachster Weg, die Position vom externen Player zurückzubekommen")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_EXTERNAL) return
+        if (requestCode != REQ_EXTERNAL || !uiReady) return
         val extras = data?.extras
         fun num(vararg keys: String): Long {
             for (k in keys) {
@@ -419,9 +436,60 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    // ---------- Absturz-Bericht ----------
+    private fun installCrashReporter() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        if (previous is CrashCatcher) return
+        Thread.setDefaultUncaughtExceptionHandler(CrashCatcher(applicationContext, previous))
+    }
+
+    private class CrashCatcher(val ctx: Context, val previous: Thread.UncaughtExceptionHandler?) : Thread.UncaughtExceptionHandler {
+        override fun uncaughtException(t: Thread, e: Throwable) {
+            try {
+                val sw = java.io.StringWriter()
+                e.printStackTrace(java.io.PrintWriter(sw))
+                val lines = sw.toString().lines().filter { it.isNotBlank() }.take(14).joinToString("\n")
+                ctx.getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit()
+                    .putString("crashReport", "Absturz (${t.name}):\n$lines")
+                    .putLong("crashReportAt", System.currentTimeMillis())
+                    .commit()
+            } catch (x: Throwable) { }
+            previous?.uncaughtException(t, e)
+        }
+    }
+
+    private fun saveCrashReport(text: String) {
+        getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit()
+            .putString("crashReport", text).putLong("crashReportAt", System.currentTimeMillis()).commit()
+    }
+
+    /** Bericht vom letzten Absturz (nur wenn jünger als 30 Minuten) – wird danach gelöscht */
+    private fun takeCrashReport(): String? {
+        val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
+        val text = prefs.getString("crashReport", null) ?: return null
+        val at = prefs.getLong("crashReportAt", 0L)
+        prefs.edit().remove("crashReport").remove("crashReportAt").apply()
+        return if (System.currentTimeMillis() - at < 30 * 60_000) text else null
+    }
+
+    private fun webViewVersion(): String = try {
+        if (Build.VERSION.SDK_INT >= 26) WebView.getCurrentWebViewPackage()?.let { it.packageName + " " + it.versionName } ?: "?" else "?"
+    } catch (e: Throwable) { "?" }
+
+    private fun showCrashReport(text: String, then: () -> Unit) {
+        try {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("ImperumTV – Fehlerbericht")
+                .setMessage(text + "\n\nAndroid " + Build.VERSION.RELEASE + " · " + Build.MODEL + "\nBitte abfotografieren und schicken.")
+                .setCancelable(false)
+                .setPositiveButton("Weiter") { _, _ -> then() }
+                .show()
+        } catch (e: Throwable) { then() }
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        player.release()
+        try { if (::player.isInitialized) player.release() } catch (e: Throwable) { }
         try { webView.destroy() } catch (e: Throwable) { }
         super.onDestroy()
     }
