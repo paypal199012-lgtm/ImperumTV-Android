@@ -5555,9 +5555,10 @@
             btn('pl-switch', '⇄', 'Anderer Player', function () { self.switchPlayer(); });
         }
         btn('pl-aspect', '▭', 'Bildformat', function () { self.aspectMenu(); });
-        // Sprache/Untertitel nur, wenn es wirklich eine Auswahl gibt
-        if (Player.trackList('audio').length > 1) btn('pl-audio', '♪', 'Sprache', function () { self.trackMenu('audio'); });
-        if (Player.trackList('text').length > 0) btn('pl-sub', 'CC', 'Untertitel', function () { self.trackMenu('text'); });
+        // Filme/Serien: immer zeigen; Live: nur wenn der Sender eine Auswahl hat
+        var vod = this.kind !== 'live';
+        if (vod || Player.trackList('audio').length > 1) btn('pl-audio', '♪', 'Sprache', function () { self.trackMenu('audio'); });
+        if (vod || Player.trackList('text').length > 0) btn('pl-sub', 'CC', 'Untertitel', function () { self.trackMenu('text'); });
         if (this.kind !== 'episode' && it.type !== 'recording') {
             var favType = this.kind === 'live' ? 'live' : 'movie';
             var isFav = Favs.has(favType, it.id);
