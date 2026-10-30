@@ -519,18 +519,19 @@ body.touch .scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
     position: absolute; left: 1290px; top: 0; width: 630px; height: 1080px;
     border-left: 2px solid rgba(255,255,255,.45);
     background: rgba(10,11,14,.55);
-    box-sizing: border-box; padding: 60px 40px 0; text-align: center;
+    box-sizing: border-box; padding: 40px 36px 0; text-align: center; overflow: hidden;
 }
-.pl-qr { width: 300px; height: 300px; margin: 0 auto 26px; background: #fff; border-radius: 14px; padding: 10px; box-sizing: border-box; }
-.pl-qr svg { display: block; width: 280px; height: 280px; }
+.pl-side-in { overflow: hidden; padding-bottom: 6px; -webkit-transform-origin: 50% 0; transform-origin: 50% 0; }
+.pl-qr { width: 270px; height: 270px; margin: 0 auto 20px; background: #fff; border-radius: 14px; padding: 10px; box-sizing: border-box; }
+.pl-qr svg { display: block; width: 250px; height: 250px; }
 .pl-yellow { font-size: 30px; color: #f4dc9e; line-height: 40px; }
 .pl-status { font-size: 34px; color: #fff; font-weight: bold; margin-top: 22px; }
 .pl-site { font-size: 24px; color: #f4dc9e; font-weight: bold; margin-top: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl-text { font-size: 28px; color: #fff; line-height: 38px; margin-top: 18px; }
 .pl-label { font-size: 30px; color: #fff; margin-top: 22px; }
 .pl-value { font-size: 36px; color: #f4dc9e; margin-top: 6px; letter-spacing: 1px; font-family: "Courier New", monospace; font-weight: bold; }
-.pl-buttons { margin-top: 28px; }
-.pl-buttons .button { margin: 0 8px; }
+.pl-buttons { margin-top: 22px; display: flex; flex-direction: column; align-items: center; }
+.pl-buttons .button { margin: 0 0 14px; min-width: 340px; white-space: nowrap; text-align: center; box-sizing: border-box; }
 
 /* ---------- Testphase und Aktivierung ---------- */
 .trial-note {
