@@ -5203,7 +5203,7 @@
         this.ui = $('#player-ui');
         this.ui.classList.remove('hidden');
         this.start();
-        this.showOverlay();
+        this.showOverlay(this.kind === 'live' ? 2000 : 0);   // Sender gewählt: Name kurz zeigen, dann freies Bild
         var self = this;
         clearInterval(this.watchdog);
         this.watchdog = setInterval(function () { self.checkStall(); }, 2000);
@@ -5566,16 +5566,17 @@
         this.timeLeft.textContent = fmtTime(cur);
         this.timeRight.textContent = dur > 0 ? '-' + fmtTime(dur - cur) : '';
     };
-    PlayerScreen.prototype.showOverlay = function () {
+    /** ms: wie lange die Leiste stehen bleibt (Standard 5 s; nach Senderwahl nur kurz) */
+    PlayerScreen.prototype.showOverlay = function (ms) {
         var self = this;
         // Player schon geschlossen (z. B. mit „Zurück“) oder Senderliste offen: Leiste nicht einblenden
-        if (Nav.top() !== this || this.zapOpen) return;
+        if (Nav.top() !== this || this.zapOpen || Modal.node) return;   // Fenster (z. B. „Mehr“) offen: Fokus dort lassen
         this.overlay = true;
         this.ui.classList.remove('hidden');
         this.ui.classList.add('player-ui-visible');
         this.renderOverlay();
         clearTimeout(this.hideTimer);
-        this.hideTimer = setTimeout(function () { self.hideOverlay(); }, 5000);
+        this.hideTimer = setTimeout(function () { self.hideOverlay(); }, ms || 5000);
     };
     PlayerScreen.prototype.hideOverlay = function () {
         if (Nav.top() !== this) { this.overlay = false; return; }   // nicht den Fokus anderer Bildschirme löschen
@@ -5595,7 +5596,7 @@
         this.index = (this.index + delta + this.items.length) % this.items.length;
         this.retries = 0;
         this.start();
-        this.showOverlay();
+        this.showOverlay(2000);                       // Kanal gewechselt: nur kurz einblenden
     };
     PlayerScreen.prototype.close = function () {
         Nav.back();
@@ -5678,7 +5679,7 @@
             this.retries = 0;
             this.start();
         }
-        this.showOverlay();                           // kurz Name und Programm des Senders zeigen
+        this.showOverlay(2000);                       // kurz Name und Programm des Senders zeigen
     };
     PlayerScreen.prototype.closeZap = function () {
         this.zapOpen = false;

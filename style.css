@@ -899,3 +899,9 @@ body.lowfx .sy-logo { filter: none; }
 .zap-row.sel { background: rgba(217,176,102,.28); box-shadow: 0 0 0 4px #f4dc9e; }
 .zap-row.sel .znow { color: #f4dc9e; }
 .zap-hint { position: absolute; left: 56px; bottom: 40px; font-size: 22px; color: #a7a39a; }
+
+/* Player-Leiste: immer eine Zeile */
+.pl-bottom .pl-buttons { white-space: nowrap; }
+
+/* Player-Leiste: alle Knöpfe in eine Zeile (etwas schmaler, damit auch 10 Knöpfe passen) */
+.pl-bottom .pl-btn { padding: 14px 20px; margin: 0 5px; font-size: 25px; min-width: 0; }
