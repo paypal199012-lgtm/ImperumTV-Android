@@ -235,6 +235,7 @@ class MainActivity : Activity() {
         hideSystemBars()
         webView.loadUrl("file:///android_asset/www/index.html")
         trimThumbs()
+        epgLoadSaved()
 
         // Geplante Aufnahmen: Wecker neu stellen, verpasste Starts nachholen
         try { Recorder.armAll(this) } catch (e: Exception) { }
@@ -351,6 +352,166 @@ class MainActivity : Activity() {
 
     // ---------- Update aus der App heraus ----------
 
+    // ---------- Programm (EPG): einmal am Tag komplett laden und auf dem Gerät speichern ----------
+    // Format der Datei: 1. Zeile Infos (JSON), danach je Sender eine Zeile  epg-id <TAB> [[start,ende,"Titel","Text"],…]
+
+    @Volatile private var epgMap: HashMap<String, String> = HashMap()
+    @Volatile private var epgMeta: String = "{}"
+    @Volatile private var epgBusy = false
+    private val epgFile: File get() = File(filesDir, "epg.txt")
+
+    private class Prog(val start: Long, val stop: Long, val title: String, val desc: String)
+
+    /** Gespeichertes Programm beim Start einlesen (im Hintergrund) */
+    private fun epgLoadSaved() {
+        Thread {
+            try {
+                val f = epgFile
+                if (!f.exists()) return@Thread
+                val map = HashMap<String, String>()
+                var meta = "{}"
+                f.bufferedReader().useLines { lines ->
+                    var first = true
+                    for (line in lines) {
+                        if (first) { meta = line; first = false; continue }
+                        val tab = line.indexOf('\t')
+                        if (tab > 0) map[line.substring(0, tab)] = line.substring(tab + 1)
+                    }
+                }
+                epgMap = map
+                epgMeta = meta
+            } catch (e: Throwable) { }
+        }.start()
+    }
+
+    private fun emitEpg(state: String, info: String) {
+        handler.post {
+            if (uiReady) webView.evaluateJavascript("window.__androidEpg && window.__androidEpg(${JSONObject.quote(state)}, $info)", null)
+        }
+    }
+
+    /** XMLTV-Zeit "20261030170000 +0100" in Millisekunden */
+    private fun xmltvTime(v: String?): Long {
+        if (v == null || v.length < 14) return 0L
+        return try {
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.clear()
+            cal.set(v.substring(0, 4).toInt(), v.substring(4, 6).toInt() - 1, v.substring(6, 8).toInt(),
+                v.substring(8, 10).toInt(), v.substring(10, 12).toInt(), v.substring(12, 14).toInt())
+            var ms = cal.timeInMillis
+            val m = Regex("([+-])(\\d{2}):?(\\d{2})").find(v.substring(14))
+            if (m != null) {
+                val sign = if (m.groupValues[1] == "-") -1 else 1
+                val off = (m.groupValues[2].toInt() * 60 + m.groupValues[3].toInt()) * 60_000L
+                ms -= sign * off
+            }
+            ms
+        } catch (e: Throwable) { 0L }
+    }
+
+    /** XMLTV laden, nur die nächsten 36 Stunden der eigenen Sender behalten, als Datei speichern */
+    private fun epgDownload(address: String, account: String, wanted: Set<String>) {
+        if (epgBusy) return
+        epgBusy = true
+        Thread {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                val now = System.currentTimeMillis()
+                val from = now - 3 * 3600_000L
+                val until = now + 36 * 3600_000L
+                var conn = URL(address).openConnection() as HttpURLConnection
+                var redirects = 0
+                while (true) {
+                    conn.instanceFollowRedirects = false
+                    conn.connectTimeout = 20_000
+                    conn.readTimeout = 90_000
+                    conn.setRequestProperty("User-Agent", "ImperumTV/1.0 (Android)")
+                    val code = conn.responseCode
+                    if (code in 300..399 && redirects < 5) {
+                        val next = URL(conn.url, conn.getHeaderField("Location") ?: throw Exception("Weiterleitung ohne Ziel"))
+                        conn.disconnect(); conn = next.openConnection() as HttpURLConnection; redirects++; continue
+                    }
+                    if (code != 200) throw Exception("HTTP $code")
+                    break
+                }
+                val progs = HashMap<String, ArrayList<Prog>>()
+                var count = 0
+                val counter = object : java.io.FilterInputStream(conn.inputStream) {
+                    var bytes = 0L
+                    var lastMb = 0L
+                    override fun read(b: ByteArray, off: Int, len: Int): Int {
+                        val n = super.read(b, off, len)
+                        if (n > 0) {
+                            bytes += n
+                            val mb = bytes / (1024 * 1024)
+                            if (mb >= lastMb + 5) { lastMb = mb; emitEpg("progress", "{\"mb\":$mb}") }
+                        }
+                        return n
+                    }
+                }
+                counter.use { input ->
+                    val parser = android.util.Xml.newPullParser()
+                    parser.setInput(input, null)
+                    var ev = parser.eventType
+                    var chan: String? = null
+                    var start = 0L
+                    var stop = 0L
+                    var title = ""
+                    var desc = ""
+                    var keep = false
+                    while (ev != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                        if (ev == org.xmlpull.v1.XmlPullParser.START_TAG) {
+                            when (parser.name) {
+                                "programme" -> {
+                                    chan = parser.getAttributeValue(null, "channel")
+                                    start = xmltvTime(parser.getAttributeValue(null, "start"))
+                                    stop = xmltvTime(parser.getAttributeValue(null, "stop"))
+                                    title = ""; desc = ""
+                                    keep = chan != null && (wanted.isEmpty() || wanted.contains(chan)) && stop > from && start < until && start > 0
+                                }
+                                "title" -> if (keep && title.isEmpty()) title = parser.nextText().trim()
+                                "desc" -> if (keep && desc.isEmpty()) desc = parser.nextText().trim().take(400)
+                            }
+                        } else if (ev == org.xmlpull.v1.XmlPullParser.END_TAG && parser.name == "programme") {
+                            if (keep && title.isNotEmpty() && chan != null) {
+                                progs.getOrPut(chan) { ArrayList() }.add(Prog(start, stop, title, desc))
+                                count++
+                            }
+                            keep = false
+                        }
+                        ev = parser.next()
+                    }
+                }
+                conn.disconnect()
+                if (count == 0) throw Exception("Anbieter liefert kein Programm")
+                val map = HashMap<String, String>()
+                for ((id, list) in progs) {
+                    list.sortBy { it.start }
+                    val arr = JSONArray()
+                    for (p in list) arr.put(JSONArray().put(p.start).put(p.stop).put(p.title).put(p.desc))
+                    map[id] = arr.toString()
+                }
+                val meta = JSONObject().put("at", now).put("account", account).put("channels", map.size).put("count", count).toString()
+                val tmp = File(filesDir, "epg.tmp")
+                tmp.bufferedWriter().use { w ->
+                    w.write(meta); w.write("\n")
+                    for ((id, json) in map) {
+                        if (id.contains('\t') || id.contains('\n')) continue
+                        w.write(id); w.write("\t"); w.write(json); w.write("\n")
+                    }
+                }
+                if (!tmp.renameTo(epgFile)) { epgFile.delete(); tmp.renameTo(epgFile) }
+                epgMap = map
+                epgMeta = meta
+                emitEpg("done", meta)
+            } catch (e: Throwable) {
+                emitEpg("error", JSONObject().put("message", (e.message ?: e.javaClass.simpleName)).toString())
+            } finally {
+                epgBusy = false
+            }
+        }.start()
+    }
+
     private fun emitUpdate(state: String, pct: Int, msg: String = "") {
         handler.post {
             webView.evaluateJavascript(
@@ -450,9 +611,12 @@ class MainActivity : Activity() {
                 val sw = java.io.StringWriter()
                 e.printStackTrace(java.io.PrintWriter(sw))
                 val lines = sw.toString().lines().filter { it.isNotBlank() }.take(14).joinToString("\n")
+                val text = "Absturz (${t.name}):\n$lines"
                 ctx.getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit()
-                    .putString("crashReport", "Absturz (${t.name}):\n$lines")
+                    .putString("crashReport", text)
                     .putLong("crashReportAt", System.currentTimeMillis())
+                    .putString("crashSend", text)                  // wird beim nächsten Start an die Website geschickt
+                    .putLong("crashSendAt", System.currentTimeMillis())
                     .commit()
             } catch (x: Throwable) { }
             previous?.uncaughtException(t, e)
@@ -461,7 +625,9 @@ class MainActivity : Activity() {
 
     private fun saveCrashReport(text: String) {
         getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit()
-            .putString("crashReport", text).putLong("crashReportAt", System.currentTimeMillis()).commit()
+            .putString("crashReport", text).putLong("crashReportAt", System.currentTimeMillis())
+            .putString("crashSend", text).putLong("crashSendAt", System.currentTimeMillis())
+            .commit()
     }
 
     /** Bericht vom letzten Absturz (nur wenn jünger als 30 Minuten) – wird danach gelöscht */
@@ -711,6 +877,66 @@ class MainActivity : Activity() {
     // ---------- Schnittstelle für die Web-Seite ----------
 
     inner class Bridge {
+
+        /** Noch nicht gesendeter Absturzbericht: {"text":"…","at":…,"device":"…","android":"…"} oder "" */
+        @JavascriptInterface
+        fun pendingCrash(): String {
+            val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
+            val text = prefs.getString("crashSend", null) ?: return ""
+            return JSONObject().put("text", text).put("at", prefs.getLong("crashSendAt", 0L))
+                .put("device", Build.MANUFACTURER + " " + Build.MODEL).put("android", Build.VERSION.RELEASE)
+                .put("webview", webViewVersion()).toString()
+        }
+
+        /** Bericht ist angekommen: nicht noch einmal schicken */
+        @JavascriptInterface
+        fun clearPendingCrash() {
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().remove("crashSend").remove("crashSendAt").apply()
+        }
+
+        /** Gerätename für Fehlerberichte */
+        @JavascriptInterface
+        fun deviceName(): String = Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE
+
+        /** Infos zum gespeicherten Programm: {"at":…, "account":"…", "channels":…, "busy":true/false} */
+        @JavascriptInterface
+        fun epgInfo(): String = try {
+            JSONObject(epgMeta).put("busy", epgBusy).put("loaded", epgMap.size).toString()
+        } catch (e: Throwable) { "{}" }
+
+        /** Programm eines Senders: [[start,ende,"Titel","Text"],…] oder "" */
+        @JavascriptInterface
+        fun epgFor(id: String): String = epgMap[id] ?: ""
+
+        /** Was läuft gerade? Für viele Sender auf einmal: ids = JSON-Liste, Antwort {"id":"Titel",…} */
+        @JavascriptInterface
+        fun epgNow(ids: String): String {
+            val out = JSONObject()
+            try {
+                val now = System.currentTimeMillis()
+                val a = JSONArray(ids)
+                val map = epgMap
+                for (i in 0 until a.length()) {
+                    val id = a.getString(i)
+                    val raw = map[id] ?: continue
+                    val list = JSONArray(raw)
+                    for (j in 0 until list.length()) {
+                        val e = list.getJSONArray(j)
+                        if (e.getLong(0) <= now && e.getLong(1) > now) { out.put(id, e.getString(2)); break }
+                        if (e.getLong(0) > now) break
+                    }
+                }
+            } catch (e: Throwable) { }
+            return out.toString()
+        }
+
+        /** Programm komplett neu laden (XMLTV des Anbieters). ids: JSON-Liste der benötigten Sender */
+        @JavascriptInterface
+        fun epgSync(url: String, account: String, ids: String) {
+            val wanted = HashSet<String>()
+            try { val a = JSONArray(ids); for (i in 0 until a.length()) wanted.add(a.getString(i)) } catch (e: Throwable) { }
+            epgDownload(url, account, wanted)
+        }
 
         /** Zeitpunkt des letzten Absturzes der Oberfläche (ms seit 1970, 0 = nie) */
         @JavascriptInterface

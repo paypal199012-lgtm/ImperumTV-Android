@@ -311,6 +311,7 @@
         function done(skipped) {
             if (finished) return;
             finished = true;
+            setTimeout(function () { Epg.sync(false); }, skipped ? 15000 : 6000);   // Programm erst nach den Listen
             if (skipped) { Sync.hide(); onOk(); return; }
             Sync.finish(mvOk && srOk ? 'Alles aktuell' : 'Live TV ist bereit', onOk, 1100);
         }
@@ -1261,6 +1262,64 @@
         }
     };
 
+    /**
+     * Fehlerberichte automatisch an die Website (Admin → Fehlerberichte):
+     * Abstürze der Android-App (beim nächsten Start) und Programmfehler der Oberfläche (alle Geräte).
+     */
+    var Report = {
+        sent: {}, count: 0,
+        platform: function () {
+            if (AB) { try { return AB.deviceName ? AB.deviceName() : 'Android'; } catch (e) { return 'Android'; } }
+            if (window.webapis) return 'Samsung Tizen';
+            if (/Web0S|webOS/i.test(navigator.userAgent)) return 'LG webOS';
+            return 'Browser';
+        },
+        version: function () {
+            try { if (AB && AB.appVersion) return '1.0.' + AB.appVersion(); } catch (e) { /* egal */ }
+            return 'web';
+        },
+        send: function (kind, text) {
+            if (!Device.validMac(Device.mac) || !Device.validKey(Device.key)) return Promise.resolve(false);
+            return Remote.rpc('report_crash', {
+                p_mac: Device.mac, p_key: Device.key, p_version: this.version(), p_device: this.platform(),
+                p_kind: kind, p_message: String(text).slice(0, 6000)
+            }).then(function (ok) { return ok === true; }, function () { return false; });
+        },
+        /** Beim Start: wartenden Absturzbericht der Android-App abschicken */
+        flushNative: function () {
+            if (!AB || !AB.pendingCrash) return;
+            var raw = '';
+            try { raw = AB.pendingCrash(); } catch (e) { raw = ''; }
+            if (!raw) return;
+            var r;
+            try { r = JSON.parse(raw); } catch (e2) { return; }
+            var when = r.at ? new Date(r.at).toLocaleString('de-DE') : '';
+            this.send('absturz', r.text + '\n\nZeit: ' + when + '\nWebView: ' + (r.webview || '?')).then(function (ok) {
+                if (ok) { try { AB.clearPendingCrash(); } catch (e3) { /* egal */ } }
+            });
+        },
+        /** Programmfehler der Oberfläche (je Meldung nur einmal, höchstens 5 pro Start) */
+        jsError: function (msg, where, stack) {
+            msg = String(msg || '');
+            if (!msg || /^Script error\.?$/i.test(msg) || /ResizeObserver/i.test(msg)) return;
+            if (this.sent[msg] || this.count >= 5) return;
+            this.sent[msg] = 1; this.count++;
+            var top = Nav.top(), screen = top && top.constructor ? top.constructor.name : '-';
+            this.send('fehler', msg + '\nOrt: ' + (where || '?') + '\nBildschirm: ' + screen + (stack ? '\n' + String(stack).slice(0, 1500) : ''));
+        }
+    };
+    window.addEventListener('error', function (e) {
+        if (!e || !e.message) return;                                   // z. B. Bild nicht geladen: kein Programmfehler
+        Report.jsError(e.message, (e.filename || '').split('/').pop() + ':' + e.lineno + ':' + e.colno, e.error && e.error.stack);
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+        var r = e && e.reason;
+        // Nur echte Programmfehler melden, keine abgelehnten Netzwerk-Anfragen
+        if (!r || !(r instanceof TypeError || r instanceof ReferenceError || r instanceof RangeError || r instanceof SyntaxError)) return;
+        if (r instanceof TypeError && /fetch|network|Failed to/i.test(r.message)) return;
+        Report.jsError(r.message, 'Promise', r.stack);
+    });
+
     var Remote = {
         lists: null,       // zuletzt geladene Wiedergabelisten
         registered: false,
@@ -1388,7 +1447,7 @@
             if (kind === 'live') {
                 item = { type: 'live', id: parseInt(s.stream_id, 10), num: i + 1,
                     name: str(s.name) || 'Sender ' + s.stream_id, logo: str(s.stream_icon),
-                    cat: cats[String(s.category_id)] || '' };
+                    cat: cats[String(s.category_id)] || '', epg: str(s.epg_channel_id) };
             } else if (kind === 'movie') {
                 name = str(s.name) || 'Film ' + s.stream_id;
                 item = { type: 'movie', id: parseInt(s.stream_id, 10), name: name, logo: str(s.stream_icon),
@@ -1561,6 +1620,73 @@
     // Daten
     // =====================================================================
 
+    /**
+     * Programm einmal am Tag komplett (Android/Fire TV): die App lädt das XMLTV des Anbieters,
+     * behält die nächsten 36 Stunden und speichert sie. Danach ist „Jetzt/Danach“ überall sofort da.
+     */
+    var Epg = {
+        cache: {}, valid: false, status: null, nowCache: null,
+        native: function () { return !!(AB && AB.epgFor && AB.epgSync && AB.epgInfo); },
+        info: function () { try { return JSON.parse(AB.epgInfo() || '{}') || {}; } catch (e) { return {}; } },
+        accountKey: function () { var a = Api.acc; return a ? a.server + '|' + a.username : ''; },
+        /** Nach dem Laden der Sender: gespeichertes Programm passt zum Konto? Sonst (oder älter als 20 h) neu laden */
+        sync: function (force) {
+            if (!this.native() || !Api.acc || Api.acc.demo || !Data.channels.length || safeMode()) return;
+            var info = this.info(), key = this.accountKey();
+            this.valid = info.account === key && info.loaded > 0;
+            this.cache = {}; this.nowCache = null;
+            if (info.busy) return;
+            if (!force && info.account === key && Date.now() - (info.at || 0) < 20 * 3600 * 1000) return;
+            var ids = {};
+            Data.channels.forEach(function (c) { if (c.epg) ids[c.epg] = 1; });
+            var list = Object.keys(ids);
+            if (!list.length) return;
+            var a = Api.acc;
+            AB.epgSync(a.server + '/xmltv.php?username=' + encodeURIComponent(a.username) + '&password=' + encodeURIComponent(a.password),
+                key, JSON.stringify(list));
+        },
+        /** Ganze Liste eines Senders (null = nicht vorhanden → Anbieter fragen) */
+        list: function (ch) {
+            if (!this.valid || !this.native() || !ch || !ch.epg) return null;
+            var c = this.cache[ch.epg];
+            if (c && Date.now() - c.at < 10 * 60 * 1000) return c.list;
+            var raw = '';
+            try { raw = AB.epgFor(ch.epg); } catch (e) { raw = ''; }
+            if (!raw) return null;
+            var list;
+            try { list = JSON.parse(raw).map(function (x) { return { start: x[0], end: x[1], title: x[2], desc: x[3] || '' }; }); } catch (e2) { return null; }
+            this.cache[ch.epg] = { at: Date.now(), list: list };
+            return list;
+        },
+        upcoming: function (ch, n) {
+            var l = this.list(ch);
+            if (!l) return null;
+            var t = Date.now();
+            var r = l.filter(function (e) { return e.end > t; });
+            return n ? r.slice(0, n) : r;
+        },
+        /** „Jetzt läuft“ für viele Sender auf einmal (ein Aufruf statt tausend). Rückgabe {epg-id: Titel} */
+        nowMap: function (channels) {
+            if (!this.valid || !this.native() || !AB.epgNow) return {};
+            var nc = this.nowCache, minute = Math.floor(Date.now() / 60000);
+            if (nc && nc.minute === minute && nc.list === channels) return nc.map;
+            var ids = {}, map = {};
+            for (var i = 0; i < channels.length; i++) if (channels[i].epg) ids[channels[i].epg] = 1;
+            try { map = JSON.parse(AB.epgNow(JSON.stringify(Object.keys(ids))) || '{}') || {}; } catch (e) { map = {}; }
+            this.nowCache = { minute: minute, list: channels, map: map };
+            return map;
+        }
+    };
+    window.__androidEpg = function (state, info) {
+        if (state === 'done') {
+            Epg.valid = true; Epg.cache = {}; Epg.nowCache = null; Epg.status = info;
+            var top = Nav.top();
+            if (top instanceof LiveScreen || top instanceof EpgScreen) toast('Programm aktualisiert (' + fmtNum(info.channels || 0) + ' Sender)');
+        } else if (state === 'error') {
+            Epg.status = { error: info && info.message };
+        }
+    };
+
     var Data = {
         channels: [], movies: [], series: [],
         expiry: null, status: '',
@@ -1660,8 +1786,19 @@
             });
         },
 
+        channelById: function (id) {
+            if (this._byIdOf !== this.channels) {
+                this._byId = {};
+                for (var i = 0; i < this.channels.length; i++) this._byId[this.channels[i].id] = this.channels[i];
+                this._byIdOf = this.channels;
+            }
+            return this._byId[Number(id)] || null;
+        },
+
         shortEpg: function (streamId) {
             var self = this;
+            var stored = Epg.upcoming(this.channelById(streamId), 4);
+            if (stored && stored.length) return Promise.resolve(stored);
             var cached = self.epgCache[streamId];
             if (cached && Date.now() - cached.at < 5 * 60 * 1000) return Promise.resolve(cached.list);
             return Api.call('get_short_epg', { stream_id: streamId, limit: 4 }).then(function (json) {
@@ -1678,6 +1815,8 @@
         /** Programm für die nächsten Stunden (für das EPG-Raster) */
         epgFull: function (streamId) {
             var self = this;
+            var stored = Epg.upcoming(this.channelById(streamId));
+            if (stored && stored.length) return Promise.resolve(stored);
             self.epgFullCache = self.epgFullCache || {};
             var cached = self.epgFullCache[streamId];
             if (cached && Date.now() - cached.at < 10 * 60 * 1000) return Promise.resolve(cached.list);
@@ -3358,6 +3497,7 @@
         columns.appendChild(listCol);
 
         this.list = this.filter();
+        var nowMap = Epg.nowMap(this.list);              // „Jetzt läuft“ für alle Sender auf einmal (gespeichertes Programm)
         if (!this.list.length) {
             scroll.appendChild(h('div', 'empty-note', this.query ? 'Kein Sender gefunden für „' + this.query + '“.' : this.catIndex === 1 ? 'Noch keine Favoriten. Drücke bei einem Sender die gelbe Taste.' : 'Keine Sender in dieser Kategorie.'));
         }
@@ -3368,7 +3508,13 @@
             if (ch.logo) LazyImg.set(logo, ch.logo);
             logo.onerror = function () { logo.style.visibility = 'hidden'; };
             row.appendChild(logo);
-            row.appendChild(h('div', 'name', ch.name));
+            var nowT = ch.epg ? nowMap[ch.epg] : '';
+            if (nowT) {
+                var nm = h('div', 'name rname');
+                nm.appendChild(h('div', 'rn', ch.name));
+                nm.appendChild(h('div', 'rnow', nowT));
+                row.appendChild(nm);
+            } else row.appendChild(h('div', 'name', ch.name));
             if (Favs.has('live', ch.id)) row.appendChild(h('div', 'star', '★'));
             row._channel = ch;
             row._onLong = function () { favToggleNode(row, 'live', ch); };
@@ -5277,7 +5423,7 @@
             times.appendChild(this.timeLeft); times.appendChild(this.timeRight);
             bottom.appendChild(times);
         } else {
-            bottom.appendChild(h('div', 'pl-times', 'Kanal ' + (this.index + 1) + ' / ' + this.items.length + '   ·   ▲▼ Kanal wechseln'));
+            bottom.appendChild(h('div', 'pl-times', 'Kanal ' + (this.index + 1) + ' / ' + this.items.length + '   ·   ▲▼ Kanal wechseln   ·   OK Senderliste'));
         }
 
         var buttons = h('div', 'pl-buttons');
@@ -5290,6 +5436,7 @@
             btn('pl-prev', '◀ Kanal', function () { self.step(-1); });
             btn('pl-play', Player.isPlaying() ? '❚❚ Pause' : '▶ Weiter', function () { Player.toggle(); self.renderOverlay(); });
             btn('pl-next', 'Kanal ▶', function () { self.step(1); });
+            if (this.items.length > 1) btn('pl-list', '☰ Sender', function () { self.openZap(); });
         } else {
             btn('pl-rw', '« 10 s', function () { Player.seekBy(-10); });
             btn('pl-play', Player.isPlaying() ? '❚❚ Pause' : '▶ Weiter', function () { Player.toggle(); self.renderOverlay(); });
@@ -5421,8 +5568,8 @@
     };
     PlayerScreen.prototype.showOverlay = function () {
         var self = this;
-        // Player schon geschlossen (z. B. mit „Zurück“): Leiste nicht wieder einblenden
-        if (Nav.top() !== this) return;
+        // Player schon geschlossen (z. B. mit „Zurück“) oder Senderliste offen: Leiste nicht einblenden
+        if (Nav.top() !== this || this.zapOpen) return;
         this.overlay = true;
         this.ui.classList.remove('hidden');
         this.ui.classList.add('player-ui-visible');
@@ -5453,6 +5600,92 @@
     PlayerScreen.prototype.close = function () {
         Nav.back();
     };
+    // ---------- Senderliste im Vollbild (Bild läuft groß weiter) ----------
+    PlayerScreen.prototype.openZap = function () {
+        if (this.kind !== 'live' || this.items.length < 2) return;
+        this.hideOverlay();
+        clearTimeout(this.hideTimer);
+        this.zapOpen = true;
+        this.zapIndex = this.index;
+        this.zapNow = Epg.nowMap(this.items);
+        var el = $('#zap');
+        if (!el) { el = h('div', 'zap hidden'); el.id = 'zap'; $('#stage').insertBefore(el, $('#subtitle')); }
+        this.zapEl = el;
+        el.className = 'zap';
+        this.renderZap();
+    };
+    PlayerScreen.prototype.renderZap = function () {
+        var self = this, el = this.zapEl, n = this.items.length, VIS = 8;
+        if (!el) return;
+        el.innerHTML = '';
+        var head = h('div', 'zap-head');
+        head.appendChild(h('div', 'zap-title', 'Sender'));
+        head.appendChild(h('div', 'zap-count', (this.zapIndex + 1) + ' / ' + n));
+        el.appendChild(head);
+        var first = Math.max(0, Math.min(this.zapIndex - Math.floor(VIS / 2), n - VIS));
+        var box = h('div', 'zap-list');
+        for (var i = first; i < Math.min(n, first + VIS); i++) {
+            box.appendChild(this.zapRow(this.items[i], i));
+        }
+        el.appendChild(box);
+        el.appendChild(h('div', 'zap-hint', '▲▼ Sender wählen   ·   OK umschalten   ·   Zurück schließen'));
+        // Ohne gespeichertes Programm: beim markierten Sender den Anbieter fragen
+        var cur = this.items[this.zapIndex];
+        if (cur && !(cur.epg && this.zapNow[cur.epg])) {
+            var want = this.zapIndex;
+            Data.shortEpg(cur.id).then(function (list) {
+                var t = Date.now(), e = (list || []).filter(function (x) { return x.start <= t && (!x.end || x.end > t); })[0];
+                if (!e || !self.zapOpen || self.zapIndex !== want) return;
+                var row = el.querySelector('.zap-row.sel .zmain');
+                if (row && !row.querySelector('.znow')) row.appendChild(h('div', 'znow', e.title));
+            });
+        }
+        clearTimeout(this.zapTimer);
+        this.zapTimer = setTimeout(function () { self.closeZap(); }, 12000);     // nichts gedrückt: wieder ausblenden
+    };
+    PlayerScreen.prototype.zapRow = function (ch, i) {
+        var self = this;
+        var row = h('div', 'zap-row' + (i === this.zapIndex ? ' sel' : '') + (i === this.index ? ' playing' : ''));
+        row.appendChild(h('div', 'num', String(ch.num || i + 1)));
+        var logo = h('img', 'logo');
+        if (ch.logo) logo.src = ch.logo;
+        logo.onerror = function () { logo.style.visibility = 'hidden'; };
+        row.appendChild(logo);
+        var main = h('div', 'zmain');
+        main.appendChild(h('div', 'zname', ch.name));
+        var nowT = ch.epg ? this.zapNow[ch.epg] : '';
+        if (nowT) main.appendChild(h('div', 'znow', nowT));
+        row.appendChild(main);
+        if (i === this.index) row.appendChild(h('div', 'zlive', '▶ läuft'));
+        row.onclick = function () { self.zapIndex = i; self.zapPick(); };
+        return row;
+    };
+    PlayerScreen.prototype.zapKey = function (k) {
+        var n = this.items.length;
+        if (k === KEY.UP) { this.zapIndex = (this.zapIndex - 1 + n) % n; this.renderZap(); return true; }
+        if (k === KEY.DOWN) { this.zapIndex = (this.zapIndex + 1) % n; this.renderZap(); return true; }
+        if (k === KEY.CH_UP || k === KEY.RW) { this.zapIndex = Math.max(0, this.zapIndex - 8); this.renderZap(); return true; }
+        if (k === KEY.CH_DOWN || k === KEY.FF) { this.zapIndex = Math.min(n - 1, this.zapIndex + 8); this.renderZap(); return true; }
+        if (k === KEY.ENTER) { this.zapPick(); return true; }
+        if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE || k === KEY.LEFT || k === KEY.RIGHT) { this.closeZap(); return true; }
+        return true;                                  // andere Tasten nicht durchreichen, solange die Liste offen ist
+    };
+    PlayerScreen.prototype.zapPick = function () {
+        var i = this.zapIndex;
+        this.closeZap();
+        if (i !== this.index) {
+            this.index = i;
+            this.retries = 0;
+            this.start();
+        }
+        this.showOverlay();                           // kurz Name und Programm des Senders zeigen
+    };
+    PlayerScreen.prototype.closeZap = function () {
+        this.zapOpen = false;
+        clearTimeout(this.zapTimer);
+        if (this.zapEl) { this.zapEl.className = 'zap hidden'; this.zapEl.innerHTML = ''; }
+    };
+
     /** Unter welchem Namen das Bildformat gemerkt wird */
     PlayerScreen.prototype.aspectKey = function () {
         var it = this.item() || {};
@@ -5462,6 +5695,7 @@
     };
     PlayerScreen.prototype.onKey = function (k) {
         var live = this.kind === 'live';
+        if (this.zapOpen) return this.zapKey(k);
         if (k === KEY.CH_UP || (live && k === KEY.UP && !this.overlay)) { this.step(-1); return true; }
         if (k === KEY.CH_DOWN || (live && k === KEY.DOWN && !this.overlay)) { this.step(1); return true; }
         if (live && this.overlay && (k === KEY.UP || k === KEY.DOWN)) { this.step(k === KEY.UP ? -1 : 1); return true; }
@@ -5477,7 +5711,7 @@
             if (this.pop === 'next' && (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE)) { this.cancelNext(); return true; }
         }
         if (!this.overlay) {
-            if (k === KEY.ENTER) { this.showOverlay(); return true; }
+            if (k === KEY.ENTER) { if (live && this.items.length > 1) this.openZap(); else this.showOverlay(); return true; }
             if (!live && (k === KEY.LEFT || k === KEY.RIGHT)) { Player.seekBy(k === KEY.RIGHT ? 10 : -10); this.showOverlay(); return true; }
             if (k === KEY.LEFT || k === KEY.RIGHT || k === KEY.UP || k === KEY.DOWN) { this.showOverlay(); return true; }
             return false;   // Zurück-Taste → Nav.back()
@@ -5508,6 +5742,7 @@
         } else {
             Player.stop();
         }
+        this.closeZap();
         Player.on({});
         Player.aspectKey = null;                           // Vorschau & Co. zeigen immer das ganze Bild
         this.ui.innerHTML = '';
@@ -5607,6 +5842,7 @@
         Favs.load();
         Player.init();
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
+        setTimeout(function () { Report.flushNative(); }, 8000);   // Absturzbericht vom letzten Mal an die Website
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', function (e) { if (e.keyCode === KEY.ENTER) LongPress.up(); });
 
@@ -5707,7 +5943,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
