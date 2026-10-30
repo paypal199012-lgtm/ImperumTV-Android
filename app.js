@@ -4210,7 +4210,7 @@
             fav.textContent = on ? '★  Favorit' : '☆  Zu Favoriten';
         }, 'buttons');
         body.appendChild(fav);
-        if (VodPlayer.available()) body.appendChild(playerButton(this));
+        // Player-Wahl nur noch unter Einstellungen (Knopf hier ausgeblendet)
 
         var plot = h('div', 'plot', 'Infos werden geladen …');
         var credits = h('div', 'credits', '');
@@ -4336,7 +4336,7 @@
         }, 'buttons');
         body.appendChild(fav);
         if (info.trailer) body.appendChild(Trailer.button(info.trailer, s.name));
-        if (VodPlayer.available()) body.appendChild(playerButton(this));
+        // Player-Wahl nur noch unter Einstellungen (Knopf hier ausgeblendet)
 
         // Staffeln
         var seasons = [];
