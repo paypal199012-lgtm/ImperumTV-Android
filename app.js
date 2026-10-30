@@ -2953,7 +2953,10 @@
                 else self.offerWhenIdle();           // automatisch: warten, bis Ladebildschirm/Video weg sind
             }
             function failed(why) {
-                if (manual) { loader(false); toast('Keine Verbindung zu GitHub' + (why ? ' (' + why + ')' : '') + '. Versuche es später noch einmal.', 6000); }
+                if (manual) { loader(false); toast('Keine Verbindung zu GitHub' + (why ? ' (' + why + ')' : '') + '. Versuche es später noch einmal.', 6000); return; }
+                // Automatisch: still in einer Minute noch einmal versuchen (höchstens 3-mal)
+                self.autoRetries = (self.autoRetries || 0) + 1;
+                if (self.autoRetries <= 3) setTimeout(function () { self.check(false); }, 60000);
             }
             // Über die GitHub-Schnittstelle (Fallback, falls die App den Weg unten nicht kennt)
             function viaApi() {
@@ -2969,7 +2972,7 @@
             // Android-App fragt GitHub selbst (keine Sperren im Browser-Teil, kein Abfrage-Limit)
             if (AB.checkLatest) {
                 var done = false;
-                var timer = setTimeout(function () { if (!done) { done = true; viaApi(); } }, 20000);
+                var timer = setTimeout(function () { if (!done) { done = true; viaApi(); } }, 45000);
                 window.__androidLatest = function (r) {
                     if (done) return;
                     done = true; clearTimeout(timer);

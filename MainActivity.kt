@@ -996,6 +996,11 @@ class MainActivity : Activity() {
             Thread {
                 var tag = ""
                 var err = ""
+                // Bis zu 3 Versuche: direkt nach dem Einschalten ist das Netz oft noch nicht bereit
+                for (attempt in 0 until 3) {
+                if (attempt > 0) { try { Thread.sleep(if (attempt == 1) 2_000L else 5_000L) } catch (x: InterruptedException) { } }
+                tag = ""
+                err = ""
                 try {
                     var address = "https://github.com/$safeRepo/releases/latest"
                     for (i in 0 until 4) {
@@ -1016,6 +1021,8 @@ class MainActivity : Activity() {
                     if (tag.isEmpty() && err.isEmpty()) err = "keine Version gefunden"
                 } catch (e: Throwable) {
                     err = e.javaClass.simpleName + (e.message?.let { ": $it" } ?: "")
+                }
+                if (tag.isNotEmpty()) break
                 }
                 val json = JSONObject().put("tag", tag).put("error", err).toString()
                 handler.post {
