@@ -5321,10 +5321,16 @@
             Player.open(this.url(), null);
         }
         this.nowTitle = '';
+        this.nowEnd = 0;
+        this.epg = null;
         if (this.kind === 'live') {
             var it = this.item();
             Data.shortEpg(it.id).then(function (list) {
-                if (self.item() === it && list.length) { self.nowTitle = list[0].title; self.nowEnd = list[0].end; if (self.overlay) self.renderOverlay(); }
+                if (self.item() !== it || !list.length) return;
+                self.epg = list;
+                var cur = self.epgNow();
+                if (cur) { self.nowTitle = cur.title; self.nowEnd = cur.end; }
+                if (self.overlay) self.renderOverlay();
             });
         }
     };
@@ -5448,76 +5454,125 @@
         s.classList.remove('hidden');
         this.subTimer = setTimeout(function () { s.classList.add('hidden'); }, ms > 0 ? ms : 4000);
     };
+    /** Laufende und nächste Sendung aus dem EPG */
+    PlayerScreen.prototype.epgNow = function () {
+        var list = this.epg || [], now = Date.now();
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].start <= now && (!list[i].end || list[i].end > now)) return list[i];
+        }
+        return null;
+    };
+    PlayerScreen.prototype.epgNext = function () {
+        var list = this.epg || [], now = Date.now();
+        for (var i = 0; i < list.length; i++) if (list[i].start > now) return list[i];
+        return null;
+    };
+    /** Info-Banner unten: Logo, Sendung jetzt/danach mit Fortschritt, darunter runde Symbol-Knöpfe */
     PlayerScreen.prototype.renderOverlay = function () {
         var self = this, it = this.item(), ui = this.ui;
         var focusedKey = Focus.cur && ui.contains(Focus.cur) ? Focus.cur.getAttribute('data-key') : 'pl-play';
         ui.innerHTML = '';
+        this.barFill = null; this.timeLeft = null; this.timeRight = null;
 
-        var top = h('div', 'pl-top');
-        var title = h('div', 'pl-title');
-        if (this.kind === 'live') {
-            title.appendChild(h('span', 'live-badge', 'LIVE'));
-            title.appendChild(document.createTextNode((it.num ? it.num + '  ' : '') + it.name));
+        var banner = h('div', 'pb');
+        var head = h('div', 'pb-head');
+
+        // Logo bzw. Poster
+        var logoUrl = it.logo || (it.series && it.series.logo) || '';
+        var logo = h('div', 'pb-logo' + (this.kind === 'live' ? '' : ' poster'));
+        if (logoUrl) {
+            var img = h('img');
+            img.onerror = function () { logo.removeChild(img); logo.textContent = it.num || '▶'; };
+            img.src = logoUrl;
+            logo.appendChild(img);
         } else {
-            title.textContent = it.name;
+            logo.textContent = this.kind === 'live' ? (it.num || this.index + 1) : '▶';
         }
-        top.appendChild(title);
-        if (this.kind === 'live') top.appendChild(h('div', 'pl-sub', this.nowTitle ? 'Jetzt: ' + this.nowTitle : ''));
-        if (this.kind === 'episode') top.appendChild(h('div', 'pl-sub', 'Staffel ' + it.season + ' · Folge ' + (it.num || this.index + 1)));
-        ui.appendChild(top);
+        head.appendChild(logo);
 
-        var bottom = h('div', 'pl-bottom');
-        if (this.kind !== 'live') {
-            var bar = h('div', 'pl-bar'); this.barFill = h('div', 'bar'); bar.appendChild(this.barFill);
-            bottom.appendChild(bar);
-            var times = h('div', 'pl-times');
+        var info = h('div', 'pb-info');
+        var name = h('div', 'pb-name');
+        if (this.kind === 'live') {
+            name.appendChild(h('span', 'live-badge', 'LIVE'));
+            name.appendChild(document.createTextNode((it.num || this.index + 1) + '  ·  ' + it.name));
+        } else {
+            name.textContent = it.name;
+        }
+        info.appendChild(name);
+
+        if (this.kind === 'live') {
+            var cur = this.epgNow(), next = this.epgNext();
+            if (cur) {
+                info.appendChild(h('div', 'pb-now', 'Jetzt: ' + cur.title + (cur.end ? '   ' + fmtClock(new Date(cur.start)) + ' – ' + fmtClock(new Date(cur.end)) : '')));
+                if (cur.end) {
+                    var lbar = h('div', 'pl-bar pb-bar'); this.liveFill = h('div', 'bar'); lbar.appendChild(this.liveFill);
+                    info.appendChild(lbar);
+                }
+            } else {
+                info.appendChild(h('div', 'pb-now dim', 'Keine Programminfo'));
+                this.liveFill = null;
+            }
+            if (next) info.appendChild(h('div', 'pb-next', 'Danach: ' + next.title + '   ab ' + fmtClock(new Date(next.start))));
+        } else {
+            if (this.kind === 'episode') info.appendChild(h('div', 'pb-now', 'Staffel ' + it.season + ' · Folge ' + (it.num || this.index + 1)));
+            var bar = h('div', 'pl-bar pb-bar'); this.barFill = h('div', 'bar'); bar.appendChild(this.barFill);
+            info.appendChild(bar);
+            var times = h('div', 'pb-next pb-times');
             this.timeLeft = h('span', null, '0:00');
             this.timeRight = h('span', 'right', '');
             times.appendChild(this.timeLeft); times.appendChild(this.timeRight);
-            bottom.appendChild(times);
-        } else {
-            bottom.appendChild(h('div', 'pl-times', 'Kanal ' + (this.index + 1) + ' / ' + this.items.length + '   ·   ▲▼ Kanal wechseln   ·   OK Senderliste'));
+            info.appendChild(times);
         }
+        head.appendChild(info);
+        if (this.kind === 'live') {
+            head.appendChild(h('div', 'pb-hint', 'Kanal ' + (this.index + 1) + ' / ' + this.items.length + '\n▲▼ wechseln · OK Liste'));
+        }
+        banner.appendChild(head);
 
-        var buttons = h('div', 'pl-buttons');
-        function btn(key, label, action) {
-            var b = h('div', 'pl-btn', label);
+        // Runde Symbol-Knöpfe; der Name erscheint nur über dem markierten Knopf
+        var buttons = h('div', 'pb-buttons');
+        function btn(key, icon, label, action) {
+            var b = h('div', 'pb-btn');
+            b.appendChild(h('span', 'pb-ic', icon));
+            b.appendChild(h('span', 'pb-tip', label));
             focusable(b, key, function () { action(); self.showOverlay(); }, 'player');
             buttons.appendChild(b);
         }
+        var playing = Player.isPlaying();
         if (this.kind === 'live') {
-            btn('pl-prev', '◀ Kanal', function () { self.step(-1); });
-            btn('pl-play', Player.isPlaying() ? '❚❚ Pause' : '▶ Weiter', function () { Player.toggle(); self.renderOverlay(); });
-            btn('pl-next', 'Kanal ▶', function () { self.step(1); });
-            if (this.items.length > 1) btn('pl-list', '☰ Sender', function () { self.openZap(); });
+            btn('pl-prev', '‹', 'Kanal zurück', function () { self.step(-1); });
+            btn('pl-play', playing ? '❚❚' : '▶', playing ? 'Pause' : 'Weiter', function () { Player.toggle(); self.renderOverlay(); });
+            btn('pl-next', '›', 'Kanal vor', function () { self.step(1); });
+            if (this.items.length > 1) btn('pl-list', '☰', 'Senderliste', function () { self.openZap(); });
         } else {
-            btn('pl-rw', '« 10 s', function () { Player.seekBy(-10); });
-            btn('pl-play', Player.isPlaying() ? '❚❚ Pause' : '▶ Weiter', function () { Player.toggle(); self.renderOverlay(); });
-            btn('pl-ff', '10 s »', function () { Player.seekBy(10); });
+            btn('pl-rw', '«', '10 s zurück', function () { Player.seekBy(-10); });
+            btn('pl-play', playing ? '❚❚' : '▶', playing ? 'Pause' : 'Weiter', function () { Player.toggle(); self.renderOverlay(); });
+            btn('pl-ff', '»', '10 s vor', function () { Player.seekBy(10); });
             if (this.kind === 'episode' && this.index < this.items.length - 1) {
-                btn('pl-nextep', 'Nächste Folge', function () { self.goNext(); });
+                btn('pl-nextep', '»|', 'Nächste Folge', function () { self.goNext(); });
             }
         }
         if (this.kind === 'live' && Rec.available()) {
-            btn('pl-rec', '● Aufnehmen', function () { self.recordNow(); });
+            btn('pl-rec', '●', 'Aufnehmen', function () { self.recordNow(); });
         }
         if (this.kind !== 'live' && this.resumable() && VodPlayer.available()) {
-            btn('pl-switch', '⇄ Player', function () { self.switchPlayer(); });
+            btn('pl-switch', '⇄', 'Anderer Player', function () { self.switchPlayer(); });
         }
-        btn('pl-aspect', '▭ Format', function () { self.aspectMenu(); });
-        btn('pl-audio', '♪ Sprache', function () { self.trackMenu('audio'); });
-        btn('pl-sub', 'CC Untertitel', function () { self.trackMenu('text'); });
+        btn('pl-aspect', '▭', 'Bildformat', function () { self.aspectMenu(); });
+        btn('pl-audio', '♪', 'Sprache', function () { self.trackMenu('audio'); });
+        btn('pl-sub', 'CC', 'Untertitel', function () { self.trackMenu('text'); });
         if (this.kind !== 'episode' && it.type !== 'recording') {
             var favType = this.kind === 'live' ? 'live' : 'movie';
-            btn('pl-fav', Favs.has(favType, it.id) ? '★ Favorit' : '☆ Favorit', function () {
+            var isFav = Favs.has(favType, it.id);
+            btn('pl-fav', isFav ? '★' : '☆', isFav ? 'Favorit entfernen' : 'Favorit', function () {
                 var on = Favs.toggle(favType, it.id);
                 toast(on ? 'Zu Favoriten hinzugefügt' : 'Aus Favoriten entfernt');
                 self.renderOverlay();
             });
         }
-        btn('pl-back', 'Zurück', function () { self.close(); });
-        bottom.appendChild(buttons);
-        ui.appendChild(bottom);
+        btn('pl-back', '↩', 'Zurück', function () { self.close(); });
+        banner.appendChild(buttons);
+        ui.appendChild(banner);
 
         var target = Focus.byKey(focusedKey) || Focus.byKey('pl-play');
         if (target) Focus.set(target);
@@ -5613,7 +5668,12 @@
         Modal.open('Aufnehmen: ' + ch.name, this.nowTitle ? 'Jetzt: ' + this.nowTitle : '', buttons);
     };
     PlayerScreen.prototype.updateBar = function () {
-        if (this.kind === 'live' || !this.barFill) return;
+        if (this.kind === 'live') {
+            var cur = this.liveFill && this.epgNow();
+            if (cur && cur.end > cur.start) this.liveFill.style.width = Math.max(0, Math.min(100, (Date.now() - cur.start) / (cur.end - cur.start) * 100)) + '%';
+            return;
+        }
+        if (!this.barFill) return;
         var cur = Player.current(), dur = Player.duration();
         this.barFill.style.width = (dur > 0 ? Math.min(100, cur / dur * 100) : 0) + '%';
         this.timeLeft.textContent = fmtTime(cur);
@@ -5922,6 +5982,26 @@
         };
 
         // Tasten, die die Android-App weiterreicht (Zurück, Medientasten, Farbtasten)
+        // Eigener Lautstärke-Balken (Gold) statt des System-Balkens
+        window.__androidVolume = function (cur, max, muted) {
+            var box = $('#volume');
+            if (!box) {
+                box = h('div', 'vol hidden'); box.id = 'volume';
+                box.appendChild(h('div', 'vol-ic'));
+                var track = h('div', 'vol-track'); track.appendChild(h('div', 'vol-fill')); box.appendChild(track);
+                box.appendChild(h('div', 'vol-num'));
+                ($('#stage') || document.body).appendChild(box);
+            }
+            var pct = max > 0 ? Math.round(cur / max * 100) : 0;
+            var off = muted || cur <= 0;
+            box.querySelector('.vol-ic').textContent = off ? '🔇︎' : pct < 40 ? '🔈︎' : pct < 75 ? '🔉︎' : '🔊︎';
+            box.querySelector('.vol-fill').style.height = (off ? 0 : pct) + '%';
+            box.querySelector('.vol-num').textContent = off ? 'Stumm' : String(cur);
+            box.classList.toggle('muted', off);
+            box.classList.remove('hidden');
+            clearTimeout(window.__volTimer);
+            window.__volTimer = setTimeout(function () { box.classList.add('hidden'); }, 2200);
+        };
         window.__androidKey = function (code, repeat) {
             Nav.userAt = Date.now();
             onKeyDown({ keyCode: code, repeat: !!repeat, preventDefault: function () { } });

@@ -395,7 +395,53 @@ body.preview-mode #app { background: transparent; }
     color: #fff;
     text-shadow: 0 0 6px #000, 0 2px 4px #000;
 }
-.player-ui-visible ~ #subtitle { bottom: 290px; }
+.player-ui-visible ~ #subtitle { bottom: 430px; }
+
+/* ---------- Player: Info-Banner (Logo, Sendung jetzt/danach, Symbol-Knöpfe) ---------- */
+.pb {
+    position: absolute; left: 70px; right: 70px; bottom: 44px;
+    background: rgba(12,12,14,.9);
+    border: 2px solid rgba(217,176,102,.55);
+    border-radius: 26px;
+    padding: 28px 40px 26px;
+    box-sizing: border-box;
+}
+.pb-head { display: flex; align-items: center; }
+.pb-logo {
+    width: 170px; height: 110px; flex: 0 0 auto; margin-right: 34px;
+    border-radius: 16px; background: rgba(255,255,255,.08);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 40px; font-weight: bold; color: #f4dc9e; overflow: hidden;
+}
+.pb-logo img { max-width: 150px; max-height: 92px; }
+.pb-logo.poster { width: 82px; height: 120px; }
+.pb-logo.poster img { width: 82px; height: 120px; max-width: none; max-height: none; object-fit: cover; }
+.pb-info { flex: 1; min-width: 0; }
+.pb-name { font-size: 40px; font-weight: bold; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-name .live-badge { font-size: 20px; padding: 3px 12px; vertical-align: 6px; }
+.pb-now { font-size: 30px; color: #f4dc9e; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-now.dim { color: rgba(255,255,255,.55); }
+.pb-bar { margin-top: 12px; height: 6px; }
+.pb-bar .bar { height: 6px; }
+.pb-next { font-size: 25px; color: rgba(255,255,255,.7); margin-top: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-times { overflow: hidden; }
+.pb-times .right { float: right; }
+.pb-hint { flex: 0 0 auto; margin-left: 34px; font-size: 22px; line-height: 34px; color: rgba(255,255,255,.55); text-align: right; white-space: pre; }
+.pb-buttons { margin-top: 62px; text-align: center; white-space: nowrap; }
+.pb-btn {
+    position: relative; display: inline-block; vertical-align: top;
+    width: 78px; height: 78px; margin: 0 9px; border-radius: 50%;
+    background: rgba(255,255,255,.13); color: #eee; text-align: center;
+}
+.pb-ic { display: block; line-height: 78px; font-size: 32px; font-weight: bold; }
+.pb-btn.focused { background: #f4dc9e; color: #1a1408; }
+.pb-tip {
+    display: none; position: absolute; left: 50%; bottom: 92px;
+    -webkit-transform: translateX(-50%); transform: translateX(-50%);
+    background: #f4dc9e; color: #1a1408; font-size: 24px; font-weight: bold;
+    padding: 6px 16px; border-radius: 10px; white-space: nowrap;
+}
+.pb-btn.focused .pb-tip { display: block; }
 
 /* ---------- Meldungen ---------- */
 #toast {
@@ -918,3 +964,17 @@ body.lowfx .sy-logo { filter: none; }
 .seasons.hscroll { overflow-x: auto; overflow-y: hidden; padding: 6px 4px 8px; margin-left: -4px; scrollbar-width: none; }
 .seasons.hscroll.more { -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent); mask-image: linear-gradient(90deg, #000 90%, transparent); }
 .seasons.hscroll::-webkit-scrollbar { display: none; }
+
+/* ---------- Eigener Lautstärke-Balken ---------- */
+.vol {
+    position: absolute; right: 60px; top: 90px; width: 96px; height: 440px;
+    background: rgba(12,12,14,.9); border: 2px solid rgba(217,176,102,.55); border-radius: 48px;
+    box-sizing: border-box; padding: 22px 0; text-align: center; z-index: 60;
+    -webkit-transition: opacity .25s; transition: opacity .25s;
+}
+.vol.hidden { display: block !important; opacity: 0; pointer-events: none; }
+.vol-ic { font-size: 42px; height: 44px; line-height: 44px; color: #f4dc9e; }
+.vol-track { position: relative; width: 14px; height: 280px; margin: 14px auto; background: rgba(255,255,255,.18); border-radius: 7px; overflow: hidden; }
+.vol-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: #d9b066; border-radius: 7px; -webkit-transition: height .12s; transition: height .12s; }
+.vol-num { font-size: 26px; font-weight: bold; color: #fff; }
+.vol.muted .vol-num { color: #e88; font-size: 22px; }

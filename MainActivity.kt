@@ -349,6 +349,7 @@ class MainActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!uiReady) return super.dispatchKeyEvent(event)
+        if (handleVolumeKey(event)) return true
         val code = keyMap[event.keyCode]
         if (code != null) {
             // Ist die Bildschirmtastatur offen, darf sie Zurück/Enter selbst verarbeiten
@@ -371,6 +372,33 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         if (!uiReady) { super.onBackPressed(); return }
         sendKey(10009)
+    }
+
+    /**
+     * Laut/Leiser selbst regeln und den eigenen Gold-Balken zeigen statt des System-Balkens.
+     * Kommt die Taste gar nicht in der App an (Fernbedienung steuert den Fernseher direkt per IR/CEC)
+     * oder ist die Lautstärke fest (HDMI), bleibt alles wie vorher beim System.
+     */
+    private fun handleVolumeKey(event: KeyEvent): Boolean {
+        val key = event.keyCode
+        if (key != KeyEvent.KEYCODE_VOLUME_UP && key != KeyEvent.KEYCODE_VOLUME_DOWN && key != KeyEvent.KEYCODE_VOLUME_MUTE) return false
+        return try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            if (am.isVolumeFixed) return false
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val stream = android.media.AudioManager.STREAM_MUSIC
+                when (key) {
+                    KeyEvent.KEYCODE_VOLUME_UP -> am.adjustStreamVolume(stream, android.media.AudioManager.ADJUST_RAISE, 0)
+                    KeyEvent.KEYCODE_VOLUME_DOWN -> am.adjustStreamVolume(stream, android.media.AudioManager.ADJUST_LOWER, 0)
+                    else -> if (event.repeatCount == 0) am.adjustStreamVolume(stream, android.media.AudioManager.ADJUST_TOGGLE_MUTE, 0)
+                }
+                val max = am.getStreamMaxVolume(stream).coerceAtLeast(1)
+                val cur = am.getStreamVolume(stream)
+                val muted = if (Build.VERSION.SDK_INT >= 23) am.isStreamMute(stream) else cur == 0
+                webView.evaluateJavascript("window.__androidVolume && window.__androidVolume($cur, $max, $muted)", null)
+            }
+            true
+        } catch (e: Throwable) { false }
     }
 
     private fun sendKey(code: Int, repeat: Boolean = false) {
