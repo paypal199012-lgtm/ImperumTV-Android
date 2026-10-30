@@ -40,7 +40,11 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -119,8 +123,16 @@ class MainActivity : Activity() {
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(20_000)
         httpFactory = http
-        player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, http)))
+        // Ton, den das Gerät selbst nicht kann (MP2 vieler TV-Sender, Dolby, DTS …): FFmpeg springt ein, falls eingebaut.
+        // Bild: klappt der eingebaute Decoder nicht, nimmt der Player den nächsten.
+        val renderers = DefaultRenderersFactory(this)
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        // RAW-/Sat-Sender: Bild auch ohne „IDR“-Startbild beginnen, Bildgrenzen selbst erkennen
+        val extractors = DefaultExtractorsFactory()
+            .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
+        player = ExoPlayer.Builder(this, renderers)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors))
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -149,7 +161,8 @@ class MainActivity : Activity() {
                     player.prepare()
                     return
                 }
-                emit("error", error.errorCodeName)
+                if (handleCodecError(error)) return
+                emit("error", error.errorCodeName + formatInfo(error))
             }
         })
 
@@ -809,6 +822,57 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Ton ließ sich nicht abspielen → Bild ohne Ton weiterlaufen lassen (einmal je Sender) */
+    private var audioOffRetry = false
+
+    private fun handleCodecError(error: PlaybackException): Boolean {
+        val code = error.errorCode
+        val renderer = (error as? ExoPlaybackException)?.takeIf { it.type == ExoPlaybackException.TYPE_RENDERER }
+        val mime = renderer?.rendererFormat?.sampleMimeType ?: ""
+        val audioProblem = mime.startsWith("audio/") || code == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
+            code == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
+        if (!audioProblem || audioOffRetry) return false
+        audioOffRetry = true
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+            .build()
+        player.prepare()
+        player.playWhenReady = true
+        emit("notice", "Der Ton (${codecName(mime)}) läuft auf diesem Gerät nicht – das Bild läuft ohne Ton.")
+        return true
+    }
+
+    /** Für Fehlermeldungen: welches Format machte Probleme (ohne Adresse/Zugangsdaten) */
+    private fun formatInfo(error: PlaybackException): String {
+        val f = (error as? ExoPlaybackException)?.takeIf { it.type == ExoPlaybackException.TYPE_RENDERER }?.rendererFormat
+        val parts = ArrayList<String>()
+        if (f != null) {
+            parts.add(codecName(f.sampleMimeType ?: ""))
+            if (f.width > 0) parts.add("${f.width}x${f.height}")
+            if (f.frameRate > 0) parts.add("${f.frameRate.toInt()} fps")
+        }
+        val msg = (error.cause?.message ?: error.message ?: "").take(120)
+        if (msg.isNotBlank()) parts.add(msg)
+        return if (parts.isEmpty()) "" else " · " + parts.joinToString(" · ")
+    }
+
+    private fun codecName(mime: String): String = when {
+        mime.contains("hevc") || mime.contains("h265") -> "HEVC/H.265"
+        mime.contains("avc") -> "H.264"
+        mime.contains("mpeg2") -> "MPEG-2"
+        mime.contains("av01") -> "AV1"
+        mime.contains("vp9") -> "VP9"
+        mime.contains("eac3") -> "Dolby Digital Plus"
+        mime.contains("ac3") -> "Dolby Digital"
+        mime.contains("ac4") -> "Dolby AC-4"
+        mime.contains("true-hd") || mime.contains("truehd") -> "Dolby TrueHD"
+        mime.contains("dts") -> "DTS"
+        mime.contains("mpeg-l2") -> "MP2"
+        mime.contains("opus") -> "Opus"
+        mime.isEmpty() -> "unbekannt"
+        else -> mime.substringAfter('/').uppercase()
+    }
+
     private fun placeVideo(x: Double, y: Double, w: Double, h: Double) {
         placeView(playerView, x, y, w, h)
     }
@@ -948,10 +1012,12 @@ class MainActivity : Activity() {
             handler.post {
                 readySent = false
                 subtitleIndex = -1
-                // Untertitel zunächst aus, Tonspur automatisch
+                // Untertitel zunächst aus, Tonspur automatisch (Ton bei jedem Sender wieder an)
+                audioOffRetry = false
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .clearOverrides()
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                     .build()
                 placeVideo(x, y, w, h)
                 player.setMediaItem(MediaItem.fromUri(url))

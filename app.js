@@ -1298,6 +1298,15 @@
                 if (ok) { try { AB.clearPendingCrash(); } catch (e3) { /* egal */ } }
             });
         },
+        /** Sender/Film spielt nicht: Name und Fehler (ohne Adresse und Zugangsdaten), je Sender nur einmal */
+        player: function (item, msg) {
+            if (!item) return;
+            var key = 'p:' + item.type + ':' + item.id + ':' + msg;
+            if (this.sent[key] || this.count >= 15) return;
+            this.sent[key] = 1; this.count++;
+            this.send('wiedergabe', (item.type === 'live' ? 'Sender: ' : 'Titel: ') + (item.name || '?') + '\nFehler: ' + (msg || 'unbekannt') +
+                '\nFormat: ' + (item.type === 'live' ? Settings.liveExt : (item.ext || '?')));
+        },
         /** Programmfehler der Oberfläche (je Meldung nur einmal, höchstens 5 pro Start) */
         jsError: function (msg, where, stack) {
             msg = String(msg || '');
@@ -5300,6 +5309,7 @@
             },
             end: function () { self.saveProgress(true); self.onEnd(); },
             error: function (msg) { self.onError(msg); },
+            notice: function (msg) { toast(msg, 6000); Report.player(self.item(), 'Hinweis: ' + msg); },
             subtitle: function (text, ms) { self.showSubtitle(text, ms); }
         });
         Player.aspectKey = this.aspectKey();               // Bildformat dieses Senders/Films/dieser Serie
@@ -5423,6 +5433,7 @@
             return;
         }
         toast('Wiedergabe fehlgeschlagen' + (msg ? ' (' + msg + ')' : '') + '. Versuche es erneut oder wähle etwas anderes.', 7000);
+        Report.player(this.item(), msg);                    // landet unter Admin → Fehlerberichte
         this.showOverlay();
     };
     PlayerScreen.prototype.showSubtitle = function (text, ms) {
