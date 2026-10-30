@@ -2521,32 +2521,45 @@
 
         // ---------- rechte Seite ----------
         var side = h('div', 'pl-side');
+        var sideIn = h('div', 'pl-side-in');           // wird verkleinert, falls es nicht ganz passt
+        side.appendChild(sideIn);
         var qr = h('div', 'pl-qr');
         try { qr.innerHTML = window.ImperumQR.svg(Device.link(), 280); } catch (e) { qr.classList.add('hidden'); }
-        side.appendChild(qr);
-        side.appendChild(h('div', 'pl-yellow', 'Scanne den QR-Code, um eine Wiedergabeliste hinzuzufügen.'));
+        sideIn.appendChild(qr);
+        sideIn.appendChild(h('div', 'pl-yellow', 'Scanne den QR-Code, um eine Wiedergabeliste hinzuzufügen.'));
         var statusText = License.known() ? License.text() : (Remote.registered ? 'Dein Gerät ist angemeldet.' : (this.error ? 'Gerät noch nicht verbunden.' : 'Gerät wird angemeldet …'));
-        side.appendChild(h('div', 'pl-status' + (License.known() && !License.activated() && !License.free() ? ' trial' : ''), statusText));
+        sideIn.appendChild(h('div', 'pl-status' + (License.known() && !License.activated() && !License.free() ? ' trial' : ''), statusText));
         if (License.known() && !License.activated() && !License.free()) {
-            side.appendChild(h('div', 'pl-price', 'Danach ' + REMOTE.price + ' einmalig auf der Website aktivieren.'));
+            sideIn.appendChild(h('div', 'pl-price', 'Danach ' + REMOTE.price + ' einmalig auf der Website aktivieren.'));
         }
-        side.appendChild(h('div', 'pl-site', REMOTE.website.replace(/^https?:\/\//, '').replace(/\/$/, '')));
-        side.appendChild(h('div', 'pl-text', 'Um Wiedergabelisten hinzuzufügen oder zu verwalten, verwende diese Werte:'));
-        side.appendChild(h('div', 'pl-label', 'MAC-Adresse'));
-        side.appendChild(h('div', 'pl-value', Device.macText()));
-        side.appendChild(h('div', 'pl-label', 'Geräte-Schlüssel'));
-        side.appendChild(h('div', 'pl-value', Device.key));
+        sideIn.appendChild(h('div', 'pl-site', REMOTE.website.replace(/^https?:\/\//, '').replace(/\/$/, '')));
+        sideIn.appendChild(h('div', 'pl-text', 'Um Wiedergabelisten hinzuzufügen oder zu verwalten, verwende diese Werte:'));
+        sideIn.appendChild(h('div', 'pl-label', 'MAC-Adresse'));
+        sideIn.appendChild(h('div', 'pl-value', Device.macText()));
+        sideIn.appendChild(h('div', 'pl-label', 'Geräte-Schlüssel'));
+        sideIn.appendChild(h('div', 'pl-value', Device.key));
 
         var buttons = h('div', 'pl-buttons');
         var refresh = h('div', 'button', 'Aktualisieren');
         buttons.appendChild(focusable(refresh, 'pl-refresh', function () { self.reload(true); }, 'side'));
-        if (AB && AB.openUrl && document.body.classList.contains('touch')) {
+        if (AB && AB.openUrl) {                          // Android und Fire TV: Website direkt öffnen
             var open = h('div', 'button', 'Website öffnen');
             buttons.appendChild(focusable(open, 'pl-open', function () { AB.openUrl(Device.link()); }, 'side'));
         }
-        side.appendChild(buttons);
+        sideIn.appendChild(buttons);
         wrap.appendChild(side);
         root.appendChild(wrap);
+        // Größere Schrift auf manchen Fernsehern: Inhalt rechts so verkleinern, dass alles sichtbar bleibt
+        fitSide();
+        setTimeout(fitSide, 300);
+        function fitSide() {
+            sideIn.style.webkitTransform = sideIn.style.transform = '';
+            var avail = side.clientHeight - 70, need = sideIn.offsetHeight;
+            if (need > avail && need > 0) {
+                var k = Math.max(0.6, avail / need);
+                sideIn.style.webkitTransform = sideIn.style.transform = 'scale(' + k.toFixed(3) + ')';
+            }
+        }
 
         if (!this.focusKey || !Focus.byKey(this.focusKey)) {
             this.focusKey = current && Remote.find(current) ? 'pl-' + current : (lists.length ? 'pl-' + lists[0].id : 'pl-demo');
@@ -2651,7 +2664,7 @@
         buttons.appendChild(focusable(refresh, 'lock-refresh', function () { self.check(true); }, 'side'));
         var demo = h('div', 'button', 'Demo ansehen');
         buttons.appendChild(focusable(demo, 'lock-demo', function () { new PlaylistsScreen().connect(Demo.playlist); }, 'side'));
-        if (AB && AB.openUrl && document.body.classList.contains('touch')) {
+        if (AB && AB.openUrl) {                          // Android und Fire TV: Website direkt öffnen
             var open = h('div', 'button', 'Website öffnen');
             buttons.appendChild(focusable(open, 'lock-open', function () { AB.openUrl(Device.link()); }, 'side'));
         }
