@@ -985,6 +985,45 @@ class MainActivity : Activity() {
             downloadApk(url)
         }
 
+        /**
+         * Neueste Version bei GitHub nachsehen – ohne GitHub-API (kein Abfrage-Limit, keine CORS-Sperre):
+         * github.com/<repo>/releases/latest leitet auf …/releases/tag/v1.0.N weiter.
+         * Antwort kommt über window.__androidLatest({tag, error})
+         */
+        @JavascriptInterface
+        fun checkLatest(repo: String) {
+            val safeRepo = repo.filter { it.isLetterOrDigit() || it == '-' || it == '_' || it == '/' || it == '.' }
+            Thread {
+                var tag = ""
+                var err = ""
+                try {
+                    var address = "https://github.com/$safeRepo/releases/latest"
+                    for (i in 0 until 4) {
+                        val conn = URL(address).openConnection() as HttpURLConnection
+                        conn.instanceFollowRedirects = false
+                        conn.connectTimeout = 12_000
+                        conn.readTimeout = 12_000
+                        conn.setRequestProperty("User-Agent", "ImperumTV-Update")
+                        val code = conn.responseCode
+                        val location = conn.getHeaderField("Location") ?: ""
+                        conn.disconnect()
+                        val found = Regex("/releases/tag/([^/?#]+)").find(location)?.groupValues?.get(1)
+                        if (found != null) { tag = found; break }
+                        if (code in 300..399 && location.isNotEmpty()) { address = URL(URL(address), location).toString(); continue }
+                        err = "HTTP $code"
+                        break
+                    }
+                    if (tag.isEmpty() && err.isEmpty()) err = "keine Version gefunden"
+                } catch (e: Throwable) {
+                    err = e.javaClass.simpleName + (e.message?.let { ": $it" } ?: "")
+                }
+                val json = JSONObject().put("tag", tag).put("error", err).toString()
+                handler.post {
+                    if (uiReady) webView.evaluateJavascript("window.__androidLatest && window.__androidLatest($json)", null)
+                }
+            }.start()
+        }
+
         /** Website im Browser öffnen (Handy/Tablet) */
         @JavascriptInterface
         fun openUrl(url: String) {
