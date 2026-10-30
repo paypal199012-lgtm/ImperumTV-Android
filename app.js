@@ -5538,7 +5538,7 @@
         // Nur was die Fernbedienung nicht schon kann: Kanal ▲▼ und Zurück-Taste brauchen keinen Knopf
         var playing = Player.isPlaying();
         if (this.kind === 'live') {
-            btn('pl-play', playing ? '❚❚' : '▶', playing ? 'Pause' : 'Weiter', function () { Player.toggle(); self.renderOverlay(); });
+            // Live: keine Pause-Taste, Senderliste ganz vorne
             if (this.items.length > 1) btn('pl-list', '☰', 'Senderliste', function () { self.openZap(); });
         } else {
             btn('pl-rw', '«', '10 s zurück', function () { Player.seekBy(-10); });
@@ -5570,7 +5570,7 @@
         head.appendChild(buttons);
         ui.appendChild(banner);
 
-        var target = Focus.byKey(focusedKey) || Focus.byKey('pl-play');
+        var target = Focus.byKey(focusedKey) || Focus.byKey('pl-play') || Focus.byKey('pl-list') || buttons.firstChild;
         if (target) Focus.set(target);
         this.updateBar();
     };
