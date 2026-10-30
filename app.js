@@ -791,6 +791,34 @@
     // Weiterschauen: merkt sich bei Filmen und Serienfolgen, wo man aufgehört hat
     // =====================================================================
 
+    /** Gesehene und angefangene Folgen (pro Folge, bleibt auch nach dem Weiterschauen erhalten) */
+    var Seen = {
+        MAX: 4000,
+        cache: null,
+        raw: function () {
+            if (!this.cache) {
+                var o = Storage.get('seen', {});
+                this.cache = (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+            }
+            return this.cache;
+        },
+        key: function (id) { return Resume.accKey() + '|' + id; },
+        /** { p: 0–100, d: 1 = zu Ende gesehen } oder null */
+        get: function (id) { return this.raw()[this.key(id)] || null; },
+        mark: function (id, part, done) {
+            var all = this.raw(), k = this.key(id), old = all[k];
+            if (old && old.d && !done) { old.at = Date.now(); }      // einmal gesehen bleibt gesehen
+            else all[k] = { p: Math.max(0, Math.min(100, Math.round(part * 100))), d: done ? 1 : 0, at: Date.now() };
+            var keys = Object.keys(all);
+            if (keys.length > this.MAX) {
+                keys.sort(function (a, b) { return (all[a].at || 0) - (all[b].at || 0); });
+                keys.slice(0, keys.length - this.MAX).forEach(function (x) { delete all[x]; });
+            }
+            this.cache = all;
+            Storage.set('seen', all);
+        }
+    };
+
     var Resume = {
         MAX: 40,
         cache: null,
@@ -855,6 +883,10 @@
             var it = items[index];
             if (!it || it.type === 'recording' || it.url) return;
             var done = ended || (dur > 60 && (pos >= dur * 0.95 || dur - pos < 60));
+            if (kind === 'episode') {
+                if (done) Seen.mark(it.id, 1, true);
+                else if (dur > 60 && pos >= 30) Seen.mark(it.id, pos / dur, false);
+            }
             if (done) {
                 var next = kind === 'episode' ? items[index + 1] : null;
                 if (next) this.save('episode', next, 0, 0, true);
@@ -4369,12 +4401,25 @@
         if (!list.length) scroll.appendChild(h('div', 'empty-note', 'Keine Folgen gefunden.'));
         list.forEach(function (ep, i) {
             var n = h('div', 'episode');
-            n.appendChild(h('span', 'n', String(ep.num || i + 1)));
-            var e = Resume.forItem('episode', ep);
-            if (e && !e.next && e.pos >= 30) {
+            var e = Resume.forItem('episode', ep), seen = Seen.get(ep.id);
+            var started = e && !e.next && e.pos >= 30;
+            // Gesehen: Haken + gedimmt · Angefangen: Rest-Zeit + Balken · Als Nächstes: Hinweis
+            if (seen && seen.d && !started) {
+                n.classList.add('seen');
+                n.appendChild(h('span', 'ep-badge done', '✓ Gesehen'));
+            } else if (started) {
+                n.classList.add('started');
                 n.appendChild(h('span', 'ep-left', Resume.leftText(e)));
                 n.appendChild(progressNode(Resume.part(e)));
+            } else if (e && e.next) {
+                n.classList.add('upnext');
+                n.appendChild(h('span', 'ep-badge next', '▶ Als Nächstes'));
+            } else if (seen && seen.p >= 3) {
+                n.classList.add('started');
+                n.appendChild(h('span', 'ep-left', 'Angefangen'));
+                n.appendChild(progressNode(seen.p / 100));
             }
+            n.appendChild(h('span', 'n', String(ep.num || i + 1)));
             n.appendChild(document.createTextNode(ep.name));
             focusable(n, 'ep-' + ep.id, function () { playWithResume(all, all.indexOf(ep), 'episode'); }, 'episodes');
             scroll.appendChild(n);
@@ -6074,7 +6119,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
