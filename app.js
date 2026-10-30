@@ -1769,8 +1769,10 @@
 
             if (this.android) {
                 var fr = this.fractions(rect);
-                this.applyAspect(rect ? 'fit' : this.aspect());
+                this.curRect = rect || null;
+                this.boxed = false;
                 AB.open(url, fr.x, fr.y, fr.w, fr.h);
+                this.applyAspect(rect ? 'fit' : this.aspect());   // danach: legt bei 4:3 usw. die Fläche passend
             } else if (this.tizen) {
                 var av = this.av;
                 try {
@@ -1821,6 +1823,12 @@
         },
 
         setRect: function (rect) {
+            this.curRect = rect || null;
+            this.place(rect);
+        },
+
+        /** Bildfläche an eine Stelle legen (1920er-Koordinaten, null = ganzer Bildschirm) */
+        place: function (rect) {
             if (this.android) {
                 var fr = this.fractions(rect);
                 AB.setRect(fr.x, fr.y, fr.w, fr.h);
@@ -1888,12 +1896,31 @@
         /** Bildformat: 'fit' = ganzes Bild, 'zoom' = Bildschirm füllen, 'fill' = strecken */
         ASPECTS: [
             { id: 'fit', name: 'Original (ganzes Bild)' },
-            { id: 'zoom', name: 'Bildschirm füllen (Zoom)' },
-            { id: 'fill', name: 'Strecken' }
+            { id: 'fill', name: 'Vollbild (strecken)' },
+            { id: 'zoom', name: 'Zoom (füllen, Ränder abschneiden)' },
+            { id: '16:9', name: '16:9', ratio: 16 / 9 },
+            { id: '4:3', name: '4:3', ratio: 4 / 3 },
+            { id: '21:9', name: '21:9 (Kino)', ratio: 21 / 9 }
         ],
         aspect: function () { return Storage.get('aspect', 'fit'); },
         setAspect: function (mode) { Storage.set('aspect', mode); this.applyAspect(mode); },
+        ratioOf: function (mode) {
+            for (var i = 0; i < this.ASPECTS.length; i++) if (this.ASPECTS[i].id === mode) return this.ASPECTS[i].ratio || 0;
+            return 0;
+        },
         applyAspect: function (mode) {
+            // Festes Seitenverhältnis (16:9, 4:3, 21:9): Bildfläche mittig in genau diesem Format, Bild darin strecken
+            var ratio = this.ratioOf(mode);
+            var area = this.curRect || { x: 0, y: 0, w: 1920, h: 1080 };
+            if (ratio) {
+                var bw = area.w, bh = area.w / ratio;
+                if (bh > area.h) { bh = area.h; bw = area.h * ratio; }
+                this.place({ x: area.x + (area.w - bw) / 2, y: area.y + (area.h - bh) / 2, w: bw, h: bh });
+                mode = 'fill';
+            } else if (this.boxed) {
+                this.place(this.curRect);
+            }
+            this.boxed = !!ratio;
             if (this.android) { if (AB.setResize) AB.setResize(mode); return; }
             if (this.tizen) {
                 var m = mode === 'zoom' ? 'PLAYER_DISPLAY_MODE_CROPPED_FULL' : mode === 'fill' ? 'PLAYER_DISPLAY_MODE_FULL_SCREEN' : 'PLAYER_DISPLAY_MODE_LETTER_BOX';
