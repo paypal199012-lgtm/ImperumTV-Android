@@ -721,6 +721,16 @@ body.touch .settings { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .episode .ep-left { float: right; font-size: 22px; color: #d9b066; margin-left: 20px; line-height: 34px; }
 .episode .prog { left: 20px; right: 20px; bottom: 4px; height: 5px; }
 .episode.focused .ep-left { color: #fff; }
+/* Gesehen / angefangen / als Nächstes */
+.episode .ep-badge { float: right; font-size: 21px; line-height: 34px; padding: 0 14px; border-radius: 17px; margin-left: 20px; font-weight: bold; }
+.episode .ep-badge.done { background: rgba(217,176,102,.22); color: #f4dc9e; }
+.episode .ep-badge.next { background: #d9b066; color: #1a1408; }
+.episode.seen { color: rgba(255,255,255,.55); }
+.episode.seen .n { color: rgba(217,176,102,.6); }
+.episode.started { border-left: 5px solid #d9b066; }
+.episode.upnext { border-left: 5px solid #f4dc9e; }
+.episode.focused, .episode.seen.focused { color: #fff; }
+.episode.focused .ep-badge.done { background: rgba(0,0,0,.25); color: #fff; }
 
 /* ---------- Bildschirmtastatur ---------- */
 .kbd { margin-top: 18px; white-space: nowrap; }
