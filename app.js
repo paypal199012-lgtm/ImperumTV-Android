@@ -1902,8 +1902,23 @@
             { id: '4:3', name: '4:3', ratio: 4 / 3 },
             { id: '21:9', name: '21:9 (Kino)', ratio: 21 / 9 }
         ],
-        aspect: function () { return Storage.get('aspect', 'fit'); },
-        setAspect: function (mode) { Storage.set('aspect', mode); this.applyAspect(mode); },
+        /** Bildformat wird je Sender / Film / Serie gemerkt (Schlüssel setzt der Player-Bildschirm) */
+        aspectKey: null,
+        aspect: function () {
+            if (!this.aspectKey) return 'fit';
+            return Storage.get('aspects', {})[this.aspectKey] || 'fit';
+        },
+        setAspect: function (mode) {
+            if (this.aspectKey) {
+                var all = Storage.get('aspects', {}), keys;
+                delete all[this.aspectKey];
+                if (mode !== 'fit') all[this.aspectKey] = mode;    // Original braucht keinen Eintrag
+                keys = Object.keys(all);
+                if (keys.length > 400) delete all[keys[0]];        // Speicher klein halten
+                Storage.set('aspects', all);
+            }
+            this.applyAspect(mode);
+        },
         ratioOf: function (mode) {
             for (var i = 0; i < this.ASPECTS.length; i++) if (this.ASPECTS[i].id === mode) return this.ASPECTS[i].ratio || 0;
             return 0;
@@ -5047,6 +5062,7 @@
             error: function (msg) { self.onError(msg); },
             subtitle: function (text, ms) { self.showSubtitle(text, ms); }
         });
+        Player.aspectKey = this.aspectKey();               // Bildformat dieses Senders/Films/dieser Serie
         var reuse = this.handoff && this.kind === 'live';
         this.handoff = false;
         if (reuse && Player.keep(this.url(), null)) {
@@ -5258,16 +5274,17 @@
     /** Bildformat wählen (gilt für Live TV, Filme und Serien) */
     PlayerScreen.prototype.aspectMenu = function () {
         var self = this, cur = Player.aspect();
+        var what = this.kind === 'live' ? 'für diesen Sender' : this.kind === 'episode' ? 'für diese Serie' : 'für diesen Film';
         clearTimeout(this.hideTimer);
         var buttons = Player.ASPECTS.map(function (a) {
             return { label: (a.id === cur ? '✓  ' : '      ') + a.name, primary: a.id === cur, action: function () {
                 Player.setAspect(a.id);
-                toast('Bildformat: ' + a.name);
+                toast('Bildformat ' + what + ': ' + a.name);
                 self.showOverlay();
             } };
         });
         buttons.push({ label: 'Schließen', action: function () { self.showOverlay(); } });
-        Modal.open('▭ Bildformat', 'Die Wahl gilt für alle Sender, Filme und Serien.', buttons);
+        Modal.open('▭ Bildformat', 'Die Wahl gilt nur ' + what + '. Andere bleiben unverändert.', buttons);
         if (Modal.node) Modal.node.classList.add('modal-list');
         var sel = Modal.node && Modal.node.querySelector('.button.primary');
         if (sel) Focus.set(sel);
@@ -5352,6 +5369,8 @@
     };
     PlayerScreen.prototype.showOverlay = function () {
         var self = this;
+        // Player schon geschlossen (z. B. mit „Zurück“): Leiste nicht wieder einblenden
+        if (Nav.top() !== this) return;
         this.overlay = true;
         this.ui.classList.remove('hidden');
         this.ui.classList.add('player-ui-visible');
@@ -5360,6 +5379,7 @@
         this.hideTimer = setTimeout(function () { self.hideOverlay(); }, 5000);
     };
     PlayerScreen.prototype.hideOverlay = function () {
+        if (Nav.top() !== this) { this.overlay = false; return; }   // nicht den Fokus anderer Bildschirme löschen
         if (!Player.isPlaying() && Player.tizen) {      // Bei Pause stehen lassen
             var self = this;
             clearTimeout(this.hideTimer);
@@ -5380,6 +5400,13 @@
     };
     PlayerScreen.prototype.close = function () {
         Nav.back();
+    };
+    /** Unter welchem Namen das Bildformat gemerkt wird */
+    PlayerScreen.prototype.aspectKey = function () {
+        var it = this.item() || {};
+        if (this.kind === 'live') return 'live:' + it.id;
+        if (this.kind === 'episode') return 'series:' + (this.items[0] && this.items[0].id);   // ganze Serie gleich
+        return (it.type === 'recording' ? 'rec:' : 'movie:') + it.id;
     };
     PlayerScreen.prototype.onKey = function (k) {
         var live = this.kind === 'live';
@@ -5430,6 +5457,7 @@
             Player.stop();
         }
         Player.on({});
+        Player.aspectKey = null;                           // Vorschau & Co. zeigen immer das ganze Bild
         this.ui.innerHTML = '';
         this.ui.classList.add('hidden');
         this.ui.classList.remove('player-ui-visible');
