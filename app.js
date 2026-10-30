@@ -89,7 +89,8 @@
             if (!this.built) this.build();
             clearTimeout(this.doneTimer);
             var el = $('#loader');
-            el.classList.remove('ld-finished');
+            el.classList.remove('ld-finished', 'sync', 'sy-finished');
+            el.onclick = null;
             $('#loader-text').textContent = text || 'Lädt …';
             this.steps = steps || null;
             this.stepsBox.innerHTML = '';
@@ -147,6 +148,153 @@
     }
 
     /** Anmelden und Sender laden, mit Schritten in der Lade-Animation */
+    // =====================================================================
+    // Start & Aktualisieren: Live TV, Filme und Serien mit eigenem Lade-Bildschirm
+    // =====================================================================
+
+    var Sync = {
+        cards: null, skip: null,
+        show: function (title) {
+            var el = $('#loader');
+            Loader.built = false;                       // der normale Lade-Bildschirm baut sich später neu auf
+            clearTimeout(Loader.doneTimer);
+            el.innerHTML = '';
+            el.className = 'sync';
+            el.appendChild(h('div', 'sy-glow'));
+            var logo = h('img', 'sy-logo');
+            logo.src = 'img/logo-frei.png';
+            el.appendChild(logo);
+            var t = h('div', 'sy-title', title);
+            t.id = 'loader-text';
+            el.appendChild(t);
+            var row = h('div', 'sy-cards');
+            this.cards = {};
+            var self = this;
+            [['live', 'tv', 'Live TV'], ['movies', 'film', 'Filme'], ['series', 'series', 'Serien']].forEach(function (c) {
+                var card = h('div', 'sy-card wait');
+                var ico = h('div', 'sy-ico');
+                ico.innerHTML = icon(c[1], 56);
+                card.appendChild(ico);
+                card.appendChild(h('div', 'sy-name', c[2]));
+                var num = h('div', 'sy-num', '–');
+                card.appendChild(num);
+                var state = h('div', 'sy-state', 'wartet …');
+                card.appendChild(state);
+                var badge = h('div', 'sy-new hidden', '');
+                card.appendChild(badge);
+                card.appendChild(h('div', 'sy-run'));
+                row.appendChild(card);
+                self.cards[c[0]] = { card: card, num: num, state: state, badge: badge, timer: null };
+            });
+            el.appendChild(row);
+            this.bar = h('div', 'sy-bar');
+            this.fill = h('div', 'sy-fill');
+            this.bar.appendChild(this.fill);
+            el.appendChild(this.bar);
+            this.hint = h('div', 'sy-hint', '');
+            el.appendChild(this.hint);
+            this.done = 0;
+            this.skip = null;
+            el.classList.remove('hidden');
+        },
+        /** state: 'load' | 'done' | 'fail' */
+        card: function (kind, state, count, fresh, text) {
+            var c = this.cards && this.cards[kind];
+            if (!c) return;
+            c.card.className = 'sy-card ' + state;
+            if (state === 'load') { c.state.textContent = text || 'wird geladen …'; return; }
+            if (state === 'fail') { c.state.textContent = text || 'gerade nicht erreichbar'; c.num.textContent = '–'; }
+            if (state === 'done') {
+                c.state.textContent = '✓ aktuell';
+                this.countUp(c, count || 0);
+                if (fresh > 0) { c.badge.textContent = '+' + fmtNum(fresh) + ' neu'; c.badge.classList.remove('hidden'); }
+            }
+            this.done++;
+            this.fill.style.width = Math.round(this.done / 3 * 100) + '%';
+        },
+        countUp: function (c, n) {
+            clearInterval(c.timer);
+            var start = Date.now(), dur = 700;
+            c.timer = setInterval(function () {
+                var p = Math.min(1, (Date.now() - start) / dur);
+                c.num.textContent = fmtNum(Math.round(n * (1 - Math.pow(1 - p, 3))));
+                if (p >= 1) clearInterval(c.timer);
+            }, 40);
+        },
+        /** Während Filme/Serien noch laden: mit OK schon loslegen */
+        allowSkip: function (fn) {
+            this.skip = fn;
+            this.hint.textContent = 'OK drücken, um schon loszulegen – der Rest lädt im Hintergrund weiter';
+            this.hint.classList.add('show');
+            $('#loader').onclick = function () { if (Sync.skip) Sync.skip(); };   // Finger/Maus
+        },
+        finish: function (text, then, ms) {
+            var el = $('#loader');
+            this.skip = null;
+            this.hint.classList.remove('show');
+            this.fill.style.width = '100%';
+            $('#loader-text').textContent = '✓  ' + text;
+            el.classList.add('sy-finished');
+            setTimeout(function () { Sync.hide(); if (then) then(); }, ms || 900);
+        },
+        hide: function () {
+            var el = $('#loader');
+            this.skip = null;
+            for (var k in this.cards || {}) if (this.cards.hasOwnProperty(k)) clearInterval(this.cards[k].timer);
+            el.classList.add('hidden');
+            el.className = 'hidden';
+            el.innerHTML = '';
+            el.onclick = null;
+        }
+    };
+    function fmtNum(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+
+    /**
+     * Anmelden und alles laden: Live TV, dann Filme und Serien gleichzeitig.
+     * Neu = mehr Einträge als beim letzten Mal auf diesem Gerät.
+     */
+    function syncAll(acc, title, onOk, onErr, pending) {
+        var key = 'counts.' + (acc.demo ? 'demo' : acc.server + '|' + acc.username);
+        var before = Storage.get(key, null);
+        var finished = false, left = 2, mvOk = true, srOk = true;
+        function fresh(now, old) { return before && old > 0 && now > old ? now - old : 0; }
+        Sync.show(title);
+        Sync.card('live', 'load', 0, 0, 'Anmelden …');
+        (pending || Data.login(acc, function (i) { if (i === 1) Sync.card('live', 'load', 0, 0, 'Sender werden geladen …'); })).then(function () {
+            Sync.card('live', 'done', Data.channels.length, fresh(Data.channels.length, before && before.c));
+            Sync.card('movies', 'load');
+            Sync.card('series', 'load');
+            // Wer nicht warten will: los geht's, Filme/Serien laden im Hintergrund fertig
+            Sync.allowSkip(function () { done(true); });
+            Data.loadMovies().then(null, function () { mvOk = false; }).then(function () {
+                if (mvOk) Sync.card('movies', 'done', Data.movies.length, fresh(Data.movies.length, before && before.m));
+                else Sync.card('movies', 'fail');
+                part();
+            });
+            Data.loadSeries().then(null, function () { srOk = false; }).then(function () {
+                if (srOk) Sync.card('series', 'done', Data.series.length, fresh(Data.series.length, before && before.s));
+                else Sync.card('series', 'fail');
+                part();
+            });
+        }, function (e) {
+            Sync.hide();
+            onErr(e);
+        });
+        function part() {
+            left--;
+            if (left > 0) return;
+            Storage.set(key, { c: Data.channels.length, m: Data.moviesLoaded ? Data.movies.length : (before ? before.m : 0),
+                s: Data.seriesLoaded ? Data.series.length : (before ? before.s : 0) });
+            done(false);
+        }
+        function done(skipped) {
+            if (finished) return;
+            finished = true;
+            if (skipped) { Sync.hide(); onOk(); return; }
+            Sync.finish(mvOk && srOk ? 'Alles aktuell' : 'Live TV ist bereit', onOk, 1100);
+        }
+    }
+
     function loginWithSteps(acc, title, onOk, onErr, showMs, pending) {
         var before = Data.channels.length;
         Loader.show(title, ['Anmelden', 'Sender laden', 'Fertig']);
@@ -2131,10 +2279,13 @@
      * Viele Anbieter verlinken Poster von TMDB in Originalgröße (oft 2000 px) – angezeigt werden nur ~200 px.
      * Kleinere Bilder = schneller geladen und viel weniger Arbeit für Fire TV & Co.
      */
+    var THUMB_HOST = (function () { try { return AB && AB.thumbHost ? String(AB.thumbHost() || '') : ''; } catch (e) { return ''; } })();
     function thumbUrl(url, w) {
         if (!url) return url;
         var m = /^(https?:\/\/image\.tmdb\.org\/t\/p\/)[^\/]+(\/.+)$/i.exec(url);
-        if (m) return m[1] + 'w' + (w || 342) + m[2];
+        if (m) url = m[1] + 'w' + (w || 342) + m[2];
+        // Android-App: Bild einmal laden, klein rechnen und auf dem Gerät aufheben (für alle Bild-Server)
+        if (THUMB_HOST && /^https?:\/\//i.test(url)) return 'https://' + THUMB_HOST + '/p?w=260&u=' + encodeURIComponent(url);
         return url;
     }
 
@@ -2297,11 +2448,10 @@
             return;
         }
         var previous = Api.acc;
-        loginWithSteps(acc, 'Verbinde mit „' + p.name + '“ …', function () {
+        syncAll(acc, 'Verbinde mit „' + p.name + '“ …', function () {
             Storage.set('playlistId', p.id);
             Nav.replace(new HomeScreen());
             Updater.autoCheck();
-            preloadVod();
         }, function (e) {
             Api.acc = previous;
             toast(e.message || String(e), 8000);
@@ -2886,68 +3036,13 @@
         toast('Zum Beenden noch einmal Zurück drücken');
     };
 
-    /**
-     * Nach dem Start: Filme und Serien gleich im Hintergrund mitladen (die Startseite ist sofort bedienbar).
-     * Ist seit dem letzten Mal etwas dazugekommen, kommt ein kurzer Hinweis.
-     */
-    function preloadVod() {
-        var acc = Api.acc;
-        if (!acc) return;
-        var key = 'vodCounts.' + (acc.demo ? 'demo' : acc.server + '|' + acc.username);
-        var before = Storage.get(key, null);
-        setTimeout(function () {
-            if (Api.acc !== acc) return;
-            Data.loadMovies().then(null, function () { }).then(function () {
-                return Data.loadSeries().then(null, function () { });
-            }).then(function () {
-                if (Api.acc !== acc) return;
-                var m = Data.moviesLoaded ? Data.movies.length : (before ? before.m : 0);
-                var sr = Data.seriesLoaded ? Data.series.length : (before ? before.s : 0);
-                Storage.set(key, { m: m, s: sr });
-                var news = [];
-                if (before && Data.moviesLoaded && m > before.m) news.push('+' + (m - before.m) + ' Filme');
-                if (before && Data.seriesLoaded && sr > before.s) news.push('+' + (sr - before.s) + ' Serien');
-                var top = Nav.top();
-                if (news.length && !(top instanceof PlayerScreen) && !Modal.node) toast('Neu beim Anbieter: ' + news.join(', '), 5000);
-            });
-        }, 1200);
-    }
-
     /** Aktualisieren: Sender, Filme und Serien neu vom Anbieter holen und zeigen, was neu ist */
     function reloadAll() {
         var acc = Api.acc || Storage.get('account', null);
         if (!acc) return;
-        function ids(list) { var m = {}; list.forEach(function (x) { m[x.id] = true; }); return m; }
-        function fresh(list, before) { if (!before) return 0; return list.filter(function (x) { return !before[x.id]; }).length; }
-        function num(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
-        var oldCh = Data.channels.length ? ids(Data.channels) : null;
-        var oldMv = Data.moviesLoaded ? ids(Data.movies) : null;
-        var oldSr = Data.seriesLoaded ? ids(Data.series) : null;
-        Loader.show('Liste wird aktualisiert …', ['Anmelden', 'Sender', 'Filme', 'Serien', 'Fertig']);
-        var mvOk = true, srOk = true;
-        Data.login(acc, function (i) { Loader.step(i); }).then(function () {
-            Loader.step(2);
-            return Data.loadMovies().then(null, function () { mvOk = false; });
-        }).then(function () {
-            Loader.step(3);
-            return Data.loadSeries().then(null, function () { srOk = false; });
-        }).then(function () {
-            var parts = [num(Data.channels.length) + ' Sender'];
-            if (mvOk) parts.push(num(Data.movies.length) + ' Filme');
-            if (srOk) parts.push(num(Data.series.length) + ' Serien');
-            var news = [], a = fresh(Data.channels, oldCh), b = mvOk ? fresh(Data.movies, oldMv) : 0, c = srOk ? fresh(Data.series, oldSr) : 0;
-            if (a) news.push('+' + num(a) + ' Sender');
-            if (b) news.push('+' + num(b) + ' Filme');
-            if (c) news.push('+' + num(c) + ' Serien');
-            var text = parts.join(' · ') + (news.length ? '  (neu: ' + news.join(', ') + ')' : '');
-            if (Api.acc) Storage.set('vodCounts.' + (Api.acc.demo ? 'demo' : Api.acc.server + '|' + Api.acc.username),
-                { m: mvOk ? Data.movies.length : 0, s: srOk ? Data.series.length : 0 });
-            Loader.done(text, function () {
-                Nav.replace(new HomeScreen());
-                if (!mvOk || !srOk) toast((!mvOk ? 'Filme' : 'Serien') + ' ließen sich gerade nicht laden. Sie werden beim Öffnen erneut geholt.', 6000);
-            }, 1800);
+        syncAll(acc, 'Liste wird aktualisiert …', function () {
+            Nav.replace(new HomeScreen());
         }, function (e) {
-            Loader.hide();
             toast(e.message || String(e), 6000);
         });
     }
@@ -5186,7 +5281,11 @@
             return;
         }
 
-        if (!$('#loader').classList.contains('hidden')) { e.preventDefault(); return; }
+        if (!$('#loader').classList.contains('hidden')) {
+            if (Sync.skip && (k === KEY.ENTER || k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE)) Sync.skip();
+            e.preventDefault();
+            return;
+        }
 
         if (Modal.node) {
             if (Modal.pinInput && ((k >= 48 && k <= 57) || (k >= 96 && k <= 105))) {
@@ -5287,13 +5386,12 @@
         function start(acc) {
             var pending = early && sameAcc(acc, saved) ? early : null;
             early = null;
-            loginWithSteps(acc, 'ImperumTV wird gestartet …', function () {
+            syncAll(acc, 'ImperumTV wird gestartet …', function () {
                 Nav.replace(new HomeScreen());
                 Updater.autoCheck();
-                preloadVod();
             }, function (e) {
                 Nav.replace(new PlaylistsScreen(e.message || String(e)));
-            }, 300, pending);
+            }, pending);
         }
 
         loader(true, 'Wiedergabelisten werden geladen …');
@@ -5328,10 +5426,9 @@
         var chosen = lastId !== null ? Remote.find(lastId) : null;
         var acc = chosen ? playlistAccount(chosen) : null;
         if (!acc) { Nav.replace(new PlaylistsScreen()); return; }
-        loginWithSteps(acc, 'Anmelden und Sender laden …', function () {
+        syncAll(acc, 'Anmelden und alles laden …', function () {
             Nav.replace(new HomeScreen());
             Updater.autoCheck();
-            preloadVod();
         }, function (e) {
             Nav.replace(new PlaylistsScreen(e.message || String(e)));
         });
