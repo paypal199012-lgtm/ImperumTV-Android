@@ -905,3 +905,16 @@ body.lowfx .sy-logo { filter: none; }
 
 /* Player-Leiste: alle Knöpfe in eine Zeile (etwas schmaler, damit auch 10 Knöpfe passen) */
 .pl-bottom .pl-btn { padding: 14px 20px; margin: 0 5px; font-size: 25px; min-width: 0; }
+
+/* Anzahl je Kategorie (Filme, Serien) */
+.cat.with-n { display: flex; align-items: center; }
+.cat.with-n .cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cat .cat-n { flex: none; margin-left: 12px; font-size: 21px; color: #8f8a80; font-variant-numeric: tabular-nums; }
+.cat.active .cat-n { color: #d9b066; }
+.cat.focused .cat-n { color: #f4dc9e; }
+.cat.locked.with-n svg { flex: none; }
+
+/* Staffel-Leiste: bei vielen Staffeln seitlich scrollen, rechts ausblenden als Hinweis auf mehr */
+.seasons.hscroll { overflow-x: auto; overflow-y: hidden; padding: 6px 4px 8px; margin-left: -4px; scrollbar-width: none; }
+.seasons.hscroll.more { -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent); mask-image: linear-gradient(90deg, #000 90%, transparent); }
+.seasons.hscroll::-webkit-scrollbar { display: none; }
