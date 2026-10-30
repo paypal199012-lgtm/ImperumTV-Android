@@ -5509,10 +5509,10 @@
                     info.appendChild(lbar);
                 }
             } else {
-                info.appendChild(h('div', 'pb-now dim', 'Keine Programminfo'));
                 this.liveFill = null;
             }
-            if (next) info.appendChild(h('div', 'pb-next', 'Danach: ' + next.title + '   ab ' + fmtClock(new Date(next.start))));
+            info.appendChild(h('div', 'pb-next', next ? 'Danach: ' + next.title + '   ab ' + fmtClock(new Date(next.start))
+                : 'Kanal ' + (this.index + 1) + ' / ' + this.items.length + '   ·   ▲▼ Kanal wechseln   ·   OK Senderliste'));
         } else {
             if (this.kind === 'episode') info.appendChild(h('div', 'pb-now', 'Staffel ' + it.season + ' · Folge ' + (it.num || this.index + 1)));
             var bar = h('div', 'pl-bar pb-bar'); this.barFill = h('div', 'bar'); bar.appendChild(this.barFill);
@@ -5524,9 +5524,6 @@
             info.appendChild(times);
         }
         head.appendChild(info);
-        if (this.kind === 'live') {
-            head.appendChild(h('div', 'pb-hint', 'Kanal ' + (this.index + 1) + ' / ' + this.items.length + '\n▲▼ wechseln · OK Liste'));
-        }
         banner.appendChild(head);
 
         // Runde Symbol-Knöpfe; der Name erscheint nur über dem markierten Knopf
@@ -5538,11 +5535,10 @@
             focusable(b, key, function () { action(); self.showOverlay(); }, 'player');
             buttons.appendChild(b);
         }
+        // Nur was die Fernbedienung nicht schon kann: Kanal ▲▼ und Zurück-Taste brauchen keinen Knopf
         var playing = Player.isPlaying();
         if (this.kind === 'live') {
-            btn('pl-prev', '‹', 'Kanal zurück', function () { self.step(-1); });
             btn('pl-play', playing ? '❚❚' : '▶', playing ? 'Pause' : 'Weiter', function () { Player.toggle(); self.renderOverlay(); });
-            btn('pl-next', '›', 'Kanal vor', function () { self.step(1); });
             if (this.items.length > 1) btn('pl-list', '☰', 'Senderliste', function () { self.openZap(); });
         } else {
             btn('pl-rw', '«', '10 s zurück', function () { Player.seekBy(-10); });
@@ -5559,8 +5555,9 @@
             btn('pl-switch', '⇄', 'Anderer Player', function () { self.switchPlayer(); });
         }
         btn('pl-aspect', '▭', 'Bildformat', function () { self.aspectMenu(); });
-        btn('pl-audio', '♪', 'Sprache', function () { self.trackMenu('audio'); });
-        btn('pl-sub', 'CC', 'Untertitel', function () { self.trackMenu('text'); });
+        // Sprache/Untertitel nur, wenn es wirklich eine Auswahl gibt
+        if (Player.trackList('audio').length > 1) btn('pl-audio', '♪', 'Sprache', function () { self.trackMenu('audio'); });
+        if (Player.trackList('text').length > 0) btn('pl-sub', 'CC', 'Untertitel', function () { self.trackMenu('text'); });
         if (this.kind !== 'episode' && it.type !== 'recording') {
             var favType = this.kind === 'live' ? 'live' : 'movie';
             var isFav = Favs.has(favType, it.id);
@@ -5570,8 +5567,7 @@
                 self.renderOverlay();
             });
         }
-        btn('pl-back', '↩', 'Zurück', function () { self.close(); });
-        banner.appendChild(buttons);
+        head.appendChild(buttons);
         ui.appendChild(banner);
 
         var target = Focus.byKey(focusedKey) || Focus.byKey('pl-play');
