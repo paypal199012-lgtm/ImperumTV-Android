@@ -44,7 +44,7 @@ cp logo-frei.png "$OUT/app/src/main/assets/www/img/logo-frei.png"
 
 # FFmpeg-Ton-Decoder (MP2 vieler TV-Sender, Dolby, DTS …) – nur eintragen, wenn es die passende Version gibt,
 # damit der Build sonst trotzdem klappt
-MEDIA3=1.4.1
+MEDIA3=1.5.0
 BASE=https://repo1.maven.org/maven2/org/jellyfin/media3/media3-ffmpeg-decoder
 FFV=$(curl -fsSL --max-time 20 "$BASE/maven-metadata.xml" 2>/dev/null | grep -o "<version>$MEDIA3+[0-9]*</version>" | sed 's/<[^>]*>//g' | sort -t+ -k2 -n | tail -1 || true)
 if [ -n "$FFV" ] && curl -fsI --max-time 20 "$BASE/$FFV/media3-ffmpeg-decoder-$FFV.pom" >/dev/null 2>&1; then

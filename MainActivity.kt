@@ -47,7 +47,6 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.DefaultExtractorsFactory
-import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -106,7 +105,7 @@ class MainActivity : Activity() {
         val n = counters.renderedOutputBufferCount
         val now = System.currentTimeMillis()
         if (n != lastFrames) { lastFrames = n; frozenSince = now; return }
-        if (now - frozenSince > 6_000 && freezeFixes < 2) {
+        if (now - frozenSince > 8_000 && freezeFixes < 1) {
             freezeFixes++
             frozenSince = now
             if (player.isCurrentMediaItemLive) player.seekToDefaultPosition()
@@ -159,7 +158,7 @@ class MainActivity : Activity() {
         // Bild: klappt der eingebaute Decoder nicht, nimmt der Player den nächsten.
         // Ton immer selbst entschlüsseln und als PCM ausgeben: kein „Durchreichen“ von Dolby an den Fernseher
         // (kann der Fernseher das Format nicht, bleibt es sonst stumm – ohne Fehlermeldung).
-        // FFmpeg zuerst (MP2, Dolby, DTS …), sonst der Decoder des Geräts.
+        // Decoder des Geräts zuerst; FFmpeg nur für Ton, den das Gerät nicht kann (MP2, DTS …).
         val renderers = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink? {
                 @Suppress("DEPRECATION")
@@ -171,10 +170,9 @@ class MainActivity : Activity() {
             }
         }
             .setEnableDecoderFallback(true)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-        // RAW-/Sat-Sender: Bild auch ohne „IDR“-Startbild beginnen, Bildgrenzen selbst erkennen
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        // Standard-Einstellungen für TS-Sender (Sonder-Flags ließen auf manchen Fire-TV-Chips das Bild hängen)
         val extractors = DefaultExtractorsFactory()
-            .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
         player = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors))
             .build()
