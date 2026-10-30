@@ -184,6 +184,24 @@ class MainActivity : Activity() {
                     fitToScreen()
                 }
 
+                // Oberfläche abgestürzt (meist Speicher voll): App NICHT beenden lassen,
+                // sondern neu aufbauen. Die Oberfläche startet dann im Sparmodus.
+                @android.annotation.TargetApi(26)
+                override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                    val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
+                    val now = System.currentTimeMillis()
+                    val last = prefs.getLong("renderGone", 0L)
+                    val count = if (now - last < 60_000) prefs.getInt("renderGoneCount", 0) + 1 else 1
+                    prefs.edit().putLong("renderGone", now).putInt("renderGoneCount", count).apply()
+                    try { (view.parent as? ViewGroup)?.removeView(view) } catch (e: Throwable) { }
+                    try { view.destroy() } catch (e: Throwable) { }
+                    handler.post {
+                        // Dreimal in einer Minute: aufgeben statt endlos neu zu starten
+                        if (count >= 3) finish() else recreate()
+                    }
+                    return true
+                }
+
                 // Poster verkleinert liefern (läuft im Hintergrund, nicht auf dem Haupt-Thread)
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     val uri = request.url
@@ -404,7 +422,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         player.release()
-        webView.destroy()
+        try { webView.destroy() } catch (e: Throwable) { }
         super.onDestroy()
     }
 
@@ -608,6 +626,11 @@ class MainActivity : Activity() {
     // ---------- Schnittstelle für die Web-Seite ----------
 
     inner class Bridge {
+
+        /** Zeitpunkt des letzten Absturzes der Oberfläche (ms seit 1970, 0 = nie) */
+        @JavascriptInterface
+        fun lastCrash(): Double =
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getLong("renderGone", 0L).toDouble()
 
         @JavascriptInterface
         fun open(url: String, x: Double, y: Double, w: Double, h: Double) {
