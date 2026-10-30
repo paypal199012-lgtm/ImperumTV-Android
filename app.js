@@ -1203,15 +1203,20 @@
                 if (!self.channels.length) throw new Error('Anmeldung klappt, aber der Server liefert keine Live-Sender.');
                 self.movies = []; self.series = [];
                 self.moviesLoaded = false; self.seriesLoaded = false;
+                self.gen++; self.moviesPromise = null; self.seriesPromise = null;
                 self.epgCache = {};
                 Storage.set('account', acc);
             });
         },
 
+        gen: 0, moviesPromise: null, seriesPromise: null,
+
         loadMovies: function () {
-            var self = this;
+            var self = this, gen = this.gen;
             if (self.moviesLoaded) return Promise.resolve();
-            return Promise.all([Api.call('get_vod_categories'), Api.call('get_vod_streams')]).then(function (res) {
+            if (self.moviesPromise) return self.moviesPromise;       // lädt schon (z. B. im Hintergrund beim Start)
+            self.moviesPromise = Promise.all([Api.call('get_vod_categories'), Api.call('get_vod_streams')]).then(function (res) {
+                if (gen !== self.gen) return;                         // inzwischen andere Liste gewählt
                 var cats = self.catMap(res[0]);
                 var list = Array.isArray(res[1]) ? res[1] : [];
                 self.movies = list.map(function (s) {
@@ -1231,12 +1236,16 @@
                 }).filter(function (m) { return !isNaN(m.id); });
                 self.moviesLoaded = true;
             });
+            self.moviesPromise.then(function () { if (gen === self.gen) self.moviesPromise = null; }, function () { if (gen === self.gen) self.moviesPromise = null; });
+            return self.moviesPromise;
         },
 
         loadSeries: function () {
-            var self = this;
+            var self = this, gen = this.gen;
             if (self.seriesLoaded) return Promise.resolve();
-            return Promise.all([Api.call('get_series_categories'), Api.call('get_series')]).then(function (res) {
+            if (self.seriesPromise) return self.seriesPromise;
+            self.seriesPromise = Promise.all([Api.call('get_series_categories'), Api.call('get_series')]).then(function (res) {
+                if (gen !== self.gen) return;
                 var cats = self.catMap(res[0]);
                 var list = Array.isArray(res[1]) ? res[1] : [];
                 self.series = list.map(function (s) {
@@ -1254,6 +1263,8 @@
                 }).filter(function (s) { return !isNaN(s.id); });
                 self.seriesLoaded = true;
             });
+            self.seriesPromise.then(function () { if (gen === self.gen) self.seriesPromise = null; }, function () { if (gen === self.gen) self.seriesPromise = null; });
+            return self.seriesPromise;
         },
 
         movieInfo: function (id) {
@@ -1376,8 +1387,20 @@
         emit: function (name, a, b) { var f = this.handlers[name]; if (f) f(a, b); },
 
         /** rect in 1920er-Koordinaten oder null für Vollbild */
+        /**
+         * Läuft genau dieser Sender schon (z. B. in der Vorschau)? Dann nur das Bild verschieben/vergrößern,
+         * ohne neu zu laden. true = übernommen.
+         */
+        keep: function (url, rect) {
+            if (!url || this.url !== url) return false;
+            this.setRect(rect);
+            this.applyAspect(rect ? 'fit' : this.aspect());
+            return true;
+        },
+
         open: function (url, rect) {
             this.stop();
+            this.url = url;
             this.subtitleOn = false;
             this.subIndex = -1;
             this.emit('buffer', true);
@@ -1459,6 +1482,7 @@
         },
 
         stop: function () {
+            this.url = null;
             if (this.android) { AB.stop(); return; }
             if (this.tizen) {
                 try { this.av.stop(); } catch (e) { /* war nicht offen */ }
@@ -1813,7 +1837,9 @@
                 return;
             }
             var cur = this.stack.pop();
+            cur._backTo = this.top();          // der Bildschirm darunter (für „Sender weiterlaufen lassen“)
             if (cur.hide) cur.hide();
+            cur._backTo = null;
             var top = this.top();
             if (top._dom && (!top.canRevive || top.canRevive())) this.revive(top);
             else { top._dom = null; this.show(top, true); }
@@ -2191,6 +2217,7 @@
             Storage.set('playlistId', p.id);
             Nav.replace(new HomeScreen());
             Updater.autoCheck();
+            preloadVod();
         }, function (e) {
             Api.acc = previous;
             toast(e.message || String(e), 8000);
@@ -2775,6 +2802,33 @@
         toast('Zum Beenden noch einmal Zurück drücken');
     };
 
+    /**
+     * Nach dem Start: Filme und Serien gleich im Hintergrund mitladen (die Startseite ist sofort bedienbar).
+     * Ist seit dem letzten Mal etwas dazugekommen, kommt ein kurzer Hinweis.
+     */
+    function preloadVod() {
+        var acc = Api.acc;
+        if (!acc) return;
+        var key = 'vodCounts.' + (acc.demo ? 'demo' : acc.server + '|' + acc.username);
+        var before = Storage.get(key, null);
+        setTimeout(function () {
+            if (Api.acc !== acc) return;
+            Data.loadMovies().then(null, function () { }).then(function () {
+                return Data.loadSeries().then(null, function () { });
+            }).then(function () {
+                if (Api.acc !== acc) return;
+                var m = Data.moviesLoaded ? Data.movies.length : (before ? before.m : 0);
+                var sr = Data.seriesLoaded ? Data.series.length : (before ? before.s : 0);
+                Storage.set(key, { m: m, s: sr });
+                var news = [];
+                if (before && Data.moviesLoaded && m > before.m) news.push('+' + (m - before.m) + ' Filme');
+                if (before && Data.seriesLoaded && sr > before.s) news.push('+' + (sr - before.s) + ' Serien');
+                var top = Nav.top();
+                if (news.length && !(top instanceof PlayerScreen) && !Modal.node) toast('Neu beim Anbieter: ' + news.join(', '), 5000);
+            });
+        }, 1200);
+    }
+
     /** Aktualisieren: Sender, Filme und Serien neu vom Anbieter holen und zeigen, was neu ist */
     function reloadAll() {
         var acc = Api.acc || Storage.get('account', null);
@@ -2802,6 +2856,8 @@
             if (b) news.push('+' + num(b) + ' Filme');
             if (c) news.push('+' + num(c) + ' Serien');
             var text = parts.join(' · ') + (news.length ? '  (neu: ' + news.join(', ') + ')' : '');
+            if (Api.acc) Storage.set('vodCounts.' + (Api.acc.demo ? 'demo' : Api.acc.server + '|' + Api.acc.username),
+                { m: mvOk ? Data.movies.length : 0, s: srOk ? Data.series.length : 0 });
             Loader.done(text, function () {
                 Nav.replace(new HomeScreen());
                 if (!mvOk || !srOk) toast((!mvOk ? 'Filme' : 'Serien') + ' ließen sich gerade nicht laden. Sie werden beim Öffnen erneut geholt.', 6000);
@@ -2930,7 +2986,8 @@
             error: function () { toast('Vorschau nicht verfügbar: ' + ch.name); },
             ready: function () { Player.applyPreferences(); }
         });
-        Player.open(Api.liveUrl(ch.id), stageRect(this.previewBox));
+        var url = Api.liveUrl(ch.id), rect = stageRect(this.previewBox);
+        if (!Player.keep(url, rect)) Player.open(url, rect);     // läuft schon (z. B. aus dem Vollbild zurück): nur verkleinern
         this.renderInfo(ch, []);
         Data.shortEpg(ch.id).then(function (list) {
             if (self.selected && self.selected.id === ch.id) self.renderInfo(ch, list);
@@ -2958,8 +3015,10 @@
     };
     LiveScreen.prototype.openFullscreen = function (index) {
         Player.on({});
-        Player.stop();
-        Nav.push(new PlayerScreen(this.list, index, 'live'));
+        this.handoff = true;                           // Bild weiterlaufen lassen, nur groß machen
+        var screen = new PlayerScreen(this.list, index, 'live');
+        screen.handoff = true;
+        Nav.push(screen);
     };
     LiveScreen.prototype.onKey = function (k) {
         if (k === KEY.YELLOW && Focus.cur && Focus.cur._channel) {
@@ -2975,7 +3034,8 @@
     };
     LiveScreen.prototype.hide = function () {
         Player.on({});
-        Player.stop();
+        if (this.handoff) this.handoff = false;        // Vollbild übernimmt den laufenden Sender
+        else Player.stop();
         document.body.classList.remove('preview-mode');
     };
 
@@ -3938,7 +3998,8 @@
         clearTimeout(this.previewTimer);
         EpgQueue.clear();
         Player.on({});
-        Player.stop();
+        if (this.handoff) this.handoff = false;
+        else Player.stop();
         this.previewId = null;
     };
 
@@ -4065,11 +4126,19 @@
         this.previewLabel.textContent = ch.num + ' · ' + ch.name;
         if (this.previewId === ch.id) return;
         clearTimeout(this.previewTimer);
+        // Kommt man aus dem Vollbild zurück, läuft der Sender schon: sofort verkleinern statt warten
+        if (Player.url && Player.url === Api.liveUrl(ch.id)) {
+            this.previewId = ch.id;
+            Player.on({ ready: function () { Player.applyPreferences(); } });
+            Player.keep(Player.url, stageRect(this.previewBox));
+            return;
+        }
         this.previewTimer = setTimeout(function () {
             if (Nav.top() !== self || Modal.node) return;
             self.previewId = ch.id;
             Player.on({ ready: function () { Player.applyPreferences(); } });
-            Player.open(Api.liveUrl(ch.id), stageRect(self.previewBox));
+            var url = Api.liveUrl(ch.id), rect = stageRect(self.previewBox);
+            if (!Player.keep(url, rect)) Player.open(url, rect);
         }, 900);
     };
 
@@ -4150,7 +4219,16 @@
         var now = Date.now();
         if (!p.placeholder && p.end <= now) { toast('Diese Sendung ist schon vorbei.'); return; }
         var running = p.placeholder || (p.start <= now && p.end > now);
-        var watch = function () { Player.on({}); Player.stop(); self.previewId = null; Nav.push(new PlayerScreen(self.list, self.chIndex, 'live')); };
+        var watch = function () {
+            Player.on({});
+            var keepIt = self.previewId === ch.id;    // Vorschau zeigt schon diesen Sender: nur groß machen
+            if (!keepIt) Player.stop();
+            self.handoff = keepIt;
+            self.previewId = null;
+            var screen = new PlayerScreen(self.list, self.chIndex, 'live');
+            screen.handoff = keepIt;
+            Nav.push(screen);
+        };
         if (!Rec.available() || p.placeholder) { if (running) watch(); else toast('Diese Sendung beginnt erst um ' + fmtClock(new Date(p.start)) + '.'); return; }
 
         var mark = this.marks[ch.id + ':' + p.start];
@@ -4601,7 +4679,13 @@
             error: function (msg) { self.onError(msg); },
             subtitle: function (text, ms) { self.showSubtitle(text, ms); }
         });
-        Player.open(this.url(), null);
+        var reuse = this.handoff && this.kind === 'live';
+        this.handoff = false;
+        if (reuse && Player.keep(this.url(), null)) {
+            self.buffering = false;                    // Bild läuft schon: nur auf Vollbild vergrößert
+        } else {
+            Player.open(this.url(), null);
+        }
         this.nowTitle = '';
         if (this.kind === 'live') {
             var it = this.item();
@@ -4966,7 +5050,17 @@
         clearTimeout(this.hideTimer);
         clearTimeout(this.subTimer);
         clearInterval(this.watchdog);
-        Player.stop();
+        // Zurück aus dem Live-Vollbild in die Senderliste/EPG: Sender weiterlaufen lassen, dort nur verkleinern
+        var below = this._backTo;
+        var ch = this.kind === 'live' ? this.item() : null;
+        if (ch && below && (below instanceof LiveScreen || below instanceof EpgGridScreen)) {
+            if (below instanceof LiveScreen) below.selected = ch;
+            if (below instanceof EpgGridScreen) {
+                for (var i = 0; i < below.list.length; i++) if (below.list[i].id === ch.id) { below.chIndex = i; break; }
+            }
+        } else {
+            Player.stop();
+        }
         Player.on({});
         this.ui.innerHTML = '';
         this.ui.classList.add('hidden');
@@ -5109,6 +5203,7 @@
             loginWithSteps(acc, 'ImperumTV wird gestartet …', function () {
                 Nav.replace(new HomeScreen());
                 Updater.autoCheck();
+                preloadVod();
             }, function (e) {
                 Nav.replace(new PlaylistsScreen(e.message || String(e)));
             }, 300, pending);
@@ -5149,6 +5244,7 @@
         loginWithSteps(acc, 'Anmelden und Sender laden …', function () {
             Nav.replace(new HomeScreen());
             Updater.autoCheck();
+            preloadVod();
         }, function (e) {
             Nav.replace(new PlaylistsScreen(e.message || String(e)));
         });
