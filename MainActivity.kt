@@ -5,6 +5,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -21,6 +23,8 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -61,6 +65,8 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_EXTERNAL = 4711
+        /** Erfundene Adresse: Anfragen dorthin beantwortet die App selbst mit verkleinerten Postern */
+        const val THUMB_HOST = "thumbs.imperum.local"
     }
 
     private lateinit var root: FrameLayout
@@ -177,6 +183,13 @@ class MainActivity : Activity() {
                 override fun onPageFinished(view: WebView, url: String) {
                     fitToScreen()
                 }
+
+                // Poster verkleinert liefern (läuft im Hintergrund, nicht auf dem Haupt-Thread)
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    val uri = request.url
+                    if (uri.host != THUMB_HOST) return null
+                    return thumbResponse(uri)
+                }
             }
             webChromeClient = WebChromeClient()
             addJavascriptInterface(Bridge(), "AndroidBridge")
@@ -190,6 +203,7 @@ class MainActivity : Activity() {
 
         setContentView(root)
         webView.loadUrl("file:///android_asset/www/index.html")
+        trimThumbs()
 
         // Geplante Aufnahmen: Wecker neu stellen, verpasste Starts nachholen
         try { Recorder.armAll(this) } catch (e: Exception) { }
@@ -424,6 +438,95 @@ class MainActivity : Activity() {
         cachedPosition = player.currentPosition / 1000.0
         val d = player.duration
         cachedDuration = if (d == C.TIME_UNSET || d <= 0 || player.isCurrentMediaItemLive) 0.0 else d / 1000.0
+    }
+
+    // ---------- Poster verkleinern und auf dem Gerät aufheben ----------
+    // Anbieter liefern Poster oft in voller Größe (1000–2000 px). Angezeigt werden ~200 px.
+    // Hier wird jedes Bild einmal geladen, klein gerechnet und als kleines JPEG im Zwischenspeicher abgelegt.
+
+    private val thumbDir: File by lazy { File(cacheDir, "thumbs").apply { mkdirs() } }
+
+    private fun thumbResponse(uri: Uri): WebResourceResponse {
+        val src = uri.getQueryParameter("u")
+        val width = (uri.getQueryParameter("w")?.toIntOrNull() ?: 260).coerceIn(80, 800)
+        if (src.isNullOrBlank()) return notFound()
+        val name = Integer.toHexString(src.hashCode()) + "_" + Integer.toHexString(src.length) + "_" + width + ".jpg"
+        val file = File(thumbDir, name)
+        try {
+            if (!file.exists() || file.length() == 0L) {
+                val bytes = downloadBytes(src) ?: return notFound()
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                if (bounds.outWidth <= 0) return notFound()
+                var sample = 1
+                while (bounds.outWidth / (sample * 2) >= width) sample *= 2
+                val opts = BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                }
+                val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return notFound()
+                val scaled = if (decoded.width > width * 5 / 4) {
+                    Bitmap.createScaledBitmap(decoded, width, (decoded.height.toLong() * width / decoded.width).toInt().coerceAtLeast(1), true)
+                } else decoded
+                val tmp = File(thumbDir, "$name.tmp${Thread.currentThread().id}")
+                FileOutputStream(tmp).use { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }
+                if (scaled !== decoded) scaled.recycle()
+                decoded.recycle()
+                if (!tmp.renameTo(file)) tmp.delete()
+            }
+            if (!file.exists()) return notFound()
+            val headers = mapOf("Cache-Control" to "max-age=2592000", "Access-Control-Allow-Origin" to "*")
+            return WebResourceResponse("image/jpeg", null, 200, "OK", headers, file.inputStream())
+        } catch (e: Throwable) {
+            return notFound()
+        }
+    }
+
+    private fun notFound(): WebResourceResponse =
+        WebResourceResponse("text/plain", "utf-8", 404, "Not Found", mapOf("Access-Control-Allow-Origin" to "*"), java.io.ByteArrayInputStream(ByteArray(0)))
+
+    /** Bild laden, Weiterleitungen (auch http↔https) selbst folgen */
+    private fun downloadBytes(start: String): ByteArray? {
+        var url = start
+        repeat(5) {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = 12_000
+            conn.readTimeout = 15_000
+            conn.setRequestProperty("User-Agent", "ImperumTV/1.0 (Android)")
+            try {
+                val code = conn.responseCode
+                if (code in 300..399) {
+                    val next = conn.getHeaderField("Location") ?: return null
+                    url = URL(URL(url), next).toString()
+                    return@repeat
+                }
+                if (code !in 200..299) return null
+                val len = conn.contentLength
+                if (len > 15_000_000) return null
+                return conn.inputStream.use { it.readBytes() }
+            } finally {
+                conn.disconnect()
+            }
+        }
+        return null
+    }
+
+    /** Zwischenspeicher klein halten (älteste Bilder zuerst weg) */
+    private fun trimThumbs() {
+        Thread {
+            try {
+                val files = thumbDir.listFiles() ?: return@Thread
+                var total = files.sumOf { it.length() }
+                val limit = 120L * 1024 * 1024
+                if (total <= limit) return@Thread
+                for (f in files.sortedBy { it.lastModified() }) {
+                    total -= f.length()
+                    f.delete()
+                    if (total <= limit * 3 / 4) break
+                }
+            } catch (e: Exception) { }
+        }.start()
     }
 
     private fun emit(name: String, value: Any?) {
@@ -787,6 +890,10 @@ class MainActivity : Activity() {
         }
 
         /** Trailer: zuerst die YouTube-App, sonst Browser. false = nichts gefunden (dann zeigt die App ihn selbst) */
+        /** Die Oberfläche fragt, ob Poster über die Verkleinerung geladen werden können */
+        @JavascriptInterface
+        fun thumbHost(): String = THUMB_HOST
+
         @JavascriptInterface
         fun openYoutube(id: String): Boolean {
             val clean = id.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
