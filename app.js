@@ -2526,6 +2526,7 @@
         }
         scroll.appendChild(h('div', 'col-head', 'Kategorien'));
         var kind = search && search.kind;
+        var counts = search && search.counts;               // Anzahl je Kategorie (gleiche Reihenfolge wie cats)
         cats.forEach(function (name, i) {
             var item = h('div', 'cat' + (i === activeIndex ? ' active' : ''));
             if (kind && Parental.catProtected(kind, name)) {
@@ -2534,6 +2535,13 @@
                 item.lastChild.textContent = name;
             } else {
                 item.textContent = name;
+            }
+            if (counts && counts[i] !== undefined && counts[i] !== null) {
+                var label = h('span', 'cat-name');
+                while (item.firstChild) label.appendChild(item.firstChild);
+                item.appendChild(label);
+                item.appendChild(h('span', 'cat-n', fmtNum(counts[i])));
+                item.classList.add('with-n');
             }
             focusable(item, 'cat-' + i, function () {
                 if (kind && Parental.catLocked(kind, name)) Parental.ask('PIN für „' + name + '“', function () { onSelect(i); });
@@ -3657,6 +3665,32 @@
         if (this.kind === 'movies') base.push(this.yearLabel());
         return base.concat(cats);
     };
+    /** Wie viele Filme/Serien in jeder Kategorie stecken (ein Durchlauf über alle Einträge) */
+    MoviesScreen.prototype.catCounts = function () {
+        var items = this.items(), all = this.allItems(), fav = this.favType(), c = this._cc;
+        // Zählen nur, wenn sich die Liste geändert hat (bei zehntausenden Filmen spürbar)
+        if (!c || c.all !== all || c.len !== items.length) {
+            var per = {}, year = 0, ids = {}, thisYear = new Date().getFullYear();
+            for (var i = 0; i < items.length; i++) {
+                var m = items[i];
+                if (m.cat) per[m.cat] = (per[m.cat] || 0) + 1;
+                if (m.year === thisYear) year++;
+                ids[m.id] = 1;
+            }
+            c = this._cc = { all: all, len: items.length, per: per, year: year, ids: ids };
+        }
+        var favs = 0, pre = fav + ':';
+        for (var k in Favs.set) if (Favs.set.hasOwnProperty(k) && k.indexOf(pre) === 0 && c.ids[k.slice(pre.length)]) favs++;
+        var self = this;
+        return this.categories().map(function (cat, i) {
+            if (i === 0) return items.length;
+            if (i === 1) return favs;
+            if (cat === RESUME_CAT) return self.resumeItems().length;
+            if (cat === NEW_CAT) return self.newItems().length;
+            if (self.kind === 'movies' && cat === self.yearLabel()) return c.year;
+            return c.per[cat] || 0;
+        });
+    };
     MoviesScreen.prototype.applySearch = applySearch;
     MoviesScreen.prototype.openSearch = function () {
         var self = this, items = this.items();
@@ -3767,7 +3801,7 @@
             Nav.show(self);
             var first = $('.poster');
             if (first) Focus.set(first);
-        }, { query: this.query, kind: this.favType(), onClick: function () { self.openSearch(); },
+        }, { query: this.query, kind: this.favType(), onClick: function () { self.openSearch(); }, counts: this.catCounts(),
              sort: { label: 'Sortieren: ' + this.sortName(), onClick: function () { self.sortMenu(); } } }));
 
         var gridCol = h('div', 'col col-grid');
@@ -4298,7 +4332,7 @@
         // Staffeln
         var seasons = [];
         this.episodes.forEach(function (e) { if (seasons.indexOf(e.season) < 0) seasons.push(e.season); });
-        var row = h('div', 'seasons');
+        var row = h('div', 'seasons hscroll');          // viele Staffeln: Leiste scrollt seitlich mit
         seasons.forEach(function (n) {
             var b = h('div', 'season' + (n === self.season ? ' active' : ''), 'Staffel ' + n);
             focusable(b, 'season-' + n, function () {
@@ -4309,6 +4343,14 @@
             row.appendChild(b);
         });
         body.appendChild(row);
+        // Gewählte Staffel sichtbar machen (z. B. Staffel 11 ganz rechts)
+        function moreRight() { row.classList.toggle('more', row.scrollLeft + row.clientWidth < row.scrollWidth - 4); }
+        row.addEventListener('scroll', moreRight);
+        setTimeout(function () {
+            var act = row.querySelector('.season.active');
+            if (act && act.offsetLeft + act.offsetWidth > row.scrollLeft + row.clientWidth - 40) row.scrollLeft = act.offsetLeft - 40;
+            moreRight();
+        }, 0);
 
         // Folgen der gewählten Staffel
         var list = this.episodes.filter(function (e) { return e.season === self.season; });
