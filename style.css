@@ -810,3 +810,7 @@ input { -webkit-user-select: text; user-select: text; }
 /* Virtuelles Poster-Raster: Poster liegen fest an ihrer Stelle, nur die sichtbaren existieren */
 .grid.vgrid { position: relative; box-sizing: border-box; }
 .grid.vgrid .poster { position: absolute; margin: 0; }
+
+/* Android/Fire TV: markiertes Poster nicht vergrößern (spart das Neuzeichnen des großen Bildes bei jedem Schritt) */
+body.lowfx .poster.focused { transform: none; }
+body.lowfx .poster .img { border-radius: 6px; }

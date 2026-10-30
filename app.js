@@ -528,7 +528,8 @@
      * Maße passen zu .poster in style.css (212 × 376 px, Abstand 14 px, Reihe 400 px).
      */
     function virtualGrid(scroll, grid, items, make) {
-        var COLW = 226, ROWH = 400, PADT = 10, PADL = 24, PADB = 40, BUF = 2;
+        // Puffer: 1 Reihe nach oben, 3 nach unten (dort lädt man meist hin – Bilder sind dann schon da)
+        var COLW = 226, ROWH = 400, PADT = 10, PADL = 24, PADB = 40, BUF_UP = 1, BUF_DOWN = 3;
         grid.classList.add('vgrid');
         var cols = Math.max(1, Math.floor(((scroll.clientWidth || 1500) - PADL) / COLW));
         var rows = Math.ceil(items.length / cols);
@@ -542,8 +543,8 @@
         function update(force) {
             if (!items.length) return;
             var top = scroll.scrollTop, hgt = scroll.clientHeight || 970;
-            var r0 = Math.max(0, Math.floor((top - PADT) / ROWH) - BUF);
-            var r1 = Math.min(rows - 1, Math.floor((top + hgt - PADT) / ROWH) + BUF);
+            var r0 = Math.max(0, Math.floor((top - PADT) / ROWH) - BUF_UP);
+            var r1 = Math.min(rows - 1, Math.floor((top + hgt - PADT) / ROWH) + BUF_DOWN);
             var a = r0 * cols, b = Math.min(items.length - 1, (r1 + 1) * cols - 1);
             if (!force && a === first && b === last) return;
             for (var k in nodes) {
@@ -556,6 +557,9 @@
                 if (nodes[i]) continue;
                 var n = make(items[i], i);
                 n._vIndex = i;
+                // Bild gleich laden: hier entstehen ohnehin nur Poster nahe am sichtbaren Bereich
+                var im = n.querySelector('.img');
+                if (im && im._lazyUrl) LazyImg.apply(im);
                 place(n, i);
                 nodes[i] = n;
                 frag.appendChild(n);
@@ -2122,10 +2126,22 @@
         }
     };
 
+    /**
+     * Kleinere Bildversion holen, wo der Bild-Server das anbietet.
+     * Viele Anbieter verlinken Poster von TMDB in Originalgröße (oft 2000 px) – angezeigt werden nur ~200 px.
+     * Kleinere Bilder = schneller geladen und viel weniger Arbeit für Fire TV & Co.
+     */
+    function thumbUrl(url, w) {
+        if (!url) return url;
+        var m = /^(https?:\/\/image\.tmdb\.org\/t\/p\/)[^\/]+(\/.+)$/i.exec(url);
+        if (m) return m[1] + 'w' + (w || 342) + m[2];
+        return url;
+    }
+
     function posterNode(item, keyPrefix, isFav, action) {
         var node = h('div', 'poster');
         var img = h('div', 'img');
-        if (item.logo) LazyImg.set(img, item.logo);
+        if (item.logo) LazyImg.set(img, thumbUrl(item.logo));
         if (isFav) img.appendChild(h('div', 'fav', '★'));
         if (item.rating > 0) img.appendChild(h('div', 'rate', ratingText(item.rating)));
         var e = null;
@@ -5253,6 +5269,8 @@
 
         // Bedienung per Finger (Handy/Tablet): Listen dürfen wischen
         if ('ontouchstart' in window) document.body.classList.add('touch');
+        // Android/Fire TV: sparsamere Effekte (schwache Grafikchips)
+        if (AB) document.body.classList.add('lowfx');
 
         Device.load();
         var saved = Storage.get('account', null);
