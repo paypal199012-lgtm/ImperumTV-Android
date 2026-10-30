@@ -205,6 +205,7 @@
             if (!c) return;
             if (c.card.className !== 'sy-card ' + state) c.card.className = 'sy-card ' + state;
             if (state === 'load') { c.state.textContent = text || 'wird geladen …'; return; }
+            if (state === 'later') { c.card.className = 'sy-card'; c.state.textContent = text || 'lädt beim Öffnen'; c.num.textContent = '–'; }
             if (state === 'fail') { c.state.textContent = text || 'gerade nicht erreichbar'; c.num.textContent = '–'; }
             if (state === 'done') {
                 c.state.textContent = '✓ aktuell';
@@ -273,16 +274,29 @@
             Sync.card('series', 'load');
             // Wer nicht warten will: los geht's, Filme/Serien laden im Hintergrund fertig
             Sync.allowSkip(function () { done(true); });
-            Data.loadMovies().then(null, function () { mvOk = false; }).then(function () {
-                if (mvOk) Sync.card('movies', 'done', Data.movies.length, fresh(Data.movies.length, before && before.m));
-                else Sync.card('movies', 'fail');
-                part();
-            });
-            Data.loadSeries().then(null, function () { srOk = false; }).then(function () {
-                if (srOk) Sync.card('series', 'done', Data.series.length, fresh(Data.series.length, before && before.s));
-                else Sync.card('series', 'fail');
-                part();
-            });
+            // Nach einem Absturz (Speicher voll): Filme und Serien erst beim Öffnen laden
+            if (safeMode()) {
+                Sync.card('movies', 'later'); Sync.card('series', 'later');
+                left = 0; mvOk = srOk = false; done(false);
+                return;
+            }
+            function movies() {
+                return Data.loadMovies().then(null, function () { mvOk = false; }).then(function () {
+                    if (mvOk) Sync.card('movies', 'done', Data.movies.length, fresh(Data.movies.length, before && before.m));
+                    else Sync.card('movies', 'fail');
+                    part();
+                });
+            }
+            function series() {
+                return Data.loadSeries().then(null, function () { srOk = false; }).then(function () {
+                    if (srOk) Sync.card('series', 'done', Data.series.length, fresh(Data.series.length, before && before.s));
+                    else Sync.card('series', 'fail');
+                    part();
+                });
+            }
+            // Android/Fire TV: nacheinander (halb so viel Speicher auf einmal), sonst gleichzeitig
+            if (AB) movies().then(series);
+            else { movies(); series(); }
         }, function (e) {
             Sync.hide();
             onErr(e);
@@ -300,6 +314,11 @@
             if (skipped) { Sync.hide(); onOk(); return; }
             Sync.finish(mvOk && srOk ? 'Alles aktuell' : 'Live TV ist bereit', onOk, 1100);
         }
+    }
+
+    /** Ist die Oberfläche in den letzten 15 Minuten abgestürzt (Android)? Dann sparsam starten. */
+    function safeMode() {
+        try { return !!(AB && AB.lastCrash && Date.now() - AB.lastCrash() < 15 * 60 * 1000); } catch (e) { return false; }
     }
 
     function loginWithSteps(acc, title, onOk, onErr, showMs, pending) {
@@ -1400,6 +1419,7 @@
             this.w = false;
             try {
                 if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL) return false;
+                if (window.AndroidBridge) return false;           // Fire TV/Android: wenig Speicher, lieber ohne
                 var body = function () {
                     postMessage({ ready: true, dec: typeof TextDecoder !== 'undefined' });
                     self.onmessage = function (e) {
