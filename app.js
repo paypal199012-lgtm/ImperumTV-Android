@@ -182,7 +182,9 @@
                 card.appendChild(state);
                 var badge = h('div', 'sy-new hidden', '');
                 card.appendChild(badge);
-                card.appendChild(h('div', 'sy-run'));
+                var run = h('div', 'sy-run');
+                run.appendChild(h('div', 'sy-beam'));
+                card.appendChild(run);
                 row.appendChild(card);
                 self.cards[c[0]] = { card: card, num: num, state: state, badge: badge, timer: null };
             });
@@ -201,7 +203,7 @@
         card: function (kind, state, count, fresh, text) {
             var c = this.cards && this.cards[kind];
             if (!c) return;
-            c.card.className = 'sy-card ' + state;
+            if (c.card.className !== 'sy-card ' + state) c.card.className = 'sy-card ' + state;
             if (state === 'load') { c.state.textContent = text || 'wird geladen …'; return; }
             if (state === 'fail') { c.state.textContent = text || 'gerade nicht erreichbar'; c.num.textContent = '–'; }
             if (state === 'done') {
@@ -210,16 +212,21 @@
                 if (fresh > 0) { c.badge.textContent = '+' + fmtNum(fresh) + ' neu'; c.badge.classList.remove('hidden'); }
             }
             this.done++;
-            this.fill.style.width = Math.round(this.done / 3 * 100) + '%';
+            this.setFill(this.done / 3);
+        },
+        /** Balken per transform (läuft auf der Grafikkarte, auch wenn gerade gerechnet wird) */
+        setFill: function (part) {
+            var v = 'scaleX(' + Math.max(0.04, Math.min(1, part)) + ')';
+            this.fill.style.webkitTransform = v;
+            this.fill.style.transform = v;
         },
         countUp: function (c, n) {
-            clearInterval(c.timer);
-            var start = Date.now(), dur = 700;
-            c.timer = setInterval(function () {
-                var p = Math.min(1, (Date.now() - start) / dur);
-                c.num.textContent = fmtNum(Math.round(n * (1 - Math.pow(1 - p, 3))));
-                if (p >= 1) clearInterval(c.timer);
-            }, 40);
+            c.timer = null;
+            // Zahl gleich zeigen und weich einblenden – Hochzählen ruckelt, während das Gerät Listen auswertet
+            c.num.textContent = fmtNum(n);
+            c.num.classList.remove('pop');
+            void c.num.offsetWidth;
+            c.num.classList.add('pop');
         },
         /** Während Filme/Serien noch laden: mit OK schon loslegen */
         allowSkip: function (fn) {
@@ -232,7 +239,7 @@
             var el = $('#loader');
             this.skip = null;
             this.hint.classList.remove('show');
-            this.fill.style.width = '100%';
+            this.setFill(1);
             $('#loader-text').textContent = '✓  ' + text;
             el.classList.add('sy-finished');
             setTimeout(function () { Sync.hide(); if (then) then(); }, ms || 900);
@@ -1084,14 +1091,40 @@
                     if (extra.hasOwnProperty(k)) url += '&' + k + '=' + encodeURIComponent(extra[k]);
                 }
             }
+            return this.fetchText(url).then(function (text) {
+                try { return JSON.parse(text); }
+                catch (e) { throw new Error('Unerwartete Antwort vom Server: ' + text.slice(0, 120)); }
+            });
+        },
+
+        fetchText: function (url) {
             return fetch(url).then(function (res) {
                 return res.text().then(function (text) {
                     if (!res.ok) throw new Error('Der Server antwortet mit HTTP ' + res.status + '. ' + text.slice(0, 120));
-                    try { return JSON.parse(text); }
-                    catch (e) { throw new Error('Unerwartete Antwort vom Server: ' + text.slice(0, 120)); }
+                    return text;
                 });
             }, function () {
                 throw new Error('Der Server ist nicht erreichbar. Prüfe die Adresse und die Internetverbindung.');
+            });
+        },
+
+        /** Große Liste holen und im Hintergrund umrechnen. cats: Promise der Kategorien */
+        list: function (action, kind, cats) {
+            var a = this.acc, text;
+            if (a && a.demo) text = Promise.resolve(JSON.stringify(Demo.answer(action)));
+            else {
+                var url = a.server + '/player_api.php?username=' + encodeURIComponent(a.username) +
+                    '&password=' + encodeURIComponent(a.password) + '&action=' + action;
+                // Rohe Bytes direkt an den Worker: kein Umwandeln riesiger Antworten auf dem Bedien-Thread
+                text = Parser.wantsBytes() ? fetch(url).then(function (res) {
+                    if (!res.ok) return res.text().then(function (t) { throw new Error('Der Server antwortet mit HTTP ' + res.status + '. ' + t.slice(0, 120)); });
+                    return res.arrayBuffer();
+                }, function () {
+                    throw new Error('Der Server ist nicht erreichbar. Prüfe die Adresse und die Internetverbindung.');
+                }) : this.fetchText(url);
+            }
+            return Promise.all([cats, text]).then(function (res) {
+                return Parser.run(res[1], kind, Data.catMap(res[0]));
             });
         },
 
@@ -1327,6 +1360,133 @@
     }
     function ratingText(v) { return v > 0 ? '★ ' + v.toFixed(1) : ''; }
 
+    /** Rohliste des Anbieters in kleine Einträge umrechnen (läuft im Worker oder als Notlösung hier) */
+    function mapList(kind, list, cats) {
+        var out = [], i, s, name, item;
+        for (i = 0; i < list.length; i++) {
+            s = list[i];
+            if (!s) continue;
+            if (kind === 'live') {
+                item = { type: 'live', id: parseInt(s.stream_id, 10), num: i + 1,
+                    name: str(s.name) || 'Sender ' + s.stream_id, logo: str(s.stream_icon),
+                    cat: cats[String(s.category_id)] || '' };
+            } else if (kind === 'movie') {
+                name = str(s.name) || 'Film ' + s.stream_id;
+                item = { type: 'movie', id: parseInt(s.stream_id, 10), name: name, logo: str(s.stream_icon),
+                    cat: cats[String(s.category_id)] || '', ext: str(s.container_extension) || 'mp4',
+                    year: firstYear(str(s.year)) || firstYear(str(s.release_date)) || firstYear(str(s.releaseDate)) || yearFromName(name),
+                    rating: parseRating(s.rating, s.rating_5based), added: parseInt(s.added, 10) || 0 };
+            } else {
+                name = str(s.name) || 'Serie ' + s.series_id;
+                item = { type: 'series', id: parseInt(s.series_id, 10), name: name, logo: str(s.cover),
+                    cat: cats[String(s.category_id)] || '',
+                    year: firstYear(str(s.releaseDate)) || firstYear(str(s.release_date)) || firstYear(str(s.year)) || yearFromName(name),
+                    rating: parseRating(s.rating, s.rating_5based), added: parseInt(s.last_modified, 10) || 0 };
+            }
+            if (!isNaN(item.id)) out.push(item);
+        }
+        return out;
+    }
+
+    /**
+     * Große Listen (zehntausende Filme/Serien) im Hintergrund-Worker auswerten:
+     * die Oberfläche und die Lade-Animation laufen dabei flüssig weiter.
+     */
+    var Parser = {
+        w: null, ready: false, seq: 0, wait: {},
+        CHUNK: 4000,
+        worker: function () {
+            if (this.w !== null) return this.w;
+            this.w = false;
+            try {
+                if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL) return false;
+                var body = function () {
+                    postMessage({ ready: true, dec: typeof TextDecoder !== 'undefined' });
+                    self.onmessage = function (e) {
+                        var d = e.data, json, text = d.text, list, i, n;
+                        try { if (d.buf) text = new TextDecoder('utf-8').decode(new Uint8Array(d.buf)); }
+                        catch (x0) { postMessage({ id: d.id, err: 'Antwort vom Server konnte nicht gelesen werden.' }); return; }
+                        try { json = JSON.parse(text); }
+                        catch (x) { postMessage({ id: d.id, err: 'Unerwartete Antwort vom Server: ' + String(text).slice(0, 120) }); return; }
+                        text = null;
+                        try { list = mapList(d.kind, Array.isArray(json) ? json : [], d.cats); }
+                        catch (x2) { postMessage({ id: d.id, err: 'Liste konnte nicht gelesen werden.' }); return; }
+                        json = null;
+                        // In Häppchen zurückschicken: die Oberfläche bleibt zwischendurch bedienbar
+                        n = d.chunk || 4000;
+                        for (i = 0; i < list.length; i += n) postMessage({ id: d.id, part: list.slice(i, i + n) });
+                        postMessage({ id: d.id, end: true, total: list.length });
+                    };
+                };
+                var src = [str, firstYear, yearFromName, parseRating, mapList].map(function (f) { return f.toString(); }).join('\n') +
+                    '\n(' + body.toString() + ')();';
+                var w = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+                var me = this;
+                w.onmessage = function (e) {
+                    var d = e.data;
+                    if (d.ready) { me.ready = true; me.dec = !!d.dec; return; }
+                    var job = me.wait[d.id];
+                    if (!job) return;
+                    if (d.part) { for (var i = 0; i < d.part.length; i++) job.list.push(d.part[i]); return; }
+                    delete me.wait[d.id];
+                    clearTimeout(job.timer);
+                    if (d.err) job.reject(new Error(d.err));
+                    else job.resolve(job.list);
+                };
+                w.onerror = function () { me.broken(); };
+                this.w = w;
+            } catch (e) { this.w = false; }
+            return this.w;
+        },
+        /** Worker geht nicht: alles Offene hier erledigen und künftig ohne Worker */
+        broken: function () {
+            try { if (this.w) this.w.terminate(); } catch (e) { /* egal */ }
+            this.w = false;
+            this.ready = false;
+            var jobs = this.wait;
+            this.wait = {};
+            for (var k in jobs) if (jobs.hasOwnProperty(k)) { clearTimeout(jobs[k].timer); this.local(jobs[k]); }
+        },
+        local: function (job) {
+            var json;
+            if (job.text === null) { job.reject(new Error('Die Liste konnte nicht gelesen werden. Bitte noch einmal aktualisieren.')); return; }
+            try { json = JSON.parse(job.text); }
+            catch (e) { job.reject(new Error('Unerwartete Antwort vom Server: ' + String(job.text).slice(0, 120))); return; }
+            try { job.resolve(mapList(job.kind, Array.isArray(json) ? json : [], job.cats)); }
+            catch (e2) { job.reject(e2); }
+        },
+        /** Kann der Worker rohe Bytes bekommen (spart das Umwandeln in Text hier)? */
+        wantsBytes: function () {
+            return !!(this.worker() && this.ready && this.dec && typeof ArrayBuffer !== 'undefined');
+        },
+        /** data: Text oder ArrayBuffer (nur wenn wantsBytes()) */
+        run: function (data, kind, cats) {
+            var me = this;
+            return new Promise(function (resolve, reject) {
+                var isBuf = typeof data !== 'string';
+                var job = { text: isBuf ? null : data, kind: kind, cats: cats || {}, resolve: resolve, reject: reject, timer: null, list: [] };
+                var w = me.worker();
+                if (!w || (isBuf && !me.ready)) {
+                    if (isBuf) { try { job.text = new TextDecoder('utf-8').decode(new Uint8Array(data)); } catch (e) { job.text = null; } }
+                    setTimeout(function () { me.local(job); }, 0);
+                    return;
+                }
+                var id = ++me.seq;
+                me.wait[id] = job;
+                // Antwortet der Worker gar nicht, nach 90 s aufgeben bzw. hier weitermachen
+                job.timer = setTimeout(function () { if (me.wait[id]) { delete me.wait[id]; job.list = []; me.local(job); } }, 90000);
+                try {
+                    if (isBuf) w.postMessage({ id: id, buf: data, kind: kind, cats: job.cats, chunk: me.CHUNK }, [data]);
+                    else w.postMessage({ id: id, text: data, kind: kind, cats: job.cats, chunk: me.CHUNK });
+                } catch (e) {
+                    delete me.wait[id]; clearTimeout(job.timer);
+                    if (isBuf) { try { job.text = new TextDecoder('utf-8').decode(new Uint8Array(data)); } catch (e2) { job.text = null; } }
+                    me.local(job);
+                }
+            });
+        }
+    };
+
     /** YouTube-Kennung aus dem, was der Anbieter liefert (ID oder ganzer Link) */
     function trailerId(v) {
         v = str(v);
@@ -1387,9 +1547,10 @@
 
         login: function (acc, progress) {
             Api.acc = acc;
+            Parser.worker();                                   // Hintergrund-Helfer schon starten
             var self = this;
             // Alles gleichzeitig anfragen (spart Wartezeit); die Senderliste zählt nur, wenn die Anmeldung klappt
-            var lists = Promise.all([Api.call('get_live_categories'), Api.call('get_live_streams')]);
+            var lists = Api.list('get_live_streams', 'live', Api.call('get_live_categories'));
             lists.then(null, function () { /* Fehler wird unten gemeldet */ });
             return Api.call(null).then(function (json) {
                 var user = json && json.user_info;
@@ -1400,19 +1561,8 @@
                 self.expiry = exp > 0 ? new Date(exp * 1000) : null;
                 if (progress) progress(1);
                 return lists;
-            }).then(function (res) {
-                var cats = self.catMap(res[0]);
-                var streams = Array.isArray(res[1]) ? res[1] : [];
-                self.channels = streams.map(function (s, i) {
-                    return {
-                        type: 'live',
-                        id: parseInt(s.stream_id, 10),
-                        num: i + 1,
-                        name: str(s.name) || 'Sender ' + s.stream_id,
-                        logo: str(s.stream_icon),
-                        cat: cats[String(s.category_id)] || ''
-                    };
-                }).filter(function (c) { return !isNaN(c.id); });
+            }).then(function (list) {
+                self.channels = list;
                 if (!self.channels.length) throw new Error('Anmeldung klappt, aber der Server liefert keine Live-Sender.');
                 self.movies = []; self.series = [];
                 self.moviesLoaded = false; self.seriesLoaded = false;
@@ -1428,25 +1578,9 @@
             var self = this, gen = this.gen;
             if (self.moviesLoaded) return Promise.resolve();
             if (self.moviesPromise) return self.moviesPromise;       // lädt schon (z. B. im Hintergrund beim Start)
-            self.moviesPromise = Promise.all([Api.call('get_vod_categories'), Api.call('get_vod_streams')]).then(function (res) {
+            self.moviesPromise = Api.list('get_vod_streams', 'movie', Api.call('get_vod_categories')).then(function (list) {
                 if (gen !== self.gen) return;                         // inzwischen andere Liste gewählt
-                var cats = self.catMap(res[0]);
-                var list = Array.isArray(res[1]) ? res[1] : [];
-                self.movies = list.map(function (s) {
-                    var name = str(s.name) || 'Film ' + s.stream_id;
-                    var year = firstYear(str(s.year)) || firstYear(str(s.release_date)) || firstYear(str(s.releaseDate)) || yearFromName(name);
-                    return {
-                        type: 'movie',
-                        id: parseInt(s.stream_id, 10),
-                        name: name,
-                        logo: str(s.stream_icon),
-                        cat: cats[String(s.category_id)] || '',
-                        ext: str(s.container_extension) || 'mp4',
-                        year: year,
-                        rating: parseRating(s.rating, s.rating_5based),
-                        added: parseInt(s.added, 10) || 0
-                    };
-                }).filter(function (m) { return !isNaN(m.id); });
+                self.movies = list;
                 self.moviesLoaded = true;
             });
             self.moviesPromise.then(function () { if (gen === self.gen) self.moviesPromise = null; }, function () { if (gen === self.gen) self.moviesPromise = null; });
@@ -1457,23 +1591,9 @@
             var self = this, gen = this.gen;
             if (self.seriesLoaded) return Promise.resolve();
             if (self.seriesPromise) return self.seriesPromise;
-            self.seriesPromise = Promise.all([Api.call('get_series_categories'), Api.call('get_series')]).then(function (res) {
+            self.seriesPromise = Api.list('get_series', 'series', Api.call('get_series_categories')).then(function (list) {
                 if (gen !== self.gen) return;
-                var cats = self.catMap(res[0]);
-                var list = Array.isArray(res[1]) ? res[1] : [];
-                self.series = list.map(function (s) {
-                    var name = str(s.name) || 'Serie ' + s.series_id;
-                    return {
-                        type: 'series',
-                        id: parseInt(s.series_id, 10),
-                        name: name,
-                        logo: str(s.cover),
-                        cat: cats[String(s.category_id)] || '',
-                        year: firstYear(str(s.releaseDate)) || firstYear(str(s.release_date)) || firstYear(str(s.year)) || yearFromName(name),
-                        rating: parseRating(s.rating, s.rating_5based),
-                        added: parseInt(s.last_modified, 10) || 0
-                    };
-                }).filter(function (s) { return !isNaN(s.id); });
+                self.series = list;
                 self.seriesLoaded = true;
             });
             self.seriesPromise.then(function () { if (gen === self.gen) self.seriesPromise = null; }, function () { if (gen === self.gen) self.seriesPromise = null; });
@@ -5435,7 +5555,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
