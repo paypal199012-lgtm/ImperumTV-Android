@@ -2892,12 +2892,42 @@
     var Updater = {
         latest: null,
         checked: false,
-        /** Einmal pro App-Start, kurz nachdem die Startseite da ist */
+        lastCheck: 0,
+        dismissed: 0,           // „Später“ für diese Version gewählt (gilt bis zum nächsten Start)
+        waiter: null,
+        /** Gleich beim App-Start nachsehen (läuft parallel zum Laden der Listen) */
         autoCheck: function () {
-            var self = this;
             if (this.checked || !this.available()) return;
             this.checked = true;
-            setTimeout(function () { self.check(false); }, 4000);
+            this.check(false);
+        },
+        /** App kommt nach langer Zeit wieder nach vorn: erneut nachsehen (höchstens alle 6 Stunden) */
+        recheck: function () {
+            if (!this.available() || Date.now() - this.lastCheck < 6 * 3600 * 1000) return;
+            this.check(false);
+        },
+        /** Hinweis erst zeigen, wenn nichts anderes läuft (kein Ladebildschirm, kein Video, kein anderes Fenster) */
+        offerWhenIdle: function () {
+            var self = this, tries = 0;
+            clearInterval(this.waiter);
+            this.waiter = setInterval(function () {
+                tries++;
+                if (!self.latest || self.dismissed === self.latest.version || tries > 600) { clearInterval(self.waiter); return; }
+                var loaderEl = $('#loader');
+                var busy = (loaderEl && !loaderEl.classList.contains('hidden')) || Modal.node || Nav.top() instanceof PlayerScreen || !Nav.top();
+                if (busy) return;
+                clearInterval(self.waiter);
+                self.offer();
+            }, 1000);
+        },
+        offer: function () {
+            var self = this, l = this.latest, cur = this.current();
+            if (!l) return;
+            var mb = l.size ? ' (' + Math.round(l.size / 1e6) + ' MB)' : '';
+            Modal.open('Update verfügbar', 'Version ' + self.versionText(l.version) + ' ist da' + mb + '. Du hast ' + self.versionText(cur) + '.', [
+                { label: 'Jetzt aktualisieren', primary: true, action: function () { self.install(); } },
+                { label: 'Später', action: function () { self.dismissed = l.version; } }
+            ]);
         },
         available: function () { return !!(AB && AB.downloadUpdate && AB.appVersion); },
         current: function () { try { return AB.appVersion() || 0; } catch (e) { return 0; } },
@@ -2907,30 +2937,49 @@
             var self = this;
             if (!this.available()) return;
             if (manual) loader(true, 'Suche nach Updates …');
-            fetch('https://api.github.com/repos/' + REMOTE.updateRepo + '/releases/latest', { cache: 'no-store' }).then(function (res) {
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                return res.json();
-            }).then(function (rel) {
+            this.lastCheck = Date.now();
+            var repo = REMOTE.updateRepo;
+            function found(tag, apkUrl, size) {
                 if (manual) loader(false);
-                var m = /(\d+)\s*$/.exec(String(rel.tag_name || ''));
+                var m = /(\d+)\s*$/.exec(String(tag || ''));
                 var latest = m ? parseInt(m[1], 10) : 0;
-                var asset = (rel.assets || []).filter(function (a) { return /\.apk$/i.test(a.name || ''); })[0];
                 var cur = self.current();
-                if (!asset || !latest || latest <= cur) {
+                if (!latest || latest <= cur) {
                     if (manual) toast('Du hast schon die neueste Version (' + self.versionText(cur) + ').');
                     return;
                 }
-                self.latest = { version: latest, url: asset.browser_download_url, size: asset.size || 0 };
-                // Beim automatischen Prüfen nicht stören, wenn gerade etwas läuft
-                if (!manual && (Modal.node || Nav.top() instanceof PlayerScreen)) return;
-                var mb = asset.size ? ' (' + Math.round(asset.size / 1e6) + ' MB)' : '';
-                Modal.open('Update verfügbar', 'Version ' + self.versionText(latest) + ' ist da' + mb + '. Du hast ' + self.versionText(cur) + '.', [
-                    { label: 'Jetzt aktualisieren', primary: true, action: function () { self.install(); } },
-                    { label: 'Später' }
-                ]);
-            }, function () {
-                if (manual) { loader(false); toast('GitHub ist gerade nicht erreichbar. Versuche es später noch einmal.', 5000); }
-            });
+                self.latest = { version: latest, url: apkUrl || ('https://github.com/' + repo + '/releases/download/' + tag + '/ImperumTV.apk'), size: size || 0 };
+                if (manual) self.offer();
+                else self.offerWhenIdle();           // automatisch: warten, bis Ladebildschirm/Video weg sind
+            }
+            function failed(why) {
+                if (manual) { loader(false); toast('Keine Verbindung zu GitHub' + (why ? ' (' + why + ')' : '') + '. Versuche es später noch einmal.', 6000); }
+            }
+            // Über die GitHub-Schnittstelle (Fallback, falls die App den Weg unten nicht kennt)
+            function viaApi() {
+                fetch('https://api.github.com/repos/' + repo + '/releases/latest', { cache: 'no-store' }).then(function (res) {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json();
+                }).then(function (rel) {
+                    var asset = (rel.assets || []).filter(function (a) { return /\.apk$/i.test(a.name || ''); })[0];
+                    if (!asset) { found('', null, 0); return; }
+                    found(rel.tag_name, asset.browser_download_url, asset.size);
+                }, function (e) { failed(e && e.message); });
+            }
+            // Android-App fragt GitHub selbst (keine Sperren im Browser-Teil, kein Abfrage-Limit)
+            if (AB.checkLatest) {
+                var done = false;
+                var timer = setTimeout(function () { if (!done) { done = true; viaApi(); } }, 20000);
+                window.__androidLatest = function (r) {
+                    if (done) return;
+                    done = true; clearTimeout(timer);
+                    if (r && r.tag) found(r.tag, null, 0);
+                    else viaApi();                            // nicht geklappt: zweiter Weg
+                };
+                AB.checkLatest(repo);
+                return;
+            }
+            viaApi();
         },
         install: function () {
             var self = this;
@@ -5554,6 +5603,7 @@
         registerKeys();
         Favs.load();
         Player.init();
+        Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', function (e) { if (e.keyCode === KEY.ENTER) LongPress.up(); });
 
@@ -5573,7 +5623,10 @@
             }
         }
         document.addEventListener('visibilitychange', function () { if (!AB) lifecycle(document.hidden); });
-        window.__androidLifecycle = function (state) { lifecycle(state === 'hidden'); };
+        window.__androidLifecycle = function (state) {
+            lifecycle(state === 'hidden');
+            if (state !== 'hidden') Updater.recheck();
+        };
 
         // Tasten, die die Android-App weiterreicht (Zurück, Medientasten, Farbtasten)
         window.__androidKey = function (code, repeat) {
