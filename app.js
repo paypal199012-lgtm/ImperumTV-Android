@@ -2232,6 +2232,41 @@
                 default: return '';
             }
         },
+        /** Sender deiner Liste nach Namen (z. B. alle „Sky Sport Bundesliga …“) */
+        PATTERNS: {
+            skyBl: /sky.*(bundesliga|buli)|bundesliga.*sky/i,
+            sky: /(^|[^a-z])sky([^a-z]|$).*(sport|bundesliga|premier|top ?event|fussball|fußball|football)/i,
+            dazn: /dazn/i,
+            prime: /prime|amazon/i,
+            konferenz: /konferenz/i
+        },
+        channelsBy: function (keys) {
+            var me = this, out = [];
+            Data.channels.forEach(function (c) {
+                for (var i = 0; i < keys.length; i++) if (me.PATTERNS[keys[i]].test(c.name || '')) { out.push(c); return; }
+            });
+            out.sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'de', { numeric: true }); });
+            return out.slice(0, 40);
+        },
+        /** Auswahl beim Spiel: im Programm gefunden, Einzelspiel, Konferenz … */
+        options: function (m, found) {
+            var d = new Date(m.t), wd = d.getDay(), hr = d.getHours(), out = [];
+            if (found && found.length) out.push({ label: 'Im Programm gefunden', chans: found });
+            if (m.c === 'BL1') {
+                if (wd === 6 && hr < 17) {
+                    out.push({ label: 'Einzelspiel · Sky', chans: this.channelsBy(['skyBl']) });
+                    out.push({ label: 'Konferenz · DAZN', chans: this.channelsBy(['konferenz', 'dazn']) });
+                } else if (wd === 0) out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
+                else out.push({ label: 'Sky', chans: this.channelsBy(['skyBl']) });
+            } else if (m.c === 'PL') out.push({ label: 'Sky', chans: this.channelsBy(['sky']) });
+            else if (m.c === 'SA' || m.c === 'PD' || m.c === 'FL1') out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
+            else if (m.c === 'CL') {
+                out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
+                if (wd === 2) out.push({ label: 'Prime Video', chans: this.channelsBy(['prime']) });
+            }
+            return out.filter(function (o) { return o.chans.length; });
+        },
+
         /** Sender im Programm suchen (Android/Fire TV). cb({spielId: [Sender…]}) */
         findChannels: function (matches, cb) {
             if (!AB || !AB.epgSearch || !Epg.valid) { cb({}); return; }
@@ -5343,22 +5378,45 @@
         }
     };
     FootballScreen.prototype.open = function (m) {
-        var list = this.found[String(m.id)];
         var title = (m.h.s || m.h.n) + ' – ' + (m.a.s || m.a.n);
-        if (!list || !list.length) {
+        var when = fmtClock(new Date(m.t)) + ' Uhr';
+        var opts = Football.options(m, this.found[String(m.id)]);
+        if (!opts.length) {
             var r = Football.rights(m);
-            toast(r ? title + ': voraussichtlich bei ' + r + '. Kein passender Sender in deinem Programm gefunden.' : title + ': kein passender Sender in deinem Programm gefunden.', 6000);
+            toast(title + ': kein passender Sender in deiner Liste gefunden' + (r ? ' (voraussichtlich ' + r + ').' : '.'), 6000);
             return;
         }
         function play(ch) {
             var i = Data.channels.indexOf(ch);
             Nav.push(new PlayerScreen(Data.channels, i < 0 ? 0 : i, 'live'));
         }
-        if (list.length === 1) { play(list[0]); return; }
-        var buttons = list.map(function (ch, i) { return { label: '▶  ' + ch.name, primary: i === 0, action: function () { play(ch); } }; });
-        buttons.push({ label: 'Schließen', action: function () { } });
-        Modal.open(title, fmtClock(new Date(m.t)) + ' Uhr', buttons);
-        if (Modal.node) Modal.node.classList.add('modal-list');
+        var words = Football.words(m.h).concat(Football.words(m.a));
+        function channels(opt) {
+            var now = Epg.nowMap(opt.chans);
+            // Läuft das Spiel laut Programm gerade auf einem Sender? Dann diesen nach oben
+            function hits(ch) {
+                var t = Football.fold(ch.epg && now[ch.epg] || '');
+                return words.filter(function (w) { return t.indexOf(w) >= 0; }).length;
+            }
+            var list = opt.chans.slice().sort(function (a, b) { return hits(b) - hits(a); });
+            var buttons = list.map(function (ch, i) {
+                var t = ch.epg && now[ch.epg];
+                return { label: '▶  ' + ch.name + (t ? '   ·   ' + t : ''), primary: i === 0, action: function () { play(ch); } };
+            });
+            buttons.push({ label: 'Zurück', action: function () { choose(); } });
+            Modal.open(title + ' · ' + opt.label, when, buttons);
+            if (Modal.node) Modal.node.classList.add('modal-list');
+        }
+        function choose() {
+            if (opts.length === 1) { channels(opts[0]); return; }
+            var buttons = opts.map(function (o, i) {
+                return { label: o.label + '   (' + o.chans.length + (o.chans.length === 1 ? ' Sender)' : ' Sender)'), primary: i === 0, action: function () { channels(o); } };
+            });
+            buttons.push({ label: 'Schließen', action: function () { } });
+            Modal.open(title, when, buttons);
+            if (Modal.node) Modal.node.classList.add('modal-list');
+        }
+        choose();
     };
 
     function AccountScreen() { }
