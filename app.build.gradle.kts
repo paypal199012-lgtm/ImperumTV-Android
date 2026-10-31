@@ -51,6 +51,10 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+    // OpenVPN startet ein eigenes Programm aus den nativen Bibliotheken: die müssen entpackt auf dem Gerät liegen
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+    }
 }
 
 dependencies {
@@ -60,6 +64,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.0")
     implementation("androidx.media3:media3-extractor:1.5.0")
     // FFMPEG_DECODER (setup-android.sh trägt hier den FFmpeg-Ton-Decoder ein, wenn er bei Maven Central zu finden ist)
+    // OPENVPN (setup-android.sh trägt hier die OpenVPN-Bibliothek ein, wenn sie gebaut werden soll)
     // WIREGUARD (setup-android.sh trägt hier die WireGuard-Bibliothek für das VPN ein, wenn sie zu finden ist)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
 }

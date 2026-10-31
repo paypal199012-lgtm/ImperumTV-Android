@@ -1533,6 +1533,35 @@
             return 'An · getrennt';
         }
     };
+    /** OpenVPN mit eigener .ovpn-Datei (hochgeladen auf der Website beim Gerät). Verbinden/Trennen entscheidet jeder selbst. */
+    var OVpn = {
+        native: function () { try { return !!(AB && AB.ovpnAvailable && AB.ovpnAvailable()); } catch (e) { return false; } },
+        info: function () { try { return JSON.parse(AB.ovpnInfo() || '{}') || {}; } catch (e) { return {}; } },
+        sync: function (done) {
+            if (!this.native() || !Device.mac) { if (done) done(); return; }
+            Remote.rpc('device_ovpn_get', { p_mac: Device.mac, p_key: Device.key, p_for_app: true }).then(function (r) {
+                try {
+                    if (r && r.has && r.config) AB.ovpnSetProfile(r.config, r.user || '', r.pass || '');
+                    else if (r && r.has === false) AB.ovpnSetProfile('', '', '');
+                } catch (e) { /* egal */ }
+                if (done) done();
+            }, function () { if (done) done(); });   // offline / noch nicht eingerichtet: Gespeichertes behalten
+        },
+        text: function (i) {
+            i = i || this.info();
+            if (i.state === 'an') return 'Verbunden · OK zum Trennen';
+            if (i.state === 'verbindet') return 'Verbindet … · OK zum Trennen';
+            if (i.state === 'fehler') return 'Fehler: ' + (i.error || 'unbekannt') + ' · OK zum erneuten Verbinden';
+            return 'Getrennt · OK zum Verbinden';
+        }
+    };
+    window.__androidOvpn = function (state, err) {
+        if (state === 'an') toast('VPN (OpenVPN) verbunden');
+        else if (state === 'fehler') toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 6000);
+        var top = Nav.top();
+        if (top && top instanceof SettingsScreen && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
+    };
+
     window.__androidVpn = function (state, err) {
         if (state === 'an') toast('VPN verbunden');
         else if (state === 'fehler') toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 6000);
@@ -5495,6 +5524,33 @@
                 Vpn.askCode(function () { meSet.focusKey = 'set-vpn'; setTimeout(function () { if (Nav.top() === meSet) Nav.show(meSet); }, 400); });
             });
         }
+        if (OVpn.native()) {
+            var oi = OVpn.info();
+            if (oi.has) {
+                row('ovpn', 'VPN (OpenVPN)', OVpn.text(oi), function (v) {
+                    var on = OVpn.info().state === 'aus' || OVpn.info().state === 'fehler' || OVpn.info().state === 'kein Zugang';
+                    try { AB.ovpnConnect(on); } catch (e) { /* egal */ }
+                    v.textContent = on ? 'Verbindet …' : 'Getrennt · OK zum Verbinden';
+                });
+                row('ovpn-auto', 'VPN beim Start verbinden', oi.auto ? 'An' : 'Aus', function (v) {
+                    var on = !OVpn.info().auto;
+                    try { AB.ovpnSetAutoStart(on); } catch (e) { /* egal */ }
+                    v.textContent = on ? 'An' : 'Aus';
+                });
+            } else {
+                row('ovpn', 'VPN (OpenVPN) einrichten', 'Eigene .ovpn-Datei auf der Website hochladen', function () {
+                    Modal.open('Eigenes VPN (OpenVPN)', 'Öffne am Handy oder PC ' + REMOTE.website.replace(/^https?:\/\//, '').replace(/\/+$/, '') +
+                        '/playlist.html, melde dich mit MAC ' + Device.macText() + ' und Geräte-Schlüssel ' + Device.key +
+                        ' an und lade unten bei „VPN (OpenVPN)“ deine .ovpn-Datei mit Benutzername und Passwort hoch. Danach hier „Neu laden“ drücken.', [
+                        { label: 'Neu laden', primary: true, action: function () {
+                            toast('VPN-Datei wird geladen …');
+                            OVpn.sync(function () { var t = Nav.top(); if (t instanceof SettingsScreen) { t.focusKey = 'set-ovpn'; Nav.show(t); } });
+                        } },
+                        { label: 'Schließen' }
+                    ]);
+                });
+            }
+        }
         row('cache', 'Cache leeren', 'Gespeicherte Bilder und Programm löschen, Listen neu laden', function () { clearCacheFlow(); });
         row('lists', 'Wiedergabelisten', 'Liste wechseln oder neue hinzufügen', function () { Nav.push(new PlaylistsScreen()); });
         row('account', 'Konto', License.activated() ? 'Aktiviert (unbegrenzt)' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
@@ -6325,6 +6381,7 @@
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
         setTimeout(function () { Report.flushNative(); }, 8000);   // Absturzbericht vom letzten Mal an die Website
         setTimeout(function () { Vpn.sync(); }, 3000);              // VPN-Zugang (nur bei eigenen Geräten eingetragen)
+        setTimeout(function () { OVpn.sync(); }, 3500);             // eigene OpenVPN-Datei von der Website
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', function (e) { if (e.keyCode === KEY.ENTER) LongPress.up(); });
 
@@ -6445,7 +6502,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Vpn: Vpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { OVpn: OVpn, Vpn: Vpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();

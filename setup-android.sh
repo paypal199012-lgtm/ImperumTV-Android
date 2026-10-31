@@ -72,4 +72,25 @@ else
     echo "WireGuard nicht gefunden – Build ohne VPN"
 fi
 
+# OpenVPN (eigene .ovpn-Datei, Verbinden/Trennen in der App).
+# Die Bibliothek wird aus ihrem Quellcode mitgebaut. Klappt das nicht, baut der Workflow mit OPENVPN=0 ohne OpenVPN.
+OVPN_REPO=https://github.com/pia-foss/mobile-android-openvpn-tunnel
+OVPN_COMMIT=4235a8412fc2dc9ebff58f008a5f75e0ab38b9cd
+if [ "${OPENVPN:-1}" != "0" ] && git clone -q "$OVPN_REPO" "$OUT/openvpn" 2>/dev/null \
+   && (cd "$OUT/openvpn" && git checkout -q "$OVPN_COMMIT" && (git submodule update --init --depth 1 -q || git submodule update --init -q)); then
+    rm -f "$OUT/openvpn/build.gradle"
+    cp openvpn.build.gradle.kts "$OUT/openvpn/build.gradle.kts"
+    # Neuere Gradle-Version: Paketname kommt aus build.gradle.kts, nicht mehr aus dem Manifest
+    sed -i 's| package="de.blinkt.openvpn"||' "$OUT/openvpn/src/main/AndroidManifest.xml"
+    echo 'include(":openvpn")' >> "$OUT/settings.gradle.kts"
+    sed -i 's|// OPENVPN.*|implementation(project(":openvpn"))|' "$OUT/app/build.gradle.kts"
+    cp OVpn.kt "$JAVA_DIR/OVpn.kt"
+    sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />|' "$OUT/app/src/main/AndroidManifest.xml"
+    echo "OpenVPN-Bibliothek eingebunden"
+else
+    cp OVpnStub.kt "$JAVA_DIR/OVpn.kt"
+    echo "Build ohne OpenVPN"
+fi
+cp App.kt "$JAVA_DIR/App.kt"
+
 echo "Projekt liegt in $OUT"
