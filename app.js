@@ -491,7 +491,7 @@
     }
 
     var VERTICAL_LOCK = { cats: true, list: true, grid: true };
-    var HORIZONTAL_LOCK = { sethead: true, setquick: true, similar: true, cast: true, seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true, topbtns: true };
+    var HORIZONTAL_LOCK = { plgrid: true, sethead: true, setquick: true, similar: true, cast: true, seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true, topbtns: true };
 
     var Focus = {
         cur: null,
@@ -3182,7 +3182,7 @@
     }
     PlaylistsScreen.prototype.render = function (root) {
         var self = this;
-        var wrap = h('div', 'pl');
+        var wrap = h('div', 'pl pl-c');          // Listen oben, Geräte-Infos als Kasten darunter
 
         // ---------- linke Seite ----------
         var left = h('div', 'pl-left');
@@ -3201,7 +3201,7 @@
         head.appendChild(logo);
         left.appendChild(head);
 
-        var grid = h('div', 'pl-grid scroll');
+        var grid = h('div', 'pl-grid hscroll');
         var lists = Remote.lists || [];
         var current = Api.acc ? String(Storage.get('playlistId', '')) : '';
         if (this.loading && !lists.length) {
@@ -3210,7 +3210,7 @@
             var note = h('div', 'pl-note');
             note.appendChild(h('div', 'pl-note-title', this.error ? 'Keine Verbindung zur Website' : 'Noch keine Wiedergabeliste'));
             note.appendChild(h('div', null, this.error ||
-                'Scanne den QR-Code rechts mit dem Handy oder öffne die Website und gib dort MAC-Adresse und Geräte-Schlüssel ein. ' +
+                'Scanne den QR-Code unten mit dem Handy oder öffne die Website und gib dort MAC-Adresse und Geräte-Schlüssel ein. ' +
                 'Die Wiedergabeliste erscheint danach hier von selbst.'));
             grid.appendChild(note);
         }
@@ -3226,8 +3226,7 @@
         left.appendChild(grid);
 
         var foot = h('div', 'pl-foot');
-        foot.appendChild(h('div', 'pl-foot-big', 'ImperumTV ist ein Player für deine eigenen Wiedergabelisten'));
-        foot.appendChild(h('div', 'pl-foot-small', 'ImperumTV verkauft keine Inhalte. Bitte frage nicht nach Inhalten.'));
+        foot.appendChild(h('div', 'pl-foot-line', 'ImperumTV ist ein Player für deine eigenen Wiedergabelisten · ImperumTV verkauft keine Inhalte'));
         left.appendChild(foot);
         wrap.appendChild(left);
 
@@ -3238,18 +3237,18 @@
         var qr = h('div', 'pl-qr');
         try { qr.innerHTML = window.ImperumQR.svg(Device.link(), 280); } catch (e) { qr.classList.add('hidden'); }
         sideIn.appendChild(qr);
-        sideIn.appendChild(h('div', 'pl-yellow', 'Scanne den QR-Code, um eine Wiedergabeliste hinzuzufügen.'));
+        var col1 = h('div', 'pl-col1'), col2 = h('div', 'pl-col2'), col3 = h('div', 'pl-col3');
+        col1.appendChild(h('div', 'pl-yellow', 'Scanne den QR-Code, um eine Wiedergabeliste hinzuzufügen.'));
         var statusText = License.known() ? License.text() : (Remote.registered ? 'Dein Gerät ist angemeldet.' : (this.error ? 'Gerät noch nicht verbunden.' : 'Gerät wird angemeldet …'));
-        sideIn.appendChild(h('div', 'pl-status' + (License.known() && !License.activated() && !License.free() ? ' trial' : ''), statusText));
+        col1.appendChild(h('div', 'pl-status' + (License.known() && !License.activated() && !License.free() ? ' trial' : ''), statusText));
         if (License.known() && !License.activated() && !License.free()) {
-            sideIn.appendChild(h('div', 'pl-price', 'Danach ' + REMOTE.price + ' einmalig auf der Website aktivieren.'));
+            col1.appendChild(h('div', 'pl-price', 'Danach ' + REMOTE.price + ' einmalig auf der Website aktivieren.'));
         }
-        sideIn.appendChild(h('div', 'pl-site', REMOTE.website.replace(/^https?:\/\//, '').replace(/\/$/, '')));
-        sideIn.appendChild(h('div', 'pl-text', 'Um Wiedergabelisten hinzuzufügen oder zu verwalten, verwende diese Werte:'));
-        sideIn.appendChild(h('div', 'pl-label', 'MAC-Adresse'));
-        sideIn.appendChild(h('div', 'pl-value', Device.macText()));
-        sideIn.appendChild(h('div', 'pl-label', 'Geräte-Schlüssel'));
-        sideIn.appendChild(h('div', 'pl-value', Device.key));
+        col1.appendChild(h('div', 'pl-site', REMOTE.website.replace(/^https?:\/\//, '').replace(/\/$/, '')));
+        col2.appendChild(h('div', 'pl-label', 'MAC-Adresse'));
+        col2.appendChild(h('div', 'pl-value', Device.macText()));
+        col2.appendChild(h('div', 'pl-label', 'Geräte-Schlüssel'));
+        col2.appendChild(h('div', 'pl-value', Device.key));
 
         var buttons = h('div', 'pl-buttons');
         var refresh = h('div', 'button', 'Aktualisieren');
@@ -3258,7 +3257,10 @@
             var open = h('div', 'button', 'Website öffnen');
             buttons.appendChild(focusable(open, 'pl-open', function () { AB.openUrl(Device.link()); }, 'side'));
         }
-        sideIn.appendChild(buttons);
+        col3.appendChild(buttons);
+        sideIn.appendChild(col1);
+        sideIn.appendChild(col2);
+        sideIn.appendChild(col3);
         wrap.appendChild(side);
         root.appendChild(wrap);
         // Größere Schrift auf manchen Fernsehern: Inhalt rechts so verkleinern, dass alles sichtbar bleibt
