@@ -2618,8 +2618,26 @@
             if (!url) return;
             n._lazyUrl = null;
             n.classList.remove('lazy');
+            if (THUMB_HOST && url.indexOf('https://' + THUMB_HOST + '/') === 0) { this.viaThumb(n, url); return; }
+            this.show(n, url);
+        },
+        show: function (n, url) {
             if (n.tagName === 'IMG') n.src = url;
             else n.style.backgroundImage = 'url("' + url.replace(/"/g, '%22') + '")';
+        },
+        /** Verkleinertes Poster vom Gerät; klappt das nicht, das Original direkt vom Bild-Server laden */
+        viaThumb: function (n, url) {
+            var self = this, orig = thumbOriginal(url), probe = new Image();
+            probe.onload = function () { ThumbStat.ok++; self.show(n, url); };
+            probe.onerror = function () {
+                ThumbStat.failed(orig);
+                if (!orig) return;
+                var direct = new Image();
+                direct.onload = function () { ThumbStat.directOk++; self.show(n, orig); };
+                direct.onerror = function () { ThumbStat.directFailed(orig); };
+                direct.src = orig;
+            };
+            probe.src = url;
         },
         /** n: <img> oder Element mit Hintergrundbild */
         set: function (n, url) {
@@ -2658,12 +2676,40 @@
      * Kleinere Bilder = schneller geladen und viel weniger Arbeit für Fire TV & Co.
      */
     var THUMB_HOST = (function () { try { return AB && AB.thumbHost ? String(AB.thumbHost() || '') : ''; } catch (e) { return ''; } })();
+    /** Klappt das Verkleinern auf dem Gerät nicht, Poster direkt laden und den Fehler einmal melden */
+    var ThumbStat = {
+        ok: 0, fail: 0, off: false, directOk: 0, directFail: 0, reported: {},
+        host: function (u) { var m = /^https?:\/\/([^\/?#]+)/i.exec(u || ''); return m ? m[1] : '?'; },
+        failed: function (orig) {
+            this.fail++;
+            if (!this.off && this.ok === 0 && this.fail >= 6) {
+                this.off = true;              // ab jetzt direkt laden
+                this.report('zwischenspeicher', 'Cover: Das Verkleinern auf dem Gerät liefert keine Bilder (' + this.fail + ' Fehler) – lade jetzt direkt. Beispiel-Server: ' + this.host(orig));
+            }
+        },
+        directFailed: function (orig) {
+            this.directFail++;
+            if (this.directOk === 0 && this.directFail >= 6) {
+                this.report('direkt', 'Cover lassen sich nicht laden (' + this.directFail + ' Fehler, auch direkt). Bild-Server: ' + this.host(orig));
+            }
+        },
+        report: function (key, text) {
+            if (this.reported[key]) return;
+            this.reported[key] = true;
+            try { Report.send('fehler', text); } catch (e) { /* egal */ }
+        }
+    };
+    function thumbOriginal(url) {
+        var m = /[?&]u=([^&]+)/.exec(url || '');
+        try { return m ? decodeURIComponent(m[1]) : ''; } catch (e) { return ''; }
+    }
+
     function thumbUrl(url, w) {
         if (!url) return url;
         var m = /^(https?:\/\/image\.tmdb\.org\/t\/p\/)[^\/]+(\/.+)$/i.exec(url);
         if (m) url = m[1] + 'w' + (w || 342) + m[2];
         // Android-App: Bild einmal laden, klein rechnen und auf dem Gerät aufheben (für alle Bild-Server)
-        if (THUMB_HOST && /^https?:\/\//i.test(url)) return 'https://' + THUMB_HOST + '/p?w=260&u=' + encodeURIComponent(url);
+        if (THUMB_HOST && !ThumbStat.off && /^https?:\/\//i.test(url)) return 'https://' + THUMB_HOST + '/p?w=260&u=' + encodeURIComponent(url);
         return url;
     }
 
@@ -3480,6 +3526,24 @@
     };
 
     /** Aktualisieren: Sender, Filme und Serien neu vom Anbieter holen und zeigen, was neu ist */
+    /** Einstellungen → Cache leeren: Bilder, Programm und Browser-Speicher weg, dann alles frisch laden */
+    function clearCacheFlow() {
+        Modal.open('Cache leeren?', 'Gespeicherte Cover, das Programm (EPG) und der Zwischenspeicher werden gelöscht und danach neu geladen. ' +
+            'Favoriten, Weiterschauen, gesehene Folgen und Einstellungen bleiben erhalten.', [
+            { label: 'Cache leeren', primary: true, action: function () {
+                var freed = 0;
+                try { if (AB && AB.clearCache) freed = parseInt(AB.clearCache(), 10) || 0; } catch (e) { /* egal */ }
+                ThumbStat.ok = 0; ThumbStat.fail = 0; ThumbStat.off = false; ThumbStat.directOk = 0; ThumbStat.directFail = 0;
+                Epg.cache = {}; Epg.valid = false; Epg.nowCache = null;
+                Data.epgCache = {};
+                if (Data.epgFullCache) Data.epgFullCache = {};
+                toast('Cache geleert' + (freed > 0 ? ' (' + Math.max(1, Math.round(freed / 1048576)) + ' MB frei)' : '') + ' – Listen werden neu geladen …', 4000);
+                reloadAll();
+            } },
+            { label: 'Abbrechen' }
+        ]);
+    }
+
     function reloadAll() {
         var acc = Api.acc || Storage.get('account', null);
         if (!acc) return;
@@ -5171,6 +5235,7 @@
         if (Updater.available()) {
             row('update', 'App-Version ' + Updater.versionText(Updater.current()), 'Nach Updates suchen', function () { Updater.check(true); });
         }
+        row('cache', 'Cache leeren', 'Gespeicherte Bilder und Programm löschen, Listen neu laden', function () { clearCacheFlow(); });
         row('lists', 'Wiedergabelisten', 'Liste wechseln oder neue hinzufügen', function () { Nav.push(new PlaylistsScreen()); });
         row('account', 'Konto', License.activated() ? 'Aktiviert (unbegrenzt)' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
         row('device', 'Gerät', 'MAC ' + Device.macText() + '  ·  Schlüssel ' + Device.key, function () { Nav.push(new PlaylistsScreen()); });

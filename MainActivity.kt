@@ -1039,6 +1039,32 @@ class MainActivity : Activity() {
             getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().remove("crashSend").remove("crashSendAt").apply()
         }
 
+        /**
+         * „Cache leeren“: verkleinerte Poster, Programm (EPG), alte Update-Dateien und den Browser-Zwischenspeicher löschen.
+         * Favoriten, Weiterschauen und Einstellungen bleiben erhalten. Gibt die freigegebenen Bytes zurück.
+         */
+        @JavascriptInterface
+        fun clearCache(): String {
+            var freed = 0L
+            fun wipe(dir: File?) {
+                dir?.listFiles()?.forEach { f ->
+                    if (f.isDirectory) wipe(f)
+                    freed += f.length()
+                    f.delete()
+                }
+            }
+            try { wipe(thumbDir) } catch (e: Throwable) { }
+            try { wipe(File(cacheDir, "updates")) } catch (e: Throwable) { }
+            try { externalCacheDir?.let { wipe(File(it, "updates")) } } catch (e: Throwable) { }
+            try {
+                if (epgFile.exists()) { freed += epgFile.length(); epgFile.delete() }
+                epgMap = HashMap()
+                epgMeta = "{}"
+            } catch (e: Throwable) { }
+            handler.post { try { if (uiReady) webView.clearCache(true) } catch (e: Throwable) { } }
+            return freed.toString()
+        }
+
         /** Gerätename für Fehlerberichte */
         @JavascriptInterface
         fun deviceName(): String = Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE +
