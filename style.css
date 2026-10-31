@@ -1069,3 +1069,61 @@ body.wide .pl-side { left: auto; right: 0; }
 .pf-set-row .set-label { flex: 1; }
 .pf-item.focused { box-shadow: none !important; }
 .pf-chip.focused { box-shadow: 0 0 22px rgba(244,220,158,.45) !important; }
+
+/* ---------- Einstellungen (Profil oben, Schnellzugriff, Gruppen) ---------- */
+.settings.set5 { left: 70px; right: 70px; top: 110px; padding: 18px 14px 40px; }
+.set-hero { position: relative; display: flex; align-items: center; height: 196px; padding: 0 36px; margin-bottom: 26px; box-sizing: border-box;
+    border-radius: 24px; background: linear-gradient(120deg, rgba(217,176,102,.32), rgba(0,0,0,.55)); border: 2px solid rgba(244,220,158,.35); }
+.pf-av.hero { width: 128px; height: 128px; font-size: 66px; margin-right: 32px; flex: none; }
+.set-logo { background: rgba(0,0,0,.4); overflow: hidden; }
+.set-logo img { width: 100%; height: 100%; object-fit: cover; }
+.set-hero-t { flex: 1; min-width: 0; }
+.set-hero-name { font-size: 46px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-hero-sub { font-size: 25px; color: #d8d4cb; margin-top: 6px; }
+.set-chips { display: flex; flex: none; }
+.set-chip { display: flex; align-items: center; height: 62px; padding: 0 26px 0 18px; margin-left: 16px; border-radius: 32px; font-size: 25px; font-weight: bold;
+    background: rgba(0,0,0,.55); border: 2px solid rgba(244,220,158,.5); color: #f4dc9e; white-space: nowrap; }
+.set-chip svg { margin-right: 10px; flex: none; }
+.set-chip.vpn.on { color: #7ee08a; border-color: rgba(126,224,138,.7); background: rgba(22,48,28,.85); }
+.set-chip.vpn.wait { color: #f4dc9e; }
+.set-chip.vpn.err { color: #ff8a80; border-color: rgba(255,138,128,.7); }
+.set-chip.vpn.off { color: #b8bcc6; border-color: rgba(255,255,255,.3); }
+.set-chip.focused { background: #f4dc9e !important; color: #1a1408 !important; border-color: #f4dc9e !important; }
+.set-quick { display: flex; margin: 0 -12px 18px; }
+.set-tile { flex: 1; display: flex; align-items: center; height: 140px; margin: 0 12px; padding: 0 24px; box-sizing: border-box; min-width: 0;
+    border-radius: 20px; background: rgba(0,0,0,.5); border: 2px solid rgba(255,255,255,.12); }
+.set-tile-ic { width: 76px; height: 76px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center;
+    background: rgba(217,176,102,.18); color: #f4dc9e; margin-right: 20px; }
+.set-tile-t { min-width: 0; }
+.set-tile-l { font-size: 29px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-tile-v { font-size: 22px; color: #f4dc9e; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-tile.focused { background: rgba(217,176,102,.38); }
+.set-group { font-size: 23px; font-weight: 800; letter-spacing: 3px; color: #d9b066; margin: 22px 0 12px 8px; }
+.set5 .set-row { padding: 22px 32px; margin-bottom: 12px; }
+#modal .modal-text { white-space: pre-line; }
+
+/* ---------- Film: „Mehr davon“ ---------- */
+.detail .body.vscroll { overflow: hidden; padding-bottom: 30px; box-sizing: border-box; }
+body.touch .detail .body.vscroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.similar { margin-top: 6px; }
+.similar-strip { overflow: hidden; white-space: nowrap; }
+body.touch .similar-strip { overflow-x: auto; }
+.similar-inner { white-space: nowrap; padding: 4px 0 10px 6px; }
+.similar .poster { width: 170px; margin: 8px 12px 6px 0; white-space: normal; }
+.similar .poster .img { width: 170px; height: 255px; }
+.similar .poster .title { font-size: 20px; height: 50px; line-height: 25px; }
+/* Einstellungen: alles auf einen Bildschirm */
+.settings.set5 { padding-top: 12px; -webkit-mask-image: none; mask-image: none; }
+.set5 .set-hero { height: 150px; margin-bottom: 18px; padding: 0 30px; }
+.set5 .pf-av.hero { width: 104px; height: 104px; font-size: 54px; margin-right: 26px; }
+.set5 .set-hero-name { font-size: 40px; }
+.set5 .set-hero-sub { font-size: 23px; }
+.set5 .set-quick { margin-bottom: 4px; }
+.set5 .set-tile { height: 112px; }
+.set5 .set-tile-ic { width: 66px; height: 66px; }
+.set-cols { display: flex; margin: 0 -14px; }
+.set-col { flex: 1; margin: 0 14px; min-width: 0; }
+.set5 .set-group { margin: 16px 0 8px 6px; font-size: 21px; }
+.set5 .set-row { padding: 0 26px; height: 70px; margin-bottom: 9px; box-sizing: border-box; }
+.set5 .set-label { font-size: 27px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set5 .set-value { font-size: 23px; white-space: nowrap; }
