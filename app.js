@@ -1412,6 +1412,21 @@
 
         /** Große Liste holen und im Hintergrund umrechnen. cats: Promise der Kategorien */
         list: function (action, kind, cats) {
+            var a = this.acc, text, self = this;
+            if (a && !a.demo && NativeList.host()) {
+                // Fire TV/Android: der Android-Teil liest und kürzt die Liste, hier wird nur noch eingesetzt
+                var src = a.server + '/player_api.php?username=' + encodeURIComponent(a.username) +
+                    '&password=' + encodeURIComponent(a.password) + '&action=' + action;
+                return Promise.all([cats, NativeList.fetch(src, kind)]).then(function (res) {
+                    if (res[1] === null) return self.listClassic(action, kind, Promise.resolve(res[0]));   // Notlösung: wie bisher
+                    return NativeList.build(res[1], kind, Data.catMap(res[0]));
+                });
+            }
+            return this.listClassic(action, kind, cats);
+        },
+
+        /** Bisheriger Weg: ganze Antwort hier lesen und umrechnen */
+        listClassic: function (action, kind, cats) {
             var a = this.acc, text;
             if (a && a.demo) text = Promise.resolve(JSON.stringify(Demo.answer(action)));
             else {
@@ -1908,6 +1923,58 @@
      * Große Listen (zehntausende Filme/Serien) im Hintergrund-Worker auswerten:
      * die Oberfläche und die Lade-Animation laufen dabei flüssig weiter.
      */
+    /**
+     * Fire TV/Android: große Listen liest der Android-Teil (MainActivity.listResponse / ListMapper.kt).
+     * Er liefert pro Zeile ein kleines JSON-Feld; hier werden die Zeilen häppchenweise eingelesen,
+     * damit die Bedienung dazwischen flüssig bleibt.
+     */
+    var NativeList = {
+        _host: undefined,
+        host: function () {
+            if (this._host === undefined) {
+                try { this._host = AB && AB.listHost ? String(AB.listHost() || '') : ''; } catch (e) { this._host = ''; }
+            }
+            return this._host;
+        },
+        /** Text der kleinen Liste, oder null = bitte auf den alten Weg ausweichen */
+        fetch: function (src, kind) {
+            var url = 'https://' + this.host() + '/map?kind=' + encodeURIComponent(kind) + '&u=' + encodeURIComponent(src);
+            return fetch(url).then(function (res) {
+                return res.text().then(function (text) {
+                    if (res.status === 599) return null;
+                    if (res.status === 422) throw new Error(text || 'Unerwartete Antwort vom Server.');
+                    if (!res.ok) throw httpError(res.status, text);
+                    return text;
+                });
+            }, function () { return null; });
+        },
+        item: function (kind, r, cats) {
+            if (kind === 'live') return { type: 'live', id: r[0], num: r[1], name: r[2], logo: r[3], cat: cats[r[4]] || '', epg: r[5] };
+            if (kind === 'movie') return { type: 'movie', id: r[0], name: r[1], logo: r[2], cat: cats[r[3]] || '', ext: r[4], year: r[5], rating: r[6], added: r[7] };
+            return { type: 'series', id: r[0], name: r[1], logo: r[2], cat: cats[r[3]] || '', year: r[4], rating: r[5], added: r[6] };
+        },
+        build: function (text, kind, cats) {
+            var me = this;
+            return new Promise(function (resolve, reject) {
+                var lines = text.split('\n'), out = [], i = 0;
+                text = null;
+                function step() {
+                    var t0 = Date.now();
+                    try {
+                        while (i < lines.length && Date.now() - t0 < 25) {
+                            var line = lines[i]; lines[i] = null; i++;
+                            if (!line) continue;
+                            var rows = JSON.parse(line);
+                            for (var k = 0; k < rows.length; k++) out.push(me.item(kind, rows[k], cats));
+                        }
+                    } catch (e) { reject(new Error('Die Liste konnte nicht gelesen werden. Bitte noch einmal aktualisieren.')); return; }
+                    if (i < lines.length) setTimeout(step, 0); else resolve(out);
+                }
+                step();
+            });
+        }
+    };
+
     var Parser = {
         w: null, ready: false, seq: 0, wait: {},
         CHUNK: 4000,
