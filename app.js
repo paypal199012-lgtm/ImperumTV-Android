@@ -2285,25 +2285,28 @@
         },
         /** PPV-/Event-Sender, die das Spiel im Namen tragen (z. B. „Live | Mönchengladbach vs. Paderborn“) */
         eventChannels: function (m) {
+            var youth = /(^|[^a-z0-9])(u ?1[5-9]|u ?2[0-3]|ii|frauen|women|damen|jugend|youth|reserves?)([^a-z0-9]|$)/;
             if (this._namesOf !== Data.channels) {
                 var me = this;
                 this._names = [];
+                this._evCache = {};             // Ergebnis je Spiel – gilt, bis die Senderliste neu geladen wird
                 Data.channels.forEach(function (c) {
                     var n = c.name || '';
                     if (/#{2,}|^\s*[-=*#]|[-=*]{3,}/.test(n)) return;
                     var f = me.fold(n);
                     if (/(^|\|)\s*(ended|ende|beendet|finished|vorbei)([^a-z]|$)/.test(f)) return;   // beendete Events
-                    me._names.push({ c: c, f: f });
+                    me._names.push({ c: c, f: f, y: youth.test(f) });
                 });
                 this._namesOf = Data.channels;
             }
+            var ck = String(m.id);
+            if (this._evCache[ck]) return this._evCache[ck].slice();
             var hw = this.words(m.h), aw = this.words(m.a), me2 = this, out = [];
             var teams = this.fold((m.h.n || '') + ' ' + (m.a.n || ''));
-            var youth = /(^|[^a-z0-9])(u ?1[5-9]|u ?2[0-3]|ii|frauen|women|damen|jugend|youth|reserves?)([^a-z0-9]|$)/;
             var teamYouth = youth.test(teams);
             for (var i = 0; i < this._names.length; i++) {
                 var x = this._names[i];
-                if (!teamYouth && youth.test(x.f)) continue;
+                if (!teamYouth && x.y) continue;
                 var hh = hw.some(function (w) { return me2.has(x.f, w); });
                 var ah = aw.some(function (w) { return me2.has(x.f, w); });
                 if (!hh && !ah) continue;
@@ -2312,7 +2315,9 @@
                 out.push({ c: x.c, sc: sc });
             }
             out.sort(function (a, b) { return b.sc - a.sc; });
-            return out.slice(0, 20);
+            out = out.slice(0, 20);
+            this._evCache[ck] = out;
+            return out.slice();
         },
 
         /** Programm eines Senders zur Anstoßzeit (Titel + Text, vereinfacht) */
