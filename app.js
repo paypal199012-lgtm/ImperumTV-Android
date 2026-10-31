@@ -369,6 +369,12 @@
         lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
         rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
         gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M5.5 18.5l1.9-1.9M16.6 7.4l1.9-1.9"/><circle cx="12" cy="12" r="6.2"/>',
+        clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+        play: '<path d="M7.5 4.5l12 7.5-12 7.5z"/>',
+        next: '<path d="M5.5 5l9 7-9 7zM18.5 5v14"/>',
+        speed: '<path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4.2-5"/>',
+        device: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>',
+        users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17" cy="8.5" r="2.8"/><path d="M17 14c2.8.2 4.8 2.3 4.8 5.5"/>',
         epg: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/><circle cx="5.2" cy="9" r=".4"/><circle cx="5.2" cy="13" r=".4"/><circle cx="5.2" cy="17" r=".4"/>'
     };
     function icon(name, size) {
@@ -6323,134 +6329,141 @@
     SettingsScreen.prototype.render = function (root) {
         var self = this;
         root.appendChild(topbar('Einstellungen', ''));
-        var box = h('div', 'settings set5 vscroll');
+        var box = h('div', 'settings set6');
+        function go(key, fn) { return function () { self.focusKey = key; fn(); }; }
+        var accText = License.activated() ? 'Konto aktiviert' : (License.free() ? License.freeText() : License.text());
+        function parentalOpen() {
+            if (!Parental.hasPin()) newPinFlow(function () { Nav.push(new ParentalScreen()); });
+            else Parental.ask('PIN eingeben', function () { Nav.push(new ParentalScreen()); }, true);
+        }
 
-        // ---------- Oben: wer schaut, VPN, Profil wechseln ----------
+        // ---------- Banner: Logo/Profil, Name, Konto · Version, rechts Status-Felder ----------
         var me = Profiles.cur();
-        var hero = h('div', 'set-hero');
-        if (me) hero.appendChild(Profiles.avatar(me, 'hero'));
+        var hero = h('div', 'set6-hero');
+        if (me && Profiles.count() >= 2) hero.appendChild(Profiles.avatar(me, 'hero'));
         else {
             var lg = h('div', 'pf-av hero set-logo');
             var im = h('img'); im.src = 'img/icon.png'; lg.appendChild(im);
             hero.appendChild(lg);
         }
         var ht = h('div', 'set-hero-t');
-        ht.appendChild(h('div', 'set-hero-name', me ? me.name : 'ImperumTV'));
-        var favN = Favs.set ? Object.keys(Favs.set).length : 0;
-        var bits = [];
-        if (me) bits.push(me.id === 'p0' ? 'Hauptprofil' : (me.kids ? 'Kinder-Profil' : 'Profil'));
-        bits.push(favN + (favN === 1 ? ' Favorit' : ' Favoriten'));
+        ht.appendChild(h('div', 'set-hero-name', me && Profiles.count() >= 2 ? me.name : 'ImperumTV'));
+        var bits = [accText];
         if (Updater.available()) bits.push('Version ' + Updater.versionText(Updater.current()));
-        ht.appendChild(h('div', 'set-hero-sub', bits.join(' · ')));
+        var favN = Favs.set ? Object.keys(Favs.set).length : 0;
+        bits.push(favN + (favN === 1 ? ' Favorit' : ' Favoriten'));
+        ht.appendChild(h('div', 'set-hero-sub', bits.filter(function (x) { return !!x; }).join(' · ')));
         hero.appendChild(ht);
-        var chips = h('div', 'set-chips');
-        if (OVpn.native()) {
-            var oi = OVpn.info();
-            var vc = h('div', 'set-chip vpn ' + (!oi.has ? 'off' : oi.state === 'an' ? 'on' : oi.state === 'verbindet' ? 'wait' : oi.state === 'fehler' ? 'err' : 'off'));
-            var place = OVpn.place(oi.server);
-            vc.innerHTML = icon('shield', 30) + '<span></span>';
-            vc.lastChild.textContent = !oi.has ? 'VPN einrichten' : oi.state === 'an' ? 'VPN verbunden' + (place ? ' · ' + place : '') :
-                oi.state === 'verbindet' ? 'VPN verbindet …' : oi.state === 'fehler' ? 'VPN-Fehler' : 'VPN aus';
-            chips.appendChild(focusable(vc, 'set-vpnchip', function () { self.focusKey = 'set-vpnchip'; vpnDialog(); }, 'sethead'));
+        var stats = h('div', 'set6-stats');
+        function stat(key, ic, label, value, cls, action) {
+            var st = h('div', 'set6-stat' + (cls ? ' ' + cls : ''));
+            var l = h('div', 'set6-stat-l'); l.innerHTML = icon(ic, 24) + '<span></span>'; l.lastChild.textContent = label;
+            st.appendChild(l);
+            st.appendChild(h('div', 'set6-stat-v', value));
+            stats.appendChild(focusable(st, 'set-' + key, go('set-' + key, action), 'sethead'));
         }
-        var pc = h('div', 'set-chip prof');
-        pc.innerHTML = icon('user', 30) + '<span></span>';
-        pc.lastChild.textContent = Profiles.count() >= 2 ? 'Profil wechseln' : 'Profile';
-        chips.appendChild(focusable(pc, 'set-profchip', function () {
-            if (Profiles.count() >= 2) Nav.push(new WhoScreen(function () { Nav.stack.length = 0; Nav.push(new HomeScreen()); }, true));
-            else Nav.push(new ProfilesScreen());
-        }, 'sethead'));
-        hero.appendChild(chips);
+        if (OVpn.native()) {
+            var oi = OVpn.info(), place = OVpn.place(oi.server);
+            stat('vpnstat', 'shield', 'VPN', !oi.has ? 'Einrichten' : oi.state === 'an' ? (place || 'Verbunden') : oi.state === 'verbindet' ? 'Verbindet …' : oi.state === 'fehler' ? 'Fehler' : 'Aus',
+                oi.state === 'an' ? 'on' : oi.state === 'fehler' ? 'err' : '', function () { vpnDialog(); });
+        }
+        stat('parstat', 'lock', 'Kinderschutz', Parental.hasPin() ? 'An' : 'Aus', '', parentalOpen);
+        stat('devstat', 'device', 'Gerät', Device.macText(), 'small', function () { Nav.push(new PlaylistsScreen()); });
+        hero.appendChild(stats);
         box.appendChild(hero);
 
-        // ---------- Schnellzugriff ----------
-        var quick = h('div', 'set-quick');
-        function tile(key, ic, label, value, action) {
-            var t = h('div', 'set-tile');
-            var i = h('div', 'set-tile-ic'); i.innerHTML = icon(ic, 40);
-            t.appendChild(i);
-            var tt = h('div', 'set-tile-t');
-            tt.appendChild(h('div', 'set-tile-l', label));
-            tt.appendChild(h('div', 'set-tile-v', value));
-            t.appendChild(tt);
-            quick.appendChild(focusable(t, 'set-' + key, function () { self.focusKey = 'set-' + key; action(); }, 'setquick'));
-        }
-        tile('reload', 'refresh', 'Neu laden', 'Sender, Filme, Serien', function () { reloadAll(); });
-        tile('cache', 'clean', 'Cache leeren', 'Bilder & Programm', function () { clearCacheFlow(); });
-        tile('parental', 'lock', 'Kinderschutz', Parental.hasPin() ? 'An · PIN gesetzt' : 'Aus', function () {
-            if (!Parental.hasPin()) newPinFlow(function () { Nav.push(new ParentalScreen()); });
-            else Parental.ask('PIN eingeben', function () { Nav.push(new ParentalScreen()); }, true);
-        });
-        if (Updater.available()) tile('update', 'up', 'Updates', 'Version ' + Updater.versionText(Updater.current()), function () { Updater.check(true); });
-        else tile('account', 'user', 'Konto', License.activated() ? 'Aktiviert' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
-        box.appendChild(quick);
-
-        // ---------- Liste in zwei Spalten (alles auf einen Blick, ohne Scrollen) ----------
-        var cols = h('div', 'set-cols'), colL = h('div', 'set-col'), colR = h('div', 'set-col'), col = colL;
-        cols.appendChild(colL); cols.appendChild(colR);
+        // ---------- Drei Spalten in Karten ----------
+        var cols = h('div', 'set6-cols');
         box.appendChild(cols);
-        function head(text) { col.appendChild(h('div', 'set-group', text)); }
-        function row(key, label, value, action) {
+        var card = null;
+        function col(ic, title) {
+            card = h('div', 'set6-card');
+            var t = h('div', 'set6-head'); t.innerHTML = icon(ic, 26) + '<span></span>'; t.lastChild.textContent = title;
+            card.appendChild(t);
+            cols.appendChild(card);
+        }
+        function row(key, ic, label, value, action) {
             var r = h('div', 'set-row');
-            r.appendChild(h('div', 'set-label', label));
+            var l = h('div', 'set-label'); l.innerHTML = icon(ic, 26) + '<span></span>'; l.lastChild.textContent = label;
+            r.appendChild(l);
             var v = h('div', 'set-value', value || '');
             r.appendChild(v);
             focusable(r, 'set-' + key, function () { self.focusKey = 'set-' + key; action(v); }, 'setlist');
-            col.appendChild(r);
+            card.appendChild(r);
             return r;
         }
-        head('WIEDERGABE');
-        row('format', 'Live-Format', Settings.liveExt.toUpperCase(), function (v) {
+
+        col('play', 'WIEDERGABE');
+        row('format', 'tv', 'Live-Format', Settings.liveExt.toUpperCase(), function (v) {
             Settings.setLiveExt(Settings.liveExt === 'ts' ? 'm3u8' : 'ts');
             v.textContent = Settings.liveExt.toUpperCase();
             toast(Settings.liveExt === 'ts' ? 'Live-Sender laufen jetzt als TS (meist am stabilsten)' : 'Live-Sender laufen jetzt als HLS (M3U8)');
         });
         if (VodPlayer.available()) {
-            row('vodplayer', 'Player Filme & Serien', VodPlayer.nameOf(VodPlayer.pref()), function () {
+            row('vodplayer', 'play', 'Player Filme & Serien', VodPlayer.nameOf(VodPlayer.pref()), function () {
                 VodPlayer.pick(function () { self.focusKey = 'set-vodplayer'; Nav.show(self); });
             });
         }
-        row('autonext', 'Nächste Folge automatisch', Settings.autoNext ? 'An · 10 s' : 'Aus', function (v) {
+        row('autonext', 'next', 'Nächste Folge', Settings.autoNext ? 'An · 10 s' : 'Aus', function (v) {
             Settings.setFlag('autoNext', !Settings.autoNext);
             v.textContent = Settings.autoNext ? 'An · 10 s' : 'Aus';
         });
-        row('intro', '„Intro überspringen“', Settings.introBtn ? 'An · ' + Settings.introSec + ' s' : 'Aus', function (v) {
+        row('intro', 'next', 'Intro überspringen', Settings.introBtn ? 'An · ' + Settings.introSec + ' s' : 'Aus', function (v) {
             Settings.setFlag('introBtn', !Settings.introBtn);
             v.textContent = Settings.introBtn ? 'An · ' + Settings.introSec + ' s' : 'Aus';
         });
-        head('ANZEIGE');
-        row('clock', 'Uhrzeit oben rechts', Clock.label(), function (v) { v.textContent = Clock.next(); });
-        head('PROFILE');
-        row('profiles', 'Profile', Profiles.count() ? Profiles.count() + ' · aktiv: ' + Profiles.cur().name : 'Aus', function () { Nav.push(new ProfilesScreen()); });
 
-        col = colR;
+        col('clock', 'ANZEIGE & FAMILIE');
+        row('clock', 'clock', 'Uhrzeit oben rechts', Clock.label().replace('An · mit Sekunden', 'Mit Sekunden').replace('An · ohne Sekunden', 'Ohne Sekunden'), function (v) {
+            Clock.next();
+            v.textContent = Clock.label().replace('An · mit Sekunden', 'Mit Sekunden').replace('An · ohne Sekunden', 'Ohne Sekunden');
+        });
+        row('parental', 'lock', 'Kinderschutz', Parental.hasPin() ? 'An · PIN' : 'Aus', parentalOpen);
+        row('profiles', 'users', 'Profile', Profiles.count() ? Profiles.count() + ' · ' + Profiles.cur().name : 'Aus', function () {
+            if (Profiles.count() >= 2) Nav.push(new WhoScreen(function () { Nav.stack.length = 0; Nav.push(new HomeScreen()); }, true));
+            else Nav.push(new ProfilesScreen());
+        });
+
+        col('shield', OVpn.native() ? 'VPN & KONTO' : 'KONTO');
         if (OVpn.native()) {
-            head('VPN');
             var vi = OVpn.info();
             if (vi.has) {
-                row('ovpn', 'VPN (OpenVPN)', vi.state === 'an' ? 'Verbunden' : vi.state === 'verbindet' ? 'Verbindet …' : vi.state === 'fehler' ? 'Fehler' : 'Getrennt', function (v) {
+                row('ovpn', 'shield', 'VPN (OpenVPN)', vi.state === 'an' ? 'Verbunden' : vi.state === 'verbindet' ? 'Verbindet …' : vi.state === 'fehler' ? 'Fehler' : 'Getrennt', function (v) {
                     var on = OVpn.toggle();
                     v.textContent = on ? 'Verbindet …' : 'Getrennt';
                 });
-                row('ovpn-auto', 'Beim Start verbinden', vi.auto ? 'An' : 'Aus', function (v) {
+                row('ovpn-auto', 'refresh', 'Beim Start verbinden', vi.auto ? 'An' : 'Aus', function (v) {
                     var on = !OVpn.info().auto;
                     try { AB.ovpnSetAutoStart(on); } catch (e) { /* egal */ }
                     v.textContent = on ? 'An' : 'Aus';
                 });
             } else {
-                row('ovpn', 'VPN einrichten', '.ovpn auf der Website', function () { vpnSetupDialog(); });
+                row('ovpn', 'shield', 'VPN einrichten', '.ovpn-Datei', function () { vpnSetupDialog(); });
             }
         }
-        head('KONTO & GERÄT');
-        row('lists', 'Wiedergabelisten', 'Wechseln', function () { Nav.push(new PlaylistsScreen()); });
-        if (Updater.available()) {
-            row('account2', 'Konto', License.activated() ? 'Aktiviert' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
+        row('lists', 'list', 'Wiedergabelisten', 'Wechseln', function () { Nav.push(new PlaylistsScreen()); });
+        row('account', 'user', 'Konto', License.activated() ? 'Aktiviert' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
+
+        // ---------- Unten: Aktionen ----------
+        var acts = h('div', 'set6-acts');
+        function act(key, ic, label, sub, action) {
+            var t = h('div', 'set6-act');
+            var i = h('div', 'set-tile-ic'); i.innerHTML = icon(ic, 34);
+            t.appendChild(i);
+            var tt = h('div', 'set-tile-t');
+            tt.appendChild(h('div', 'set-tile-l', label));
+            tt.appendChild(h('div', 'set-tile-v', sub));
+            t.appendChild(tt);
+            acts.appendChild(focusable(t, 'set-' + key, go('set-' + key, action), 'setquick'));
         }
-        row('device', 'Gerät', Device.macText(), function () { Nav.push(new PlaylistsScreen()); });
-        head('HILFE');
-        row('nettest', 'Verbindungstest', 'Internet, Server, Sender prüfen', function () { Nav.push(new NetTestScreen()); });
+        act('reload', 'refresh', 'Neu laden', 'Sender, Filme, Serien', function () { reloadAll(); });
+        act('cache', 'clean', 'Cache leeren', 'Bilder & Programm', function () { clearCacheFlow(); });
+        if (Updater.available()) act('update', 'up', 'Updates', 'Version ' + Updater.versionText(Updater.current()), function () { Updater.check(true); });
+        act('nettest', 'speed', 'Verbindungstest', 'Internet & Sender', function () { Nav.push(new NetTestScreen()); });
+        box.appendChild(acts);
+
         root.appendChild(box);
-        if (!this.focusKey) this.focusKey = 'set-reload';
+        if (!this.focusKey) this.focusKey = 'set-format';
     };
 
     // =====================================================================

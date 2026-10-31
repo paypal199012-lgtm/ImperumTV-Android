@@ -1228,3 +1228,35 @@ body.video-mode.osd #clock { display: block; }
 .nt-res-tip { font-size: 23px; color: #a7a39a; margin-top: 8px; }
 .nt-btns { margin-top: 18px; }
 .nt-btns .button { display: inline-block; margin-right: 20px; }
+
+/* ---------- Einstellungen (Banner, drei Karten, Aktionen unten) ---------- */
+.settings.set6 { left: 70px; right: 70px; top: 110px; bottom: 30px; padding: 0; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+.set6-hero { display: flex; align-items: center; height: 168px; padding: 0 30px; box-sizing: border-box; border-radius: 22px;
+    background: linear-gradient(100deg, rgba(217,176,102,.45), rgba(217,176,102,.12) 55%, rgba(255,255,255,.04)); border: 2px solid rgba(232,201,138,.6); }
+.set6-hero .pf-av.hero { width: 112px; height: 112px; font-size: 58px; margin-right: 26px; border: 3px solid #f4dc9e; box-sizing: border-box; }
+.set6-hero .set-hero-name { font-size: 40px; }
+.set6-hero .set-hero-sub { font-size: 23px; color: #efe4cb; }
+.set6-stats { display: flex; flex: none; }
+.set6-stat { min-width: 190px; margin-left: 16px; padding: 14px 22px; border-radius: 16px; background: rgba(0,0,0,.4); border: 2px solid transparent; box-sizing: border-box; }
+.set6-stat-l { display: flex; align-items: center; font-size: 19px; color: #b9b4a9; }
+.set6-stat-l svg { margin-right: 8px; color: #e8c98a; }
+.set6-stat-v { font-size: 27px; font-weight: bold; margin-top: 4px; white-space: nowrap; }
+.set6-stat.small .set6-stat-v { font-size: 22px; padding-top: 4px; }
+.set6-stat.on .set6-stat-v { color: #7ee08a; }
+.set6-stat.err .set6-stat-v { color: #ff8a80; }
+.set6-stat.focused { background: rgba(217,176,102,.38); border-color: #f4dc9e; }
+.set6-cols { display: flex; margin: 26px -14px 0; align-items: flex-start; }
+.set6-card { flex: 1; min-width: 0; margin: 0 14px; padding: 16px 16px 6px; border-radius: 20px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); box-sizing: border-box; }
+.set6-head { display: flex; align-items: center; font-size: 21px; font-weight: 800; letter-spacing: 3px; color: #d9b066; margin: 2px 0 12px 6px; }
+.set6-head svg { margin-right: 10px; }
+.set6 .set-row { height: 66px; padding: 0 20px; margin-bottom: 10px; box-sizing: border-box; border-radius: 12px; background: rgba(0,0,0,.35); border: 2px solid rgba(255,255,255,.08); }
+.set6 .set-label { display: flex; align-items: center; font-size: 25px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set6 .set-label svg { flex: none; margin-right: 14px; color: #e8c98a; }
+.set6 .set-value { font-size: 21px; white-space: nowrap; margin-left: 16px; color: #d6cfbf; }
+.set6-acts { position: absolute; left: 0; right: 0; bottom: 0; display: flex; margin: 0 -10px; }
+.set6-act { flex: 1; display: flex; align-items: center; height: 104px; margin: 0 10px; padding: 0 22px; border-radius: 18px; box-sizing: border-box; min-width: 0;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); }
+.set6-act .set-tile-ic { width: 60px; height: 60px; margin-right: 18px; }
+.set6-act .set-tile-l { font-size: 25px; }
+.set6-act .set-tile-v { font-size: 19px; color: #b9b4a9; }
+.set6-act.focused { background: rgba(217,176,102,.38); }
