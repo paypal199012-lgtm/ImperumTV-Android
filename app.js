@@ -1512,6 +1512,21 @@
     });
 
     /** OpenVPN mit eigener .ovpn-Datei (hochgeladen auf der Website beim Gerät). Verbinden/Trennen entscheidet jeder selbst. */
+    /** Meldet der Website: App-Version, Gerät, VPN-Status (für die Geräte-Übersicht im Admin-Bereich) */
+    var Hello = {
+        last: 0, lastVpn: null,
+        send: function (force) {
+            if (!Device.validMac(Device.mac) || !Device.validKey(Device.key)) return;
+            var vpn = '';
+            try { if (OVpn.native() && OVpn.info().has) vpn = OVpn.info().state || ''; } catch (e) { vpn = ''; }
+            var now = Date.now();
+            if (!force && now - this.last < 60000 && vpn === this.lastVpn) return;
+            this.last = now; this.lastVpn = vpn;
+            Remote.rpc('device_hello', { p_mac: Device.mac, p_key: Device.key, p_version: Report.version(), p_device: Report.platform(), p_vpn: vpn })
+                .then(null, function () { /* ältere Datenbank ohne diese Funktion oder offline: egal */ });
+        }
+    };
+
     var OVpn = {
         native: function () { try { return !!(AB && AB.ovpnAvailable && AB.ovpnAvailable()); } catch (e) { return false; } },
         info: function () { try { return JSON.parse(AB.ovpnInfo() || '{}') || {}; } catch (e) { return {}; } },
@@ -1630,6 +1645,7 @@
         }
     };
     window.__androidOvpn = function (state, err) {
+        if (state === 'an' || state === 'aus' || state === 'fehler') setTimeout(function () { Hello.send(true); }, 1500);
         if (state === 'an') toast('VPN (OpenVPN) verbunden');
         else if (state === 'fehler') {
             toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 8000);
@@ -6539,6 +6555,7 @@
         loader(true, 'Wiedergabelisten werden geladen …');
         Remote.load().then(function () {
             loader(false);
+            setTimeout(function () { Hello.send(true); }, 5000);
             var chosen = lastId !== null ? Remote.find(lastId) : null;
             if (!License.active() && !(chosen && chosen.demo)) { Nav.replace(new LockScreen()); return; }
             var acc = chosen ? playlistAccount(chosen) : null;
@@ -6555,6 +6572,7 @@
         // Läuft die Testphase während der Nutzung ab: alle 10 Minuten nachsehen
         setInterval(function () {
             if (Nav.top() instanceof LockScreen) return;
+            Hello.send(true);
             Remote.load().then(null, function () { /* offline: gespeicherter Stand */ }).then(function () {
                 if (Api.acc && Api.acc.demo) return;      // Demo braucht keine Freischaltung
                 if (!License.active() && !(Nav.top() instanceof LockScreen)) Nav.replace(new LockScreen());
