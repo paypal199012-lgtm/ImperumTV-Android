@@ -272,7 +272,8 @@
      * Anmelden und alles laden: Live TV, dann Filme und Serien gleichzeitig.
      * Neu = mehr Einträge als beim letzten Mal auf diesem Gerät.
      */
-    function syncAll(acc, title, onOk, onErr, pending) {
+    /** quick: beim App-Start sofort zur Startseite, sobald die Sender da sind – Filme und Serien laden im Hintergrund */
+    function syncAll(acc, title, onOk, onErr, pending, quick) {
         var key = 'counts.' + (acc.demo ? 'demo' : acc.server + '|' + acc.username);
         var before = Storage.get(key, null);
         var finished = false, left = 2, mvOk = true, srOk = true;
@@ -285,6 +286,7 @@
             Sync.card('series', 'load');
             // Wer nicht warten will: los geht's, Filme/Serien laden im Hintergrund fertig
             Sync.allowSkip(function () { done(true); });
+            if (quick) setTimeout(function () { done(true); }, 400);    // kurz „Sender: fertig“ zeigen, dann los
             // Nach einem Absturz (Speicher voll): Filme und Serien erst beim Öffnen laden
             if (safeMode()) {
                 Sync.card('movies', 'later'); Sync.card('series', 'later');
@@ -7968,7 +7970,7 @@
                     var vpnOffer = !acc.demo && i.has && i.state !== 'an';
                     Nav.replace(new PlaylistsScreen(vpnOffer ? '' : (e.message || String(e))));
                     if (vpnOffer) OVpn.offerRetry(e, function () { start(acc); });
-                }, pending);
+                }, pending, true);
             });
         }
 
@@ -7976,6 +7978,20 @@
         else loadLists();
 
         function loadLists() {
+        // Schnellstart: Freischaltung bekannt und Liste gespeichert → sofort loslegen, Website im Hintergrund fragen
+        if (License.known() && License.active() && lastId !== null && saved && saved.server && saved.username && saved.password &&
+            !(saved.demo && !Demo.ENABLED)) {
+            start(saved);
+            Remote.load().then(function () {
+                setTimeout(function () { Hello.send(true); }, 5000);
+                if (!License.active() && !saved.demo) { Nav.replace(new LockScreen()); return; }
+                var chosen = Remote.find(lastId);
+                var acc = chosen ? playlistAccount(chosen) : null;
+                if (acc && !sameAcc(acc, saved)) { saved = acc; start(acc); }    // Zugangsdaten auf der Website geändert
+                else if (!chosen && Remote.lists.length) Nav.replace(new PlaylistsScreen('Die zuletzt genutzte Wiedergabeliste gibt es nicht mehr. Bitte wähle eine aus.'));
+            }, function () { /* offline: gespeicherter Stand gilt */ });
+            return;
+        }
         loader(true, 'Wiedergabelisten werden geladen …');
         Remote.load().then(function () {
             loader(false);
