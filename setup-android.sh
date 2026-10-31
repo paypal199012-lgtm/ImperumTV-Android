@@ -66,6 +66,15 @@ if [ "${OPENVPN:-1}" != "0" ] && git clone -q "$OVPN_REPO" "$OUT/openvpn" 2>/dev
     cp openvpn.build.gradle.kts "$OUT/openvpn/build.gradle.kts"
     # Neuere Gradle-Version: Paketname kommt aus build.gradle.kts, nicht mehr aus dem Manifest
     sed -i 's| package="de.blinkt.openvpn"||' "$OUT/openvpn/src/main/AndroidManifest.xml"
+    # Die Bibliothek tauscht Einstellungen zwischen App und VPN-Dienst über einen Content Provider aus,
+    # meldet ihn aber nicht selbst an (ohne ihn stürzt der VPN-Dienst nach „Konfiguration wird erstellt“ ab).
+    # Eigener Name, damit es keinen Konflikt mit anderen Apps gibt, die dieselbe Bibliothek nutzen.
+    sed -i 's|com.privateinternetaccess.multipreferences.MultiProvider|tv.imperum.app.ovpnprefs|' \
+        "$OUT/openvpn/src/main/java/de/blinkt/openvpn/core/MultiProvider.java"
+    sed -i 's|<application>|<application>\n        <provider android:name="de.blinkt.openvpn.core.MultiProvider" android:authorities="tv.imperum.app.ovpnprefs" android:exported="false" />|' \
+        "$OUT/openvpn/src/main/AndroidManifest.xml"
+    grep -q "tv.imperum.app.ovpnprefs" "$OUT/openvpn/src/main/java/de/blinkt/openvpn/core/MultiProvider.java" \
+        && grep -q "core.MultiProvider" "$OUT/openvpn/src/main/AndroidManifest.xml" || { echo "OpenVPN: Provider nicht eingetragen"; exit 1; }
     echo 'include(":openvpn")' >> "$OUT/settings.gradle.kts"
     sed -i 's|// OPENVPN.*|implementation(project(":openvpn"))|' "$OUT/app/build.gradle.kts"
     cp OVpn.kt "$JAVA_DIR/OVpn.kt"

@@ -177,13 +177,8 @@ object ImperumOVpn {
             // Nur ImperumTV durch das VPN
             p.mAllowedAppsVpn = HashSet(listOf(c.packageName))
             p.mAllowedAppsVpnAreDisallowed = false
-            val pm = ProfileManager.getInstance(c)
-            // Altes Profil der App aufräumen
-            prefs(c).getString("uuid", null)?.let { old -> ProfileManager.get(c, old)?.let { pm.removeProfile(c, it, false) } }
-            pm.addProfile(p)
-            pm.saveProfile(c, p)
-            pm.saveProfileList(c)
-            prefs(c).edit().putString("uuid", p.getUUIDString()).apply()
+            // Wie von der Bibliothek vorgesehen: als „vorübergehendes“ Profil (eigene Datei, die der VPN-Dienst liest)
+            ProfileManager.setTemporaryProfile(c, p)
             VPNLaunchHelper.startOpenVpn(p, c)
         } catch (e: Throwable) {
             update("fehler", "Die .ovpn-Datei lässt sich nicht lesen: " + (e.message ?: e.javaClass.simpleName))
