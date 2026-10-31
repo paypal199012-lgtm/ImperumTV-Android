@@ -1534,6 +1534,60 @@
                 se: 'Schweden', no: 'Norwegen', dk: 'Dänemark', ro: 'Rumänien', hr: 'Kroatien', rs: 'Serbien', al: 'Albanien', ca: 'Kanada' };
             return names[m[1].toLowerCase()] || m[1].toUpperCase();
         },
+        /** Soll beim Laden auf das VPN gewartet werden? (VPN eingerichtet und gerade im Aufbau bzw. „beim Start verbinden“) */
+        pending: function () {
+            if (!this.native()) return false;
+            var i = this.info();
+            if (!i.has || i.state === 'an' || i.state === 'fehler') return false;
+            return i.state === 'verbindet' || !!i.auto;
+        },
+        /** Erst weitermachen, wenn das VPN steht (höchstens 40 Sekunden), sonst sofort */
+        whenReady: function (cb) {
+            if (!this.pending()) { cb(); return; }
+            var self = this, t0 = Date.now(), done = false;
+            loader(true, 'VPN wird verbunden …');
+            (function poll() {
+                if (done) return;
+                var st = self.info().state;
+                if (st === 'an' || st === 'fehler' || (st === 'aus' && Date.now() - t0 > 6000) || Date.now() - t0 > 40000) {
+                    done = true; loader(false);
+                    if (st === 'fehler') toast('VPN: ' + (self.info().error || 'Verbindung fehlgeschlagen'), 6000);
+                    cb();
+                    return;
+                }
+                setTimeout(poll, 400);
+            })();
+        },
+        /** Liste ließ sich nicht laden und das VPN ist nicht verbunden: anbieten, mit VPN erneut zu versuchen */
+        offerRetry: function (err, retry) {
+            if (!this.native()) return false;
+            var i = this.info(), self = this;
+            if (!i.has || i.state === 'an') return false;
+            Modal.open('Liste konnte nicht geladen werden', (err && err.message ? err.message + ' ' : '') +
+                'Das VPN ist gerade nicht verbunden – vielleicht lässt dein Anbieter nur Verbindungen über das VPN zu.', [
+                { label: 'Mit VPN erneut versuchen', primary: true, action: function () {
+                    try { AB.ovpnConnect(true); } catch (e) { /* egal */ }
+                    setTimeout(function () { self.whenReadyForce(retry); }, 300);
+                } },
+                { label: 'Schließen' }
+            ]);
+            return true;
+        },
+        /** Wie whenReady, aber wartet auch, wenn „beim Start verbinden“ aus ist (nach „Mit VPN erneut versuchen“) */
+        whenReadyForce: function (cb) {
+            var self = this, t0 = Date.now();
+            loader(true, 'VPN wird verbunden …');
+            (function poll() {
+                var st = self.info().state;
+                if (st === 'an' || st === 'fehler' || Date.now() - t0 > 40000) {
+                    loader(false);
+                    if (st !== 'an') toast('VPN: ' + (self.info().error || 'keine Verbindung'), 6000);
+                    cb();
+                    return;
+                }
+                setTimeout(poll, 400);
+            })();
+        },
         /** VPN ein/aus (gleich wie in den Einstellungen) */
         toggle: function () {
             var st = this.info().state;
@@ -3124,14 +3178,16 @@
             toast('Diese Wiedergabeliste wird nicht unterstützt. Nötig sind Server, Benutzername und Passwort oder ein Link mit get.php?username=…&password=…', 8000);
             return;
         }
-        var previous = Api.acc;
-        syncAll(acc, 'Verbinde mit „' + p.name + '“ …', function () {
-            Storage.set('playlistId', p.id);
-            Nav.replace(new HomeScreen());
-            Updater.autoCheck();
-        }, function (e) {
-            Api.acc = previous;
-            toast(e.message || String(e), 8000);
+        var previous = Api.acc, self = this;
+        OVpn.whenReady(function () {
+            syncAll(acc, 'Verbinde mit „' + p.name + '“ …', function () {
+                Storage.set('playlistId', p.id);
+                Nav.replace(new HomeScreen());
+                Updater.autoCheck();
+            }, function (e) {
+                Api.acc = previous;
+                if (p.demo || !OVpn.offerRetry(e, function () { self.connect(p); })) toast(e.message || String(e), 8000);
+            });
         });
     };
     PlaylistsScreen.prototype.onRootBack = function () {
@@ -6458,7 +6514,7 @@
 
         // Schnellstart: mit der zuletzt genutzten Liste schon anmelden, während die Website noch antwortet
         var early = null;
-        if (lastId !== null && saved && saved.server && saved.username && saved.password) {
+        if (lastId !== null && saved && saved.server && saved.username && saved.password && !OVpn.pending()) {
             early = Data.login(saved, null);
             early.then(null, function () { /* wird unten normal behandelt */ });
         }
@@ -6467,12 +6523,17 @@
         function start(acc) {
             var pending = early && sameAcc(acc, saved) ? early : null;
             early = null;
-            syncAll(acc, 'ImperumTV wird gestartet …', function () {
-                Nav.replace(new HomeScreen());
-                Updater.autoCheck();
-            }, function (e) {
-                Nav.replace(new PlaylistsScreen(e.message || String(e)));
-            }, pending);
+            OVpn.whenReady(function () {
+                syncAll(acc, 'ImperumTV wird gestartet …', function () {
+                    Nav.replace(new HomeScreen());
+                    Updater.autoCheck();
+                }, function (e) {
+                    var i = OVpn.native() ? OVpn.info() : {};
+                    var vpnOffer = !acc.demo && i.has && i.state !== 'an';
+                    Nav.replace(new PlaylistsScreen(vpnOffer ? '' : (e.message || String(e))));
+                    if (vpnOffer) OVpn.offerRetry(e, function () { start(acc); });
+                }, pending);
+            });
         }
 
         loader(true, 'Wiedergabelisten werden geladen …');

@@ -1026,7 +1026,9 @@ body.lowfx .sy-logo { filter: none; }
 @keyframes vpnpulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* Breite Handy-Bildschirme: Vorschau und Programm nutzen die zusätzliche Breite */
-body.wide .preview-box, body.wide .info-panel { width: auto; right: 30px; }
+/* Vorschau bleibt 16:9 (kein Streifen-Bild), die Senderliste bekommt die zusätzliche Breite */
+body.wide .col-list { width: auto; right: 860px; }
+body.wide .col-info { left: auto; right: 0; width: 860px; }
 body.wide .pl-left { width: auto; right: 630px; }
 body.wide .pl-side { left: auto; right: 0; }
 
