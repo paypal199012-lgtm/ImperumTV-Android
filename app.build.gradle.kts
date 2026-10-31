@@ -41,7 +41,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        // Für die WireGuard-Bibliothek (VPN) auf älteren Geräten
+        // Neuere Java-Funktionen auch auf älteren Geräten
         isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
@@ -65,6 +65,5 @@ dependencies {
     implementation("androidx.media3:media3-extractor:1.5.0")
     // FFMPEG_DECODER (setup-android.sh trägt hier den FFmpeg-Ton-Decoder ein, wenn er bei Maven Central zu finden ist)
     // OPENVPN (setup-android.sh trägt hier die OpenVPN-Bibliothek ein, wenn sie gebaut werden soll)
-    // WIREGUARD (setup-android.sh trägt hier die WireGuard-Bibliothek für das VPN ein, wenn sie zu finden ist)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
 }

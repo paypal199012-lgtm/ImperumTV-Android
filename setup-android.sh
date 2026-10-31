@@ -54,23 +54,7 @@ else
     echo "Kein passender FFmpeg-Ton-Decoder für Media3 $MEDIA3 gefunden – Build ohne FFmpeg"
 fi
 
-# VPN (WireGuard) – nur eintragen, wenn die Bibliothek bei Maven Central liegt; sonst Ersatz ohne VPN
-WGBASE=https://repo1.maven.org/maven2/com/wireguard/android/tunnel
-WGV=""
-for v in 1.0.20230706 1.0.20231018 1.0.20230427; do
-    if curl -fsI --max-time 20 "$WGBASE/$v/tunnel-$v.pom" >/dev/null 2>&1; then WGV=$v; break; fi
-done
 JAVA_DIR="$OUT/app/src/main/java/tv/imperum/app"
-if [ -n "$WGV" ]; then
-    sed -i "s|// WIREGUARD.*|implementation(\"com.wireguard.android:tunnel:$WGV\")|" "$OUT/app/build.gradle.kts"
-    cp Vpn.kt "$JAVA_DIR/Vpn.kt"
-    # VPN-Dienst der Bibliothek ausdrücklich anmelden
-    sed -i 's|</application>|    <service android:name="com.wireguard.android.backend.GoBackend$VpnService" android:exported="false" android:permission="android.permission.BIND_VPN_SERVICE"><intent-filter><action android:name="android.net.VpnService" /></intent-filter></service>\n    </application>|' "$OUT/app/src/main/AndroidManifest.xml"
-    echo "WireGuard-VPN $WGV eingebunden"
-else
-    cp VpnStub.kt "$JAVA_DIR/Vpn.kt"
-    echo "WireGuard nicht gefunden – Build ohne VPN"
-fi
 
 # OpenVPN (eigene .ovpn-Datei, Verbinden/Trennen in der App).
 # Die Bibliothek wird aus ihrem Quellcode mitgebaut. Klappt das nicht, baut der Workflow mit OPENVPN=0 ohne OpenVPN.

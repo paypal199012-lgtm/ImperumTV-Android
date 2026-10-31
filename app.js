@@ -1248,6 +1248,18 @@
         episodeUrl: function (id) { var m = this.movies[(Number(id) - 301) % this.movies.length] || this.movies[0]; return this.FILMS + m.file; }
     };
 
+    /** Verständliche Meldung statt roher Server-Antwort (z. B. HTML-Fehlerseite) */
+    function httpError(status, body) {
+        var plain = String(body || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        var tail = plain && !/^(403 )?forbidden$/i.test(plain) && plain.length < 90 ? ' (' + plain + ')' : '';
+        if (status === 403) return new Error('Der Server deines Anbieters lehnt den Zugriff ab (HTTP 403). Prüfe Adresse (oft mit Port, z. B. :8080), Benutzername und Passwort – ' +
+            'oder frag deinen Anbieter, ob dein Zugang aktiv ist und ob er diese App bzw. dein Netz sperrt.');
+        if (status === 401) return new Error('Benutzername oder Passwort falsch (HTTP 401).');
+        if (status === 404) return new Error('Unter dieser Adresse gibt es keinen IPTV-Zugang (HTTP 404). Prüfe die Server-Adresse und den Port.');
+        if (status === 512 || status === 884) return new Error('Der Anbieter meldet einen Fehler (HTTP ' + status + '). Meist ist der Zugang abgelaufen oder gesperrt.');
+        return new Error('Der Server antwortet mit HTTP ' + status + '.' + tail);
+    }
+
     var Api = {
         acc: null,
 
@@ -1274,7 +1286,7 @@
         fetchText: function (url) {
             return fetch(url).then(function (res) {
                 return res.text().then(function (text) {
-                    if (!res.ok) throw new Error('Der Server antwortet mit HTTP ' + res.status + '. ' + text.slice(0, 120));
+                    if (!res.ok) throw httpError(res.status, text);
                     return text;
                 });
             }, function () {
@@ -1291,7 +1303,7 @@
                     '&password=' + encodeURIComponent(a.password) + '&action=' + action;
                 // Rohe Bytes direkt an den Worker: kein Umwandeln riesiger Antworten auf dem Bedien-Thread
                 text = Parser.wantsBytes() ? fetch(url).then(function (res) {
-                    if (!res.ok) return res.text().then(function (t) { throw new Error('Der Server antwortet mit HTTP ' + res.status + '. ' + t.slice(0, 120)); });
+                    if (!res.ok) return res.text().then(function (t) { throw httpError(res.status, t); });
                     return res.arrayBuffer();
                 }, function () {
                     throw new Error('Der Server ist nicht erreichbar. Prüfe die Adresse und die Internetverbindung.');
@@ -1483,56 +1495,6 @@
         Report.jsError(r.message, 'Promise', r.stack);
     });
 
-    /**
-     * VPN (WireGuard) nur für eigene Geräte: Den Zugang trägt der Admin auf der Website pro MAC ein.
-     * Geräte ohne Eintrag sehen davon nichts. E-Mail/Passwort des VPN-Kontos gibt es nirgends in der App.
-     */
-    var Vpn = {
-        native: function () { try { return !!(AB && AB.vpnAvailable && AB.vpnAvailable()); } catch (e) { return false; } },
-        info: function () { try { return JSON.parse(AB.vpnInfo() || '{}') || {}; } catch (e) { return {}; } },
-        sync: function () {
-            if (!this.native() || !Device.mac) return;
-            Remote.rpc('device_vpn_get', { p_mac: Device.mac, p_key: Device.key }).then(function (conf) {
-                try { AB.vpnSetConfig(typeof conf === 'string' ? conf : ''); } catch (e) { /* egal */ }
-            }, function () { /* offline oder noch nicht eingerichtet: gespeicherten Zugang behalten */ });
-        },
-        /** Code eingeben → freie WireGuard-Datei aus dem Vorrat holen */
-        askCode: function (done) {
-            pinDialog('VPN-Code', 'Gib den 4-stelligen VPN-Code ein. Danach verbindet sich dieser Stick automatisch.', function (code, fail) {
-                Remote.rpc('device_vpn_claim', { p_mac: Device.mac, p_key: Device.key, p_code: code }).then(function (res) {
-                    if (!res || !res.ok || !res.config) { fail((res && res.error) || 'Code falsch'); return; }
-                    Modal.pinInput = null;
-                    Modal.close();
-                    try { AB.vpnSetConfig(res.config); } catch (e) { /* egal */ }
-                    toast('VPN eingerichtet – wird verbunden …', 4000);
-                    if (done) done();
-                }, function (e) {
-                    fail(/fehlen noch|404/.test(e.message || '') ? 'VPN ist auf der Website noch nicht eingerichtet' : (e.message || 'Keine Verbindung'));
-                });
-                return false;                // Fenster bleibt offen, bis die Website geantwortet hat
-            });
-        },
-        /** VPN auf diesem Stick entfernen und die Datei im Vorrat freigeben */
-        remove: function (done) {
-            Modal.open('VPN entfernen?', 'Dieser Stick verbindet sich danach nicht mehr über das VPN. Die Datei wird für einen anderen Stick frei.', [
-                { label: 'Entfernen', primary: true, action: function () {
-                    try { AB.vpnSetConfig(''); } catch (e) { /* egal */ }
-                    Remote.rpc('device_vpn_release', { p_mac: Device.mac, p_key: Device.key }).then(null, function () { });
-                    toast('VPN entfernt');
-                    if (done) done();
-                } },
-                { label: 'Abbrechen' }
-            ]);
-        },
-        text: function (i) {
-            i = i || this.info();
-            if (!i.enabled) return 'Aus';
-            if (i.state === 'an') return 'An · verbunden';
-            if (i.state === 'verbindet') return 'Verbindet …';
-            if (i.state === 'fehler') return 'Fehler: ' + (i.error || 'unbekannt');
-            return 'An · getrennt';
-        }
-    };
     /** OpenVPN mit eigener .ovpn-Datei (hochgeladen auf der Website beim Gerät). Verbinden/Trennen entscheidet jeder selbst. */
     var OVpn = {
         native: function () { try { return !!(AB && AB.ovpnAvailable && AB.ovpnAvailable()); } catch (e) { return false; } },
@@ -1557,13 +1519,6 @@
     };
     window.__androidOvpn = function (state, err) {
         if (state === 'an') toast('VPN (OpenVPN) verbunden');
-        else if (state === 'fehler') toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 6000);
-        var top = Nav.top();
-        if (top && top instanceof SettingsScreen && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
-    };
-
-    window.__androidVpn = function (state, err) {
-        if (state === 'an') toast('VPN verbunden');
         else if (state === 'fehler') toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 6000);
         var top = Nav.top();
         if (top && top instanceof SettingsScreen && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
@@ -5508,22 +5463,6 @@
         if (Updater.available()) {
             row('update', 'App-Version ' + Updater.versionText(Updater.current()), 'Nach Updates suchen', function () { Updater.check(true); });
         }
-        var vpnInfo = Vpn.native() ? Vpn.info() : null, meSet = this;
-        if (vpnInfo && vpnInfo.has) {
-            row('vpn', 'VPN (WireGuard)', Vpn.text(vpnInfo), function (v) {
-                var on = !Vpn.info().enabled;
-                try { AB.vpnSetEnabled(on); } catch (e) { /* egal */ }
-                v.textContent = on ? 'Verbindet …' : 'Aus';
-                toast(on ? 'VPN wird eingeschaltet …' : 'VPN ausgeschaltet');
-            });
-            row('vpn-remove', 'VPN entfernen', 'Datei für einen anderen Stick freigeben', function () {
-                Vpn.remove(function () { meSet.focusKey = 'set-vpn'; setTimeout(function () { if (Nav.top() === meSet) Nav.show(meSet); }, 300); });
-            });
-        } else if (vpnInfo) {
-            row('vpn', 'VPN einrichten', 'Mit deinem VPN-Code (nur für eigene Geräte)', function () {
-                Vpn.askCode(function () { meSet.focusKey = 'set-vpn'; setTimeout(function () { if (Nav.top() === meSet) Nav.show(meSet); }, 400); });
-            });
-        }
         if (OVpn.native()) {
             var oi = OVpn.info();
             if (oi.has) {
@@ -6380,7 +6319,6 @@
         Player.init();
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
         setTimeout(function () { Report.flushNative(); }, 8000);   // Absturzbericht vom letzten Mal an die Website
-        setTimeout(function () { Vpn.sync(); }, 3000);              // VPN-Zugang (nur bei eigenen Geräten eingetragen)
         setTimeout(function () { OVpn.sync(); }, 3500);             // eigene OpenVPN-Datei von der Website
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', function (e) { if (e.keyCode === KEY.ENTER) LongPress.up(); });
@@ -6502,7 +6440,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { OVpn: OVpn, Vpn: Vpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
