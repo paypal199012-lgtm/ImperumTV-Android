@@ -1194,3 +1194,37 @@ body.touch .similar-strip { overflow-x: auto; }
 .fb-src { font-size: 20px; color: rgba(255,255,255,.5); text-align: center; padding: 18px 0 8px; }
 
 .fb-refresh { position: absolute; right: 70px; top: 28px; font-size: 26px; padding: 12px 28px; }
+
+/* ---------- Uhr oben rechts ---------- */
+#clock { position: absolute; top: 24px; right: 40px; z-index: 60; text-align: right; pointer-events: none; line-height: 1; }
+#clock .ck-t { font-size: 30px; font-weight: bold; color: #f2efe8; letter-spacing: .5px; text-shadow: 0 2px 6px rgba(0,0,0,.75); }
+#clock .ck-t span { color: #f4dc9e; }
+#clock .ck-d { font-size: 17px; color: #b9b4a9; margin-top: 5px; text-shadow: 0 2px 6px rgba(0,0,0,.75); }
+body.clock-on .hint { right: 250px; }
+body.clock-on .fb-refresh { right: 250px; }
+body.clock-on .home-head-btns { right: 250px; }
+body.clock-on .eg-clock { display: none; }
+body.video-mode #clock { display: none; }
+body.video-mode.osd #clock { display: block; }
+
+/* ---------- Verbindungstest ---------- */
+.nt { position: absolute; left: 70px; right: 70px; top: 130px; bottom: 40px; }
+.nt-row { display: flex; align-items: center; padding: 18px 26px; margin-bottom: 14px; border-radius: 16px; background: rgba(255,255,255,.06); }
+.nt-st { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; margin-right: 24px; flex: none; background: rgba(255,255,255,.08); color: #a7a39a; }
+.nt-row.ok .nt-st { background: rgba(93,202,122,.18); color: #6fd88a; }
+.nt-row.warn .nt-st { background: rgba(230,184,74,.18); color: #f0c25a; }
+.nt-row.bad .nt-st { background: rgba(226,75,74,.2); color: #f07070; }
+.nt-mid { flex: 1; min-width: 0; }
+.nt-l { font-size: 30px; font-weight: bold; }
+.nt-sub { font-size: 22px; color: #a7a39a; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt-v { font-size: 28px; font-weight: bold; margin-left: 24px; white-space: nowrap; }
+.nt-row.ok .nt-v { color: #f2efe8; } .nt-row.warn .nt-v { color: #f0c25a; } .nt-row.bad .nt-v { color: #f07070; }
+.nt-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.12); margin-top: 10px; max-width: 760px; }
+.nt-bar i { display: block; height: 8px; border-radius: 4px; background: #e8c98a; }
+.nt-st .spinner.small { width: 30px; height: 30px; border-width: 4px; margin: 0; }
+.nt-res { margin-top: 10px; padding: 22px 28px; border: 2px solid #e8c98a; border-radius: 16px; background: rgba(232,201,138,.08); }
+.nt-res-h { font-size: 26px; font-weight: bold; color: #f4dc9e; margin-bottom: 8px; }
+.nt-res-t { font-size: 28px; line-height: 1.35; }
+.nt-res-tip { font-size: 23px; color: #a7a39a; margin-top: 8px; }
+.nt-btns { margin-top: 18px; }
+.nt-btns .button { display: inline-block; margin-right: 20px; }

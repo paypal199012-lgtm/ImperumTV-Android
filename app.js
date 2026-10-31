@@ -806,6 +806,53 @@
         setLiveExt: function (ext) { this.liveExt = ext; Storage.set('liveExt', ext); }
     };
 
+    // =====================================================================
+    // Uhr oben rechts (auf allen Bildschirmen; im Player nur mit eingeblendeter Leiste)
+    // =====================================================================
+    var Clock = {
+        node: null, timer: null,
+        DAYS: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+        MONTHS: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+        /** 'sec' = mit Sekunden, 'min' = ohne Sekunden, 'off' = aus */
+        mode: function () { var m = Storage.get('clock', 'sec'); return m === 'min' || m === 'off' ? m : 'sec'; },
+        label: function () { var m = this.mode(); return m === 'sec' ? 'An · mit Sekunden' : m === 'min' ? 'An · ohne Sekunden' : 'Aus'; },
+        next: function () {
+            var m = this.mode();
+            Storage.set('clock', m === 'sec' ? 'min' : m === 'min' ? 'off' : 'sec');
+            this.apply();
+            return this.label();
+        },
+        start: function () {
+            if (this.node) return;
+            var stage = document.getElementById('stage');
+            if (!stage) return;
+            this.node = h('div', 'hidden');
+            this.node.id = 'clock';
+            this.t = h('div', 'ck-t');
+            this.d = h('div', 'ck-d');
+            this.node.appendChild(this.t);
+            this.node.appendChild(this.d);
+            stage.appendChild(this.node);
+            this.apply();
+        },
+        apply: function () {
+            if (!this.node) return;
+            var on = this.mode() !== 'off';
+            if (on) { document.body.classList.add('clock-on'); this.node.classList.remove('hidden'); }
+            else { document.body.classList.remove('clock-on'); this.node.classList.add('hidden'); }
+            clearTimeout(this.timer);
+            if (on) this.tick();
+        },
+        tick: function () {
+            var self = this, n = new Date(), sec = this.mode() === 'sec';
+            this.t.innerHTML = pad2(n.getHours()) + ':' + pad2(n.getMinutes()) + (sec ? '<span>:' + pad2(n.getSeconds()) + '</span>' : '');
+            this.d.textContent = this.DAYS[n.getDay()] + ', ' + n.getDate() + '. ' + this.MONTHS[n.getMonth()];
+            // genau zum nächsten Sekunden- bzw. Minutenwechsel weiterstellen
+            var wait = sec ? 1000 - n.getMilliseconds() : 60000 - n.getSeconds() * 1000 - n.getMilliseconds();
+            this.timer = setTimeout(function () { self.tick(); }, wait + 15);
+        }
+    };
+
     var Favs = {
         set: null,
         load: function () { this.set = {}; var list = Storage.get('favs', []); for (var i = 0; i < list.length; i++) this.set[list[i]] = true; },
@@ -3056,7 +3103,7 @@
             var app = $('#app');
             app.innerHTML = '';
             $('#toast').classList.add('hidden');   // Meldungen vom vorherigen Bildschirm ausblenden
-            document.body.classList.remove('preview-mode', 'video-mode');
+            document.body.classList.remove('preview-mode', 'video-mode', 'osd');
             Focus.clear();
             screen.render(app);
             var saved = restoring ? screen._scrolls : null;
@@ -3131,7 +3178,7 @@
             screen._dom = null;
             app.innerHTML = '';
             $('#toast').classList.add('hidden');
-            document.body.classList.remove('preview-mode', 'video-mode');
+            document.body.classList.remove('preview-mode', 'video-mode', 'osd');
             Focus.clear();
             app.appendChild(frag);
             LazyImg.scan(app);
@@ -6371,6 +6418,8 @@
             Settings.setFlag('introBtn', !Settings.introBtn);
             v.textContent = Settings.introBtn ? 'An · ' + Settings.introSec + ' s' : 'Aus';
         });
+        head('ANZEIGE');
+        row('clock', 'Uhrzeit oben rechts', Clock.label(), function (v) { v.textContent = Clock.next(); });
         head('PROFILE');
         row('profiles', 'Profile', Profiles.count() ? Profiles.count() + ' · aktiv: ' + Profiles.cur().name : 'Aus', function () { Nav.push(new ProfilesScreen()); });
 
@@ -6398,8 +6447,244 @@
             row('account2', 'Konto', License.activated() ? 'Aktiviert' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
         }
         row('device', 'Gerät', Device.macText(), function () { Nav.push(new PlaylistsScreen()); });
+        head('HILFE');
+        row('nettest', 'Verbindungstest', 'Internet, Server, Sender prüfen', function () { Nav.push(new NetTestScreen()); });
         root.appendChild(box);
         if (!this.focusKey) this.focusKey = 'set-reload';
+    };
+
+    // =====================================================================
+    // Verbindungstest: Internet, Geschwindigkeit, Server des Anbieters, Test-Sender
+    // =====================================================================
+    var NetTest = {
+        num: function (x, d) { return x.toFixed(d === undefined ? 1 : d).replace('.', ','); },
+        /** GET mit Zeitmessung. opt: { max: ms, stopBytes, text } → { ok, status, ms, first, bytes, rate (Mbit/s), body } */
+        get: function (url, opt) {
+            opt = opt || {};
+            return new Promise(function (resolve) {
+                var x = new XMLHttpRequest(), t0 = Date.now(), first = 0, firstBytes = 0, last = 0, done = false, timer;
+                function finish(ok) {
+                    if (done) return;
+                    done = true; clearTimeout(timer);
+                    var now = Date.now(), span = (last || now) - first;
+                    var rate = first && span > 150 ? (last - firstBytes) * 8 / span / 1000 :
+                        (last > 500000 && now - t0 > 0 ? last * 8 / (now - t0) / 1000 : 0);   // alles auf einmal angekommen
+                    var body = '';
+                    if (opt.text) { try { body = x.responseText || ''; } catch (e) { body = ''; } }
+                    try { x.abort(); } catch (e2) { /* egal */ }
+                    resolve({ ok: ok, status: x.status, ms: (first || now) - t0, first: first ? first - t0 : 0, bytes: last, rate: rate, body: body });
+                }
+                x.onprogress = function (e) {
+                    var now = Date.now();
+                    if (!first) { first = now; firstBytes = e.loaded; }
+                    last = e.loaded;
+                    if (opt.stopBytes && e.loaded >= opt.stopBytes) finish(true);
+                };
+                x.onload = function () { if (!first) first = Date.now(); finish(x.status >= 200 && x.status < 400); };
+                x.onerror = function () { finish(false); };
+                timer = setTimeout(function () { finish(!!first); }, opt.max || 8000);
+                try { x.open('GET', url, true); x.send(); } catch (e) { finish(false); }
+            });
+        },
+        /** Sender zum Testen: erster Favorit, sonst erster richtiger Sender */
+        channel: function () {
+            var list = Data.channels || [], i;
+            for (i = 0; i < list.length; i++) if (Favs.has('live', list[i].id)) return list[i];
+            for (i = 0; i < list.length; i++) if (!/#{2,}|^\s*[-=*#]|[-=*]{3,}/.test(list[i].name || '')) return list[i];
+            return null;
+        }
+    };
+
+    function NetTestScreen() { this.result = null; }
+    NetTestScreen.prototype.render = function (root) {
+        var self = this;
+        root.appendChild(topbar('Verbindungstest', 'Dauert etwa 15 Sekunden'));
+        var box = h('div', 'nt');
+        this.rows = {};
+        [
+            ['net', 'Internet'],
+            ['speed', 'Geschwindigkeit'],
+            ['server', 'Server deines Anbieters'],
+            ['stream', 'Test-Sender']
+        ].forEach(function (r) {
+            var row = h('div', 'nt-row wait');
+            var st = h('div', 'nt-st', '•');
+            var mid = h('div', 'nt-mid');
+            mid.appendChild(h('div', 'nt-l', r[1]));
+            var sub = h('div', 'nt-sub', 'wartet …');
+            mid.appendChild(sub);
+            var bar = h('div', 'nt-bar hidden'); var fill = h('i'); bar.appendChild(fill); mid.appendChild(bar);
+            var val = h('div', 'nt-v', '');
+            row.appendChild(st); row.appendChild(mid); row.appendChild(val);
+            box.appendChild(row);
+            self.rows[r[0]] = { row: row, st: st, sub: sub, val: val, bar: bar, fill: fill };
+        });
+        var res = h('div', 'nt-res hidden');
+        res.appendChild(h('div', 'nt-res-h', 'Ergebnis'));
+        this.resText = h('div', 'nt-res-t', '');
+        this.resTip = h('div', 'nt-res-tip', '');
+        res.appendChild(this.resText); res.appendChild(this.resTip);
+        var btns = h('div', 'nt-btns');
+        var again = h('div', 'button primary', 'Erneut testen');
+        btns.appendChild(focusable(again, 'nt-again', function () { if (!self.running) self.run(); }, 'ntbtn'));
+        var send = h('div', 'button', 'Ergebnis an Support senden');
+        btns.appendChild(focusable(send, 'nt-send', function () { self.send(); }, 'ntbtn'));
+        res.appendChild(btns);
+        box.appendChild(res);
+        this.res = res;
+        root.appendChild(box);
+        this.focusKey = 'nt-again';
+        setTimeout(function () { if (Nav.top() === self) self.run(); }, 300);
+    };
+    NetTestScreen.prototype.set = function (key, state, sub, val, pct) {
+        var r = this.rows[key];
+        if (!r) return;
+        r.row.className = 'nt-row ' + state;
+        r.st.innerHTML = state === 'ok' ? '&#10003;' : state === 'warn' ? '!' : state === 'bad' ? '&#10007;' : state === 'run' ? '<span class="spinner small"></span>' : state === 'skip' ? '–' : '•';
+        r.sub.textContent = sub || '';
+        r.val.textContent = val || '';
+        if (pct === undefined || pct === null) r.bar.classList.add('hidden');
+        else { r.bar.classList.remove('hidden'); r.fill.style.width = Math.max(2, Math.min(100, pct)) + '%'; }
+    };
+    NetTestScreen.prototype.run = function () {
+        var self = this, out = { lines: [] };
+        if (this.running) return;
+        this.running = true;
+        this.res.classList.add('hidden');
+        ['net', 'speed', 'server', 'stream'].forEach(function (k) { self.set(k, 'wait', 'wartet …', ''); });
+        function alive() { return Nav.top() === self; }
+        var N = NetTest;
+
+        // 1) Internet: kleine Datei von der ImperumTV-Website
+        self.set('net', 'run', 'prüft …', '');
+        N.get(REMOTE.website + 'robots.txt?t=' + Date.now(), { max: 6000 }).then(function (r) {
+            if (!alive()) return null;
+            out.net = r;
+            if (!r.ok) {
+                self.set('net', 'bad', 'Keine Antwort aus dem Internet', 'Keine Verbindung');
+                out.lines.push('Internet: keine Verbindung');
+                return null;
+            }
+            self.set('net', 'ok', 'Antwortzeit ' + r.ms + ' ms', 'Verbunden');
+            out.lines.push('Internet: verbunden, ' + r.ms + ' ms');
+            // 2) Geschwindigkeit: bis zu 6 Sekunden herunterladen (öffentlicher Messserver von Cloudflare)
+            self.set('speed', 'run', 'misst …', '');
+            return N.get('https://speed.cloudflare.com/__down?bytes=20000000', { max: 6000 });
+        }).then(function (r) {
+            if (!alive() || !r) return null;
+            out.speed = r;
+            var mb = r.rate;
+            if (!r.first || mb <= 0) {
+                self.set('speed', 'skip', 'Messung hat nicht geklappt', '–');
+                out.lines.push('Geschwindigkeit: nicht messbar');
+            } else {
+                var st = mb >= 10 ? 'ok' : mb >= 5 ? 'warn' : 'bad';
+                var txt = mb >= 25 ? 'Reicht auch für 4K' : mb >= 10 ? 'Reicht für HD (für 4K etwa 25 Mbit/s nötig)' : mb >= 5 ? 'Reicht knapp für HD' : 'Zu langsam für flüssiges HD';
+                self.set('speed', st, txt, N.num(mb, mb >= 10 ? 0 : 1) + ' Mbit/s', mb / 50 * 100);
+                out.lines.push('Geschwindigkeit: ' + N.num(mb) + ' Mbit/s');
+            }
+            // 3) Server des Anbieters: eine kleine Anfrage (Kontodaten)
+            var a = Api.acc;
+            if (!a || a.demo || !a.server) {
+                self.set('server', 'skip', a && a.demo ? 'Demo-Liste' : 'Nur mit Zugangsdaten (Xtream) prüfbar', '–');
+                out.lines.push('Server: nicht geprüft');
+                return { skip: true };
+            }
+            self.set('server', 'run', 'prüft …', '');
+            return N.get(a.server + '/player_api.php?username=' + encodeURIComponent(a.username) + '&password=' + encodeURIComponent(a.password), { max: 10000, text: true });
+        }).then(function (r) {
+            if (!alive() || !r) return null;
+            if (!r.skip) {
+                out.server = r;
+                var info = null;
+                try { info = JSON.parse(r.body).user_info; } catch (e) { info = null; }
+                if (!r.ok || !info) {
+                    self.set('server', 'bad', r.status ? 'Server meldet HTTP ' + r.status : 'Server nicht erreichbar', 'Fehler');
+                    out.lines.push('Server: Fehler ' + (r.status || 'keine Antwort'));
+                } else {
+                    var cons = info.max_connections ? (info.active_cons || 0) + ' von ' + info.max_connections + ' Verbindungen belegt' : '';
+                    var full = info.max_connections && +info.active_cons >= +info.max_connections;
+                    out.full = full;
+                    var st = String(info.status || '').toLowerCase() !== 'active' ? 'bad' : full || r.ms > 2000 ? 'warn' : 'ok';
+                    out.inactive = st === 'bad';
+                    self.set('server', st, 'Antwortzeit ' + r.ms + ' ms' + (cons ? ' · ' + cons : '') + (out.inactive ? ' · Zugang: ' + (info.status || '?') : ''), r.ms > 2000 ? 'Langsam' : out.inactive ? 'Gesperrt' : 'Erreichbar');
+                    out.lines.push('Server: ' + r.ms + ' ms' + (cons ? ', ' + cons : '') + ', Status ' + (info.status || '?'));
+                }
+            }
+            // 4) Test-Sender: wie schnell kommen Bilddaten?
+            var ch = N.channel();
+            if (!ch || (Api.acc && Api.acc.demo)) {
+                self.set('stream', 'skip', ch ? 'Demo-Liste' : 'Keine Sender in der Liste', '–');
+                out.lines.push('Sender: nicht geprüft');
+                return null;
+            }
+            out.ch = ch;
+            self.set('stream', 'run', ch.name + ' · prüft …', '');
+            var url = ch.url || Api.liveUrl(ch.id);
+            return N.get(url, { max: 5000, stopBytes: 6000000, text: /\.m3u8(\?|$)/i.test(url) }).then(function (r) {
+                // HLS: Liste holen, dann das erste Stück messen
+                var m = r.body && /^#EXTM3U/.test(r.body) ? r.body.split(/\r?\n/).filter(function (l) { return l && l.charAt(0) !== '#'; })[0] : null;
+                if (!m) return r;
+                var seg = /^https?:/i.test(m) ? m : url.replace(/[^\/?]*(\?.*)?$/, '') + m;
+                return N.get(seg, { max: 5000, stopBytes: 6000000 }).then(function (r2) { r2.first += r.ms; return r2; });
+            });
+        }).then(function (r) {
+            if (!alive()) return;
+            if (r) {
+                out.stream = r;
+                var name = out.ch.name;
+                if (!r.first) {
+                    self.set('stream', 'bad', name + ' · keine Bilddaten', 'Fehler');
+                    out.lines.push('Sender ' + name + ': keine Daten (HTTP ' + r.status + ')');
+                } else {
+                    var sec = r.first / 1000;
+                    var st = sec < 2 ? 'ok' : sec < 4.5 ? 'warn' : 'bad';
+                    self.set('stream', st, name + ' · Bilddaten nach ' + N.num(sec) + ' s' + (r.rate > 0 ? ' · ' + N.num(r.rate) + ' Mbit/s' : '') + (st !== 'ok' ? ' (normal: unter 2 s)' : ''),
+                        st === 'ok' ? 'Schnell' : st === 'warn' ? 'Langsam' : 'Sehr langsam');
+                    out.lines.push('Sender ' + name + ': erste Daten nach ' + N.num(sec) + ' s, ' + N.num(r.rate) + ' Mbit/s');
+                }
+            }
+            self.finish(out);
+        }).then(null, function (e) { self.running = false; toast('Test abgebrochen: ' + (e && e.message || e)); });
+    };
+    NetTestScreen.prototype.finish = function (out) {
+        var text, tip = '';
+        var sp = out.speed && out.speed.rate || 0, st = out.stream;
+        if (!out.net || !out.net.ok) {
+            text = 'Das Gerät hat gerade keine Internetverbindung.';
+            tip = 'Tipp: WLAN oder Netzwerkkabel prüfen, Router kurz neu starten.';
+        } else if (out.inactive) {
+            text = 'Dein Zugang beim Anbieter ist nicht aktiv (abgelaufen oder gesperrt).';
+            tip = 'Tipp: Beim Anbieter nachfragen.';
+        } else if (out.server && !out.server.ok) {
+            text = 'Dein Internet funktioniert, aber der Server deines Anbieters antwortet nicht richtig.';
+            tip = 'Tipp: Später noch einmal probieren oder beim Anbieter nachfragen.';
+        } else if (out.full) {
+            text = 'Alle Verbindungen deines Zugangs sind belegt.';
+            tip = 'Tipp: Auf anderen Geräten die Wiedergabe beenden, dann geht es hier wieder.';
+        } else if (sp > 0 && sp < 5) {
+            text = 'Dein Internet ist zu langsam für flüssiges Fernsehen (' + NetTest.num(sp) + ' Mbit/s).';
+            tip = 'Tipp: Router näher stellen, 5-GHz-WLAN oder ein Netzwerkkabel nutzen, andere Downloads beenden.';
+        } else if (st && (!st.first || st.first >= 2000)) {
+            text = 'Dein Internet ist schnell genug, aber der Sender startet langsam. Das liegt wahrscheinlich am Server deines Anbieters.';
+            tip = 'Tipp: Später noch einmal probieren oder in den Einstellungen das Live-Format (TS/HLS) wechseln.';
+        } else {
+            text = 'Alles in Ordnung.';
+            tip = 'Wenn ein einzelner Sender trotzdem hängt, liegt es meist an diesem Sender beim Anbieter.';
+        }
+        this.resText.textContent = text;
+        this.resTip.textContent = tip;
+        this.res.classList.remove('hidden');
+        this.summary = text + '\n' + out.lines.join('\n') + '\nLive-Format: ' + Settings.liveExt;
+        this.running = false;
+        var b = Focus.byKey('nt-again');
+        if (b) Focus.set(b);
+    };
+    NetTestScreen.prototype.send = function () {
+        if (!this.summary) { toast('Bitte erst den Test abwarten'); return; }
+        Report.send('verbindungstest', this.summary).then(function (ok) {
+            toast(ok ? 'Ergebnis gesendet' : 'Senden hat nicht geklappt');
+        });
     };
 
     /** VPN-Fenster: Status, verbinden/trennen, beim Start verbinden */
@@ -7307,6 +7592,7 @@
         this.overlay = true;
         this.ui.classList.remove('hidden');
         this.ui.classList.add('player-ui-visible');
+        document.body.classList.add('osd');
         this.renderOverlay();
         clearTimeout(this.hideTimer);
         this.hideTimer = setTimeout(function () { self.hideOverlay(); }, ms || 5000);
@@ -7322,6 +7608,7 @@
         this.overlay = false;
         this.ui.innerHTML = '';
         this.ui.classList.remove('player-ui-visible');
+        document.body.classList.remove('osd');
         Focus.cur = null;
     };
     PlayerScreen.prototype.step = function (delta) {
@@ -7567,6 +7854,7 @@
 
     function boot() {
         applyScale();
+        Clock.start();
         window.addEventListener('resize', applyScale);
         window.addEventListener('load', applyScale);
         window.addEventListener('orientationchange', function () { setTimeout(applyScale, 300); });
@@ -7719,7 +8007,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Football: Football, VodPlayer: VodPlayer, OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Football: Football, VodPlayer: VodPlayer, OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License, Clock: Clock, NetTestScreen: NetTestScreen };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
