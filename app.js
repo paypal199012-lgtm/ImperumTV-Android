@@ -256,6 +256,21 @@
             el.classList.add('sy-finished');
             setTimeout(function () { Sync.hide(); if (then) then(); }, ms || 900);
         },
+        /** Schnellstart mit gespeicherten Listen: Karten nacheinander als fertig zeigen, dann weiter (-1 = nicht gespeichert) */
+        quick: function (title, live, movies, series, then) {
+            var self = this;
+            this.show(title);
+            ['live', 'movies', 'series'].forEach(function (k) { self.card(k, 'load', 0, 0, 'wird geladen …'); });
+            this.done = 0;
+            var steps = [['live', live], ['movies', movies], ['series', series]];
+            steps.forEach(function (st, i) {
+                setTimeout(function () {
+                    if (st[1] >= 0) self.card(st[0], 'done', st[1], 0);
+                    else self.card(st[0], 'later', 0, 0, 'lädt im Hintergrund');
+                    if (i === steps.length - 1) setTimeout(function () { self.finish('Alles bereit', then, 600); }, 300);
+                }, 250 + i * 280);
+            });
+        },
         hide: function () {
             var el = $('#loader');
             this.skip = null;
@@ -272,7 +287,6 @@
      * Anmelden und alles laden: Live TV, dann Filme und Serien gleichzeitig.
      * Neu = mehr Einträge als beim letzten Mal auf diesem Gerät.
      */
-    /** quick: beim App-Start sofort zur Startseite, sobald die Sender da sind – Filme und Serien laden im Hintergrund */
     function syncAll(acc, title, onOk, onErr, pending, quick) {
         var key = 'counts.' + (acc.demo ? 'demo' : acc.server + '|' + acc.username);
         var before = Storage.get(key, null);
@@ -280,7 +294,8 @@
         function fresh(now, old) { return before && old > 0 && now > old ? now - old : 0; }
         Sync.show(title);
         Sync.card('live', 'load', 0, 0, 'Anmelden …');
-        (pending || Data.login(acc, function (i) { if (i === 1) Sync.card('live', 'load', 0, 0, 'Sender werden geladen …'); })).then(function () {
+        (pending ? pending.then(function (r) { Data.applyLive(r); }) :
+            Data.login(acc, function (i) { if (i === 1) Sync.card('live', 'load', 0, 0, 'Sender werden geladen …'); })).then(function () {
             Sync.card('live', 'done', Data.channels.length, fresh(Data.channels.length, before && before.c));
             Sync.card('movies', 'load');
             Sync.card('series', 'load');
@@ -319,6 +334,7 @@
             if (left > 0) return;
             Storage.set(key, { c: Data.channels.length, m: Data.moviesLoaded ? Data.movies.length : (before ? before.m : 0),
                 s: Data.seriesLoaded ? Data.series.length : (before ? before.s : 0) });
+            ListCache.saveSoon(acc);                 // für den nächsten Start sofort da
             done(false);
         }
         function done(skipped) {
@@ -2490,6 +2506,117 @@
         }
     };
 
+    // =====================================================================
+    // Listen auf dem Gerät speichern (IndexedDB): beim nächsten Start sofort da
+    // =====================================================================
+    var ListCache = {
+        db: null,
+        key: function (acc) { return acc && !acc.demo && acc.server ? acc.server + '|' + acc.username : null; },
+        open: function () {
+            var self = this;
+            if (this.db) return Promise.resolve(this.db);
+            return new Promise(function (resolve) {
+                try {
+                    var req = window.indexedDB.open('imperumtv-lists', 1);
+                    req.onupgradeneeded = function () { req.result.createObjectStore('lists'); };
+                    req.onsuccess = function () { self.db = req.result; resolve(self.db); };
+                    req.onerror = function () { resolve(null); };
+                } catch (e) { resolve(null); }
+            });
+        },
+        /** Nur die nötigen Felder, als kurze Listen (spart Platz und Zeit) */
+        pack: function (kind, list) {
+            var out = new Array(list.length), x;
+            for (var i = 0; i < list.length; i++) {
+                x = list[i];
+                out[i] = kind === 'live' ? [x.id, x.num, x.name, x.logo, x.cat, x.epg] :
+                    kind === 'movie' ? [x.id, x.name, x.logo, x.cat, x.ext, x.year, x.rating, x.added] :
+                    [x.id, x.name, x.logo, x.cat, x.year, x.rating, x.added];
+            }
+            return out;
+        },
+        unpack: function (kind, rows) {
+            var out = new Array(rows.length), r;
+            for (var i = 0; i < rows.length; i++) {
+                r = rows[i];
+                out[i] = kind === 'live' ? { type: 'live', id: r[0], num: r[1], name: r[2], logo: r[3], cat: r[4], epg: r[5] } :
+                    kind === 'movie' ? { type: 'movie', id: r[0], name: r[1], logo: r[2], cat: r[3], ext: r[4], year: r[5], rating: r[6], added: r[7] } :
+                    { type: 'series', id: r[0], name: r[1], logo: r[2], cat: r[3], year: r[4], rating: r[5], added: r[6] };
+            }
+            return out;
+        },
+        /** Fire TV/Android: als Datei im App-Speicher (zuverlässiger als die Browser-Datenbank) */
+        native: function () { return !!(AB && AB.cacheSave && AB.cacheLoad); },
+        build: function (v) {
+            if (!v || !v.live || !v.live.length) return null;
+            return { live: this.unpack('live', v.live), movies: v.movies ? this.unpack('movie', v.movies) : null,
+                series: v.series ? this.unpack('series', v.series) : null, status: v.status, expiry: v.expiry, at: v.at };
+        },
+        get: function (acc) {
+            var k = this.key(acc), self = this;
+            if (!k) return Promise.resolve(null);
+            if (this.native()) {
+                return new Promise(function (resolve) {
+                    setTimeout(function () {
+                        try {
+                            var text = AB.cacheLoad('lists');
+                            var v = text ? JSON.parse(text) : null;
+                            resolve(v && v.key === k ? self.build(v) : null);
+                        } catch (e) { resolve(null); }
+                    }, 0);
+                });
+            }
+            return this.open().then(function (db) {
+                if (!db) return null;
+                return new Promise(function (resolve) {
+                    try {
+                        var req = db.transaction('lists', 'readonly').objectStore('lists').get(k);
+                        req.onsuccess = function () {
+                            try { resolve(self.build(req.result)); } catch (e) { resolve(null); }
+                        };
+                        req.onerror = function () { resolve(null); };
+                    } catch (e) { resolve(null); }
+                });
+            });
+        },
+        save: function (acc) {
+            var k = this.key(acc), self = this;
+            if (!k || !Data.channels.length) return Promise.resolve(false);
+            var v = { live: this.pack('live', Data.channels),
+                movies: Data.moviesLoaded ? this.pack('movie', Data.movies) : null,
+                series: Data.seriesLoaded ? this.pack('series', Data.series) : null,
+                status: Data.status, expiry: Data.expiry ? Data.expiry.getTime() : 0, at: Date.now(), key: k };
+            if (this.native()) {
+                try { return Promise.resolve(!!AB.cacheSave('lists', JSON.stringify(v))); } catch (e) { return Promise.resolve(false); }
+            }
+            return this.open().then(function (db) {
+                if (!db) return false;
+                return new Promise(function (resolve) {
+                    try {
+                        var tx = db.transaction('lists', 'readwrite');
+                        tx.objectStore('lists').clear();          // nur die aktuelle Liste behalten (Speicher)
+                        tx.objectStore('lists').put(v, k);
+                        tx.oncomplete = function () { resolve(true); };
+                        tx.onerror = tx.onabort = function () { resolve(false); };
+                    } catch (e) { resolve(false); }
+                });
+            });
+        },
+        /** Etwas später speichern, wenn gerade nichts los ist */
+        saveSoon: function (acc) {
+            var self = this;
+            clearTimeout(this.timer);
+            this.timer = setTimeout(function () { self.save(acc); }, 8000);
+        },
+        clear: function () {
+            if (this.native()) { try { AB.cacheClear('lists'); } catch (e) { /* egal */ } return Promise.resolve(); }
+            return this.open().then(function (db) {
+                if (!db) return;
+                try { db.transaction('lists', 'readwrite').objectStore('lists').clear(); } catch (e) { /* egal */ }
+            });
+        }
+    };
+
     var Data = {
         channels: [], movies: [], series: [],
         expiry: null, status: '',
@@ -2502,30 +2629,78 @@
             return map;
         },
 
-        login: function (acc, progress) {
+        /** Anmelden und Senderliste holen, ohne etwas zu ändern → { acc, list, status, expiry } */
+        fetchLive: function (acc, progress) {
             Api.acc = acc;
             Parser.worker();                                   // Hintergrund-Helfer schon starten
-            var self = this;
             // Alles gleichzeitig anfragen (spart Wartezeit); die Senderliste zählt nur, wenn die Anmeldung klappt
             var lists = Api.list('get_live_streams', 'live', Api.call('get_live_categories'));
             lists.then(null, function () { /* Fehler wird unten gemeldet */ });
+            var info = {};
             return Api.call(null).then(function (json) {
                 var user = json && json.user_info;
                 if (!user) throw new Error('Unerwartete Antwort vom Server.');
                 if (String(user.auth) !== '1') throw new Error('Anmeldung abgelehnt. Benutzername oder Passwort stimmt nicht, oder das Abo ist abgelaufen.');
-                self.status = str(user.status) || 'Active';
+                info.status = str(user.status) || 'Active';
                 var exp = parseFloat(user.exp_date);
-                self.expiry = exp > 0 ? new Date(exp * 1000) : null;
+                info.expiry = exp > 0 ? new Date(exp * 1000) : null;
                 if (progress) progress(1);
                 return lists;
             }).then(function (list) {
-                self.channels = list;
-                if (!self.channels.length) throw new Error('Anmeldung klappt, aber der Server liefert keine Live-Sender.');
-                self.movies = []; self.series = [];
-                self.moviesLoaded = false; self.seriesLoaded = false;
-                self.gen++; self.moviesPromise = null; self.seriesPromise = null;
+                if (!list.length) throw new Error('Anmeldung klappt, aber der Server liefert keine Live-Sender.');
+                return { acc: acc, list: list, status: info.status, expiry: info.expiry };
+            });
+        },
+
+        /** Ergebnis von fetchLive übernehmen (Filme und Serien werden neu geladen) */
+        applyLive: function (r) {
+            this.status = r.status; this.expiry = r.expiry;
+            this.channels = r.list;
+            this.movies = []; this.series = [];
+            this.moviesLoaded = false; this.seriesLoaded = false;
+            this.gen++; this.moviesPromise = null; this.seriesPromise = null;
+            this.epgCache = {};
+            Storage.set('account', r.acc);
+        },
+
+        login: function (acc, progress) {
+            var self = this;
+            return this.fetchLive(acc, progress).then(function (r) { self.applyLive(r); });
+        },
+
+        /** Gespeicherte Listen sofort benutzen (Start ohne Warten) */
+        useCache: function (acc, c) {
+            Api.acc = acc;
+            Parser.worker();
+            this.status = c.status || 'Active';
+            this.expiry = c.expiry ? new Date(c.expiry) : null;
+            this.channels = c.live;
+            this.movies = c.movies || []; this.series = c.series || [];
+            this.moviesLoaded = !!c.movies; this.seriesLoaded = !!c.series;
+            this.gen++; this.moviesPromise = null; this.seriesPromise = null;
+            this.epgCache = {};
+        },
+
+        /** Im Hintergrund frisch laden und die Listen austauschen (Sender, dann Filme, dann Serien) */
+        refreshQuiet: function (acc, livePromise) {
+            var self = this, gen = this.gen;
+            return livePromise.then(function (r) {
+                if (gen !== self.gen) return;
+                self.status = r.status; self.expiry = r.expiry;
+                self.channels = r.list;
                 self.epgCache = {};
-                Storage.set('account', acc);
+                Storage.set('account', r.acc);
+                if (safeMode()) return;
+                return Api.list('get_vod_streams', 'movie', Api.call('get_vod_categories')).then(function (mv) {
+                    if (gen === self.gen && mv && mv.length) { self.movies = mv; self.moviesLoaded = true; }
+                }, function () { /* gespeicherte Filme bleiben */ }).then(function () {
+                    if (gen !== self.gen) return;
+                    return Api.list('get_series', 'series', Api.call('get_series_categories')).then(function (sr) {
+                        if (gen === self.gen && sr && sr.length) { self.series = sr; self.seriesLoaded = true; }
+                    }, function () { /* gespeicherte Serien bleiben */ });
+                }).then(function () {
+                    if (gen === self.gen) ListCache.saveSoon(acc);
+                });
             });
         },
 
@@ -4368,6 +4543,7 @@
                 ThumbStat.ok = 0; ThumbStat.fail = 0; ThumbStat.off = false; ThumbStat.directOk = 0; ThumbStat.directFail = 0;
                 Epg.cache = {}; Epg.valid = false; Epg.nowCache = null;
                 Data.epgCache = {};
+                ListCache.clear();
                 if (Data.epgFullCache) Data.epgFullCache = {};
                 toast('Cache geleert' + (freed > 0 ? ' (' + Math.max(1, Math.round(freed / 1048576)) + ' MB frei)' : '') + ' – Listen werden neu geladen …', 4000);
                 reloadAll();
@@ -7953,7 +8129,7 @@
         // Schnellstart: mit der zuletzt genutzten Liste schon anmelden, während die Website noch antwortet
         var early = null;
         if (lastId !== null && saved && saved.server && saved.username && saved.password && !OVpn.pending()) {
-            early = Data.login(saved, null);
+            early = Data.fetchLive(saved, null);
             early.then(null, function () { /* wird unten normal behandelt */ });
         }
         function sameAcc(a, b) { return a && b && a.server === b.server && a.username === b.username && a.password === b.password && !!a.demo === !!b.demo; }
@@ -7962,6 +8138,33 @@
             var pending = early && sameAcc(acc, saved) ? early : null;
             early = null;
             OVpn.whenReady(function () {
+                ListCache.get(acc).then(function (c) {
+                    if (c && !safeMode()) startCached(acc, c, pending);
+                    else normalStart(acc, pending);
+                }, function () { normalStart(acc, pending); });
+            });
+        }
+
+        /** Gespeicherte Listen: Lade-Animation kurz mit den gespeicherten Zahlen, dann los – frisch geladen wird im Hintergrund */
+        function startCached(acc, c, pending) {
+            Data.useCache(acc, c);
+            Sync.quick('ImperumTV wird gestartet …', c.live.length, c.movies ? c.movies.length : -1, c.series ? c.series.length : -1, function () {
+                Nav.replace(new HomeScreen());
+                Updater.autoCheck();
+            });
+            Data.refreshQuiet(acc, pending || Data.fetchLive(acc, null)).then(function () {
+                setTimeout(function () { Epg.sync(false); }, 6000);
+                setTimeout(function () { NewEps.check(); }, 12000);
+            }, function (e) {
+                var msg = e && e.message || String(e);
+                // Zugang abgelehnt oder abgelaufen: wie bisher zur Auswahl der Listen; sonst (offline) mit den gespeicherten Listen weiter
+                if (/abgelehnt|abgelaufen|HTTP 40[134]|gesperrt|Unerwartete/.test(msg)) Nav.replace(new PlaylistsScreen(msg));
+                else toast('Keine Verbindung zum Anbieter – gespeicherte Listen werden angezeigt');
+            });
+        }
+
+        function normalStart(acc, pending) {
+            {
                 syncAll(acc, 'ImperumTV wird gestartet …', function () {
                     Nav.replace(new HomeScreen());
                     Updater.autoCheck();
@@ -7971,7 +8174,7 @@
                     Nav.replace(new PlaylistsScreen(vpnOffer ? '' : (e.message || String(e))));
                     if (vpnOffer) OVpn.offerRetry(e, function () { start(acc); });
                 }, pending);
-            });
+            }
         }
 
         if (Profiles.askOnStart()) Nav.replace(new WhoScreen(loadLists));

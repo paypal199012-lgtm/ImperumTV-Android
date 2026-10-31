@@ -1412,6 +1412,29 @@ class MainActivity : Activity() {
             epgDownload(url, account, wanted)
         }
 
+        /** Gespeicherte Listen (Sender, Filme, Serien) für den Schnellstart: als Datei im App-Speicher */
+        private fun cacheFile(name: String): java.io.File =
+            java.io.File(filesDir, "liste-" + name.replace(Regex("[^a-zA-Z0-9]"), "") + ".json")
+
+        @JavascriptInterface
+        fun cacheSave(name: String, text: String): Boolean = try {
+            val f = cacheFile(name)
+            val tmp = java.io.File(f.path + ".tmp")
+            tmp.writeText(text)
+            tmp.renameTo(f)
+        } catch (e: Throwable) { false }
+
+        @JavascriptInterface
+        fun cacheLoad(name: String): String = try {
+            val f = cacheFile(name)
+            if (f.exists()) f.readText() else ""
+        } catch (e: Throwable) { "" }
+
+        @JavascriptInterface
+        fun cacheClear(name: String) {
+            try { cacheFile(name).delete() } catch (e: Throwable) { }
+        }
+
         /** Zeitpunkt des letzten Absturzes der Oberfläche (ms seit 1970, 0 = nie) */
         @JavascriptInterface
         fun lastCrash(): Double =
