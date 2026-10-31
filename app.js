@@ -1496,6 +1496,34 @@
                 try { AB.vpnSetConfig(typeof conf === 'string' ? conf : ''); } catch (e) { /* egal */ }
             }, function () { /* offline oder noch nicht eingerichtet: gespeicherten Zugang behalten */ });
         },
+        /** Code eingeben → freie WireGuard-Datei aus dem Vorrat holen */
+        askCode: function (done) {
+            pinDialog('VPN-Code', 'Gib den 4-stelligen VPN-Code ein. Danach verbindet sich dieser Stick automatisch.', function (code, fail) {
+                Remote.rpc('device_vpn_claim', { p_mac: Device.mac, p_key: Device.key, p_code: code }).then(function (res) {
+                    if (!res || !res.ok || !res.config) { fail((res && res.error) || 'Code falsch'); return; }
+                    Modal.pinInput = null;
+                    Modal.close();
+                    try { AB.vpnSetConfig(res.config); } catch (e) { /* egal */ }
+                    toast('VPN eingerichtet – wird verbunden …', 4000);
+                    if (done) done();
+                }, function (e) {
+                    fail(/fehlen noch|404/.test(e.message || '') ? 'VPN ist auf der Website noch nicht eingerichtet' : (e.message || 'Keine Verbindung'));
+                });
+                return false;                // Fenster bleibt offen, bis die Website geantwortet hat
+            });
+        },
+        /** VPN auf diesem Stick entfernen und die Datei im Vorrat freigeben */
+        remove: function (done) {
+            Modal.open('VPN entfernen?', 'Dieser Stick verbindet sich danach nicht mehr über das VPN. Die Datei wird für einen anderen Stick frei.', [
+                { label: 'Entfernen', primary: true, action: function () {
+                    try { AB.vpnSetConfig(''); } catch (e) { /* egal */ }
+                    Remote.rpc('device_vpn_release', { p_mac: Device.mac, p_key: Device.key }).then(null, function () { });
+                    toast('VPN entfernt');
+                    if (done) done();
+                } },
+                { label: 'Abbrechen' }
+            ]);
+        },
         text: function (i) {
             i = i || this.info();
             if (!i.enabled) return 'Aus';
@@ -5451,13 +5479,20 @@
         if (Updater.available()) {
             row('update', 'App-Version ' + Updater.versionText(Updater.current()), 'Nach Updates suchen', function () { Updater.check(true); });
         }
-        var vpnInfo = Vpn.native() ? Vpn.info() : null;
+        var vpnInfo = Vpn.native() ? Vpn.info() : null, meSet = this;
         if (vpnInfo && vpnInfo.has) {
             row('vpn', 'VPN (WireGuard)', Vpn.text(vpnInfo), function (v) {
                 var on = !Vpn.info().enabled;
                 try { AB.vpnSetEnabled(on); } catch (e) { /* egal */ }
                 v.textContent = on ? 'Verbindet …' : 'Aus';
                 toast(on ? 'VPN wird eingeschaltet …' : 'VPN ausgeschaltet');
+            });
+            row('vpn-remove', 'VPN entfernen', 'Datei für einen anderen Stick freigeben', function () {
+                Vpn.remove(function () { meSet.focusKey = 'set-vpn'; setTimeout(function () { if (Nav.top() === meSet) Nav.show(meSet); }, 300); });
+            });
+        } else if (vpnInfo) {
+            row('vpn', 'VPN einrichten', 'Mit deinem VPN-Code (nur für eigene Geräte)', function () {
+                Vpn.askCode(function () { meSet.focusKey = 'set-vpn'; setTimeout(function () { if (Nav.top() === meSet) Nav.show(meSet); }, 400); });
             });
         }
         row('cache', 'Cache leeren', 'Gespeicherte Bilder und Programm löschen, Listen neu laden', function () { clearCacheFlow(); });
