@@ -1483,6 +1483,35 @@
         Report.jsError(r.message, 'Promise', r.stack);
     });
 
+    /**
+     * VPN (WireGuard) nur für eigene Geräte: Den Zugang trägt der Admin auf der Website pro MAC ein.
+     * Geräte ohne Eintrag sehen davon nichts. E-Mail/Passwort des VPN-Kontos gibt es nirgends in der App.
+     */
+    var Vpn = {
+        native: function () { try { return !!(AB && AB.vpnAvailable && AB.vpnAvailable()); } catch (e) { return false; } },
+        info: function () { try { return JSON.parse(AB.vpnInfo() || '{}') || {}; } catch (e) { return {}; } },
+        sync: function () {
+            if (!this.native() || !Device.mac) return;
+            Remote.rpc('device_vpn_get', { p_mac: Device.mac, p_key: Device.key }).then(function (conf) {
+                try { AB.vpnSetConfig(typeof conf === 'string' ? conf : ''); } catch (e) { /* egal */ }
+            }, function () { /* offline oder noch nicht eingerichtet: gespeicherten Zugang behalten */ });
+        },
+        text: function (i) {
+            i = i || this.info();
+            if (!i.enabled) return 'Aus';
+            if (i.state === 'an') return 'An · verbunden';
+            if (i.state === 'verbindet') return 'Verbindet …';
+            if (i.state === 'fehler') return 'Fehler: ' + (i.error || 'unbekannt');
+            return 'An · getrennt';
+        }
+    };
+    window.__androidVpn = function (state, err) {
+        if (state === 'an') toast('VPN verbunden');
+        else if (state === 'fehler') toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 6000);
+        var top = Nav.top();
+        if (top && top instanceof SettingsScreen && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
+    };
+
     var Remote = {
         lists: null,       // zuletzt geladene Wiedergabelisten
         registered: false,
@@ -5422,6 +5451,15 @@
         if (Updater.available()) {
             row('update', 'App-Version ' + Updater.versionText(Updater.current()), 'Nach Updates suchen', function () { Updater.check(true); });
         }
+        var vpnInfo = Vpn.native() ? Vpn.info() : null;
+        if (vpnInfo && vpnInfo.has) {
+            row('vpn', 'VPN (WireGuard)', Vpn.text(vpnInfo), function (v) {
+                var on = !Vpn.info().enabled;
+                try { AB.vpnSetEnabled(on); } catch (e) { /* egal */ }
+                v.textContent = on ? 'Verbindet …' : 'Aus';
+                toast(on ? 'VPN wird eingeschaltet …' : 'VPN ausgeschaltet');
+            });
+        }
         row('cache', 'Cache leeren', 'Gespeicherte Bilder und Programm löschen, Listen neu laden', function () { clearCacheFlow(); });
         row('lists', 'Wiedergabelisten', 'Liste wechseln oder neue hinzufügen', function () { Nav.push(new PlaylistsScreen()); });
         row('account', 'Konto', License.activated() ? 'Aktiviert (unbegrenzt)' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
@@ -6251,6 +6289,7 @@
         Player.init();
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
         setTimeout(function () { Report.flushNative(); }, 8000);   // Absturzbericht vom letzten Mal an die Website
+        setTimeout(function () { Vpn.sync(); }, 3000);              // VPN-Zugang (nur bei eigenen Geräten eingetragen)
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', function (e) { if (e.keyCode === KEY.ENTER) LongPress.up(); });
 
@@ -6371,7 +6410,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Vpn: Vpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
