@@ -310,6 +310,13 @@ class MainActivity : Activity() {
             }
         }
         try { ImperumVpn.autoStart(this) } catch (e: Throwable) { }
+        // OpenVPN mit eigener .ovpn-Datei: nur verbinden, wenn man „beim Start verbinden“ gewählt hat
+        ImperumOVpn.listener = { s, e ->
+            handler.post {
+                if (uiReady) webView.evaluateJavascript("window.__androidOvpn && window.__androidOvpn(${JSONObject.quote(s)}, ${JSONObject.quote(e)})", null)
+            }
+        }
+        try { ImperumOVpn.startIfWanted(this) } catch (e: Throwable) { }
 
         // Geplante Aufnahmen: Wecker neu stellen, verpasste Starts nachholen
         try { Recorder.armAll(this) } catch (e: Exception) { }
@@ -439,6 +446,10 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == ImperumVpn.REQUEST) {
             try { ImperumVpn.onPermission(this, resultCode == RESULT_OK) } catch (e: Throwable) { }
+            return
+        }
+        if (requestCode == ImperumOVpn.REQUEST) {
+            try { ImperumOVpn.onPermission(this, resultCode == RESULT_OK) } catch (e: Throwable) { }
             return
         }
         if (requestCode != REQ_EXTERNAL || !uiReady) return
@@ -1077,6 +1088,35 @@ class MainActivity : Activity() {
             return freed.toString()
         }
 
+        /** OpenVPN: in dieser Version eingebaut? */
+        @JavascriptInterface
+        fun ovpnAvailable(): Boolean = ImperumOVpn.available()
+
+        /** OpenVPN-Stand: {"state":"an|aus|verbindet|fehler","error":"…","has":true,"user":"…","auto":false} */
+        @JavascriptInterface
+        fun ovpnInfo(): String = try {
+            JSONObject().put("state", ImperumOVpn.state).put("error", ImperumOVpn.lastError)
+                .put("has", ImperumOVpn.config(this@MainActivity).isNotBlank())
+                .put("user", ImperumOVpn.user(this@MainActivity))
+                .put("auto", ImperumOVpn.autoStart(this@MainActivity)).toString()
+        } catch (e: Throwable) { "{}" }
+
+        /** Eigene .ovpn-Datei + Zugangsdaten (kommen von der Website) */
+        @JavascriptInterface
+        fun ovpnSetProfile(conf: String, user: String, pass: String) {
+            handler.post { try { ImperumOVpn.setProfile(this@MainActivity, conf, user, pass) } catch (e: Throwable) { } }
+        }
+
+        @JavascriptInterface
+        fun ovpnConnect(on: Boolean) {
+            handler.post {
+                try { if (on) ImperumOVpn.connect(this@MainActivity) else ImperumOVpn.disconnect(this@MainActivity) } catch (e: Throwable) { }
+            }
+        }
+
+        @JavascriptInterface
+        fun ovpnSetAutoStart(on: Boolean) { try { ImperumOVpn.setAutoStart(this@MainActivity, on) } catch (e: Throwable) { } }
+
         /** VPN: Ist WireGuard in dieser Version eingebaut? */
         @JavascriptInterface
         fun vpnAvailable(): Boolean = ImperumVpn.available()
@@ -1104,7 +1144,8 @@ class MainActivity : Activity() {
         /** Gerätename für Fehlerberichte */
         @JavascriptInterface
         fun deviceName(): String = Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE +
-            (if (ffmpegAvailable()) " · FFmpeg-Ton" else " · ohne FFmpeg")
+            (if (ffmpegAvailable()) " · FFmpeg-Ton" else " · ohne FFmpeg") +
+            (if (ImperumOVpn.available()) " · OpenVPN" else "")
 
         /** Infos zum gespeicherten Programm: {"at":…, "account":"…", "channels":…, "busy":true/false} */
         @JavascriptInterface
