@@ -98,6 +98,37 @@ class MainActivity : Activity() {
     private var freezeFixes = 0
     private var audioWarned = false
 
+    /** Filme/Serien: gewünschte Tonsprachen in Reihenfolge (z. B. de, en); leer bei Sendern */
+    private var audioLangs: List<String> = emptyList()
+    private var langPickPending = false
+
+    private fun langMatches(f: Format, want: String): Boolean {
+        val code = (f.language ?: "").lowercase(Locale.ROOT)
+        val label = (f.label ?: "").lowercase(Locale.ROOT)
+        return when (want) {
+            "de" -> Regex("^(de|deu|ger)(-|$)").containsMatchIn(code) ||
+                Regex("(^|[^a-z])(deutsch|german|ger|deu|de)([^a-z]|$)").containsMatchIn(label)
+            "en" -> Regex("^(en|eng)(-|$)").containsMatchIn(code) ||
+                Regex("(^|[^a-z])(englisch|english|eng|en)([^a-z]|$)").containsMatchIn(label)
+            else -> code == want
+        }
+    }
+
+    /** Einmal je Film: Deutsch nehmen, sonst Englisch, sonst so lassen. Danach entscheidet der Zuschauer. */
+    private fun pickPreferredAudio(tracks: Tracks) {
+        val groups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO && it.isSupported }
+        if (groups.isEmpty()) return
+        langPickPending = false
+        if (groups.size < 2) return
+        for (want in audioLangs) {
+            val hits = groups.filter { g -> (0 until g.length).any { langMatches(g.getTrackFormat(it), want) } }
+            if (hits.isEmpty()) continue
+            val best = hits.firstOrNull { (it.getTrackFormat(0).roleFlags and C.ROLE_FLAG_DESCRIBES_VIDEO) == 0 } ?: hits[0]
+            if (!best.isSelected) select(best)
+            return
+        }
+    }
+
     private fun checkFrozen() {
         if (!player.isPlaying || player.videoFormat == null) { frozenSince = System.currentTimeMillis(); return }
         val counters = player.videoDecoderCounters ?: return
@@ -202,6 +233,7 @@ class MainActivity : Activity() {
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                if (langPickPending) pickPreferredAudio(tracks)
                 if (audioWarned) return
                 val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
                 if (audio.isEmpty()) return
@@ -1275,10 +1307,12 @@ class MainActivity : Activity() {
                 lastFrames = -1
                 freezeFixes = 0
                 frozenSince = System.currentTimeMillis()
+                langPickPending = audioLangs.isNotEmpty()
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .clearOverrides()
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                     .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    .setPreferredAudioLanguages(*audioLangs.toTypedArray())
                     .build()
                 placeVideo(x, y, w, h)
                 player.setMediaItem(MediaItem.fromUri(url))
@@ -1422,6 +1456,13 @@ class MainActivity : Activity() {
         }
 
         /** Zuletzt gewählte Sprache und Untertitel wieder nehmen (z. B. Deutsch) */
+        /** Vor open(): Tonsprachen für den nächsten Film, z. B. "de,en". Leer = automatisch (Sender). */
+        @JavascriptInterface
+        fun setAudioLangs(langs: String) {
+            val list = langs.split(",").map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() }
+            handler.post { audioLangs = list }
+        }
+
         @JavascriptInterface
         fun applyPrefs(audio: String, subtitle: String) {
             handler.postDelayed({

@@ -2341,6 +2341,8 @@
             this.url = url;
             this.subtitleOn = false;
             this.subIndex = -1;
+            this.audioLangs = this.nextLangs || '';            // nur für genau diesen Film/diese Folge
+            this.nextLangs = '';
             this.emit('buffer', true);
             var self = this;
 
@@ -2348,6 +2350,7 @@
                 var fr = this.fractions(rect);
                 this.curRect = rect || null;
                 this.boxed = false;
+                if (AB.setAudioLangs) AB.setAudioLangs(this.audioLangs || '');
                 AB.open(url, fr.x, fr.y, fr.w, fr.h);
                 this.applyAspect(rect ? 'fit' : this.aspect());   // danach: legt bei 4:3 usw. die Fläche passend
             } else if (this.tizen) {
@@ -2683,14 +2686,35 @@
             return ok;
         },
 
-        /** Zuletzt gewählte Sprache automatisch nehmen (z. B. Deutsch) */
+        /** Bei Filmen/Serien zuerst Deutsch, sonst Englisch; bei Sendern die zuletzt gewählte Tonspur */
+        audioLangs: '',
+        nextLangs: '',
+        langWanted: function (name, code) {
+            var n = String(name || '').toLowerCase(), c = String(code || '').toLowerCase();
+            if (code === 'de') return /^(de|deu|ger)(-|$)/.test(c) || /(^|[^a-z])(deutsch|german|ger|deu|de)([^a-z]|$)/.test(n);
+            return /^(en|eng)(-|$)/.test(c) || /(^|[^a-z])(englisch|english|eng|en)([^a-z]|$)/.test(n);
+        },
         applyPreferences: function () {
+            var vodLangs = !!this.audioLangs;
             if (this.android) {
-                AB.applyPrefs(Storage.get('prefAudio', ''), Storage.get('prefSubtitle', ''));
+                if (vodLangs && AB.setAudioLangs) AB.applyPrefs('', Storage.get('prefSubtitle', ''));
+                else AB.applyPrefs(Storage.get('prefAudio', ''), Storage.get('prefSubtitle', ''));
                 return;
             }
             if (!this.tizen) return;
             var pa = Storage.get('prefAudio', ''), ps = Storage.get('prefSubtitle', '');
+            if (vodLangs) {
+                var al = this.tracks('AUDIO'), langs = this.audioLangs.split(','), done = false;
+                for (var li = 0; li < langs.length && !done; li++) {
+                    for (var ai = 0; ai < al.length; ai++) {
+                        if (this.langWanted(al[ai].name, langs[li])) {
+                            if (al[ai].index !== this.currentAudio()) { try { this.av.setSelectTrack('AUDIO', al[ai].index); } catch (e0) { /* egal */ } }
+                            done = true; break;
+                        }
+                    }
+                }
+                pa = '';
+            }
             if (pa) {
                 var audio = this.tracks('AUDIO');
                 for (var i = 0; i < audio.length; i++) {
@@ -6379,6 +6403,7 @@
             subtitle: function (text, ms) { self.showSubtitle(text, ms); }
         });
         Player.aspectKey = this.aspectKey();               // Bildformat dieses Senders/Films/dieser Serie
+        Player.nextLangs = this.kind === 'live' ? '' : 'de,en';    // Filme/Serien: Deutsch, sonst Englisch
         var reuse = this.handoff && this.kind === 'live';
         this.handoff = false;
         if (reuse && Player.keep(this.url(), null)) {
