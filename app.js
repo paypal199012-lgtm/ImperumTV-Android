@@ -2187,8 +2187,8 @@
     // Fußball: Spielplan von der Website (football-data.org) + passender Sender aus dem Programm
     // =====================================================================
     var Football = {
-        LEAGUES: [['', 'Alle'], ['BL1', 'Bundesliga'], ['BL2', '2. Liga'], ['DFB', 'DFB-Pokal'], ['CL', 'Champions League'], ['PL', 'Premier League'], ['SA', 'Serie A'], ['PD', 'LaLiga'], ['FL1', 'Ligue 1']],
-        SHORT: { BL1: 'BL', BL2: '2.BL', DFB: 'POK', CL: 'CL', PL: 'PL', SA: 'SA', PD: 'LL', FL1: 'L1' },
+        LEAGUES: [['', 'Alle'], ['BL1', 'Bundesliga'], ['BL2', '2. Liga'], ['DFB', 'DFB-Pokal'], ['CL', 'Champions League'], ['EL', 'Europa League'], ['ECL', 'Conference L.'], ['PL', 'Premier League'], ['SA', 'Serie A'], ['PD', 'LaLiga'], ['FL1', 'Ligue 1']],
+        SHORT: { BL1: 'BL', BL2: '2.BL', DFB: 'POK', CL: 'CL', EL: 'EL', ECL: 'ECL', PL: 'PL', SA: 'SA', PD: 'LL', FL1: 'L1' },
         STOP: { 'club': 1, 'real': 1, 'borussia': 1, 'united': 1, 'city': 1, 'sporting': 1, 'athletic': 1, 'atletico': 1, 'olympique': 1, 'stade': 1, 'calcio': 1, 'football': 1, 'fussball': 1, 'hotspur': 1, 'albion': 1, 'wanderers': 1, 'deportivo': 1, 'racing': 1, 'union': 1, 'saint': 1, 'paris': 1, 'germain': 1, 'munchen': 1, 'internazionale': 1, 'milano': 1, 'town': 1, 'county': 1, 'rovers': 1, 'villa': 1, 'palace': 1, 'forest': 1, 'ham': 1, 'hove': 1, 'sport': 1, 'sports': 1, 'verein': 1, 'olympic': 1, 'dynamo': 1, 'calcio': 1, 'balompie': 1, 'futbol': 1 },
         data: null, at: 0, pending: null, searchSeq: 0, searchCb: {},
         load: function (force) {
@@ -2228,6 +2228,7 @@
                     return 'Sky';
                 case 'BL2': return 'Sky';
                 case 'DFB': return 'Sky · ARD/ZDF';
+                case 'EL': case 'ECL': return 'RTL+';
                 case 'PL': return 'Sky';
                 case 'SA': case 'PD': return 'DAZN';
                 case 'CL': return wd === 2 ? 'DAZN · Prime Video' : 'DAZN';
@@ -2239,6 +2240,7 @@
             skyBl: /sky.*(bundesliga|buli|top ?event)|bundesliga.*sky/i,
             skyPl: /sky.*(premier|top ?event|mix)/i,
             freeTv: /(^|[^a-z])(ard|das erste|zdf)([^a-z]|$)/i,
+            rtl: /(^|[^a-z])(rtl|nitro)([^a-z]|$)/i,
             sky: /(^|[^a-z])sky([^a-z]|$).*(sport|bundesliga|premier|top ?event|fussball|fußball|football)/i,
             dazn: /dazn/i,
             prime: /prime|amazon/i,
@@ -2319,6 +2321,7 @@
                 else out.push({ label: 'Sky', chans: this.channelsBy(['skyBl']) });
             } else if (m.c === 'BL2') out.push({ label: 'Sky', chans: this.channelsBy(['skyBl']) });
             else if (m.c === 'DFB') { out.push({ label: 'Sky', chans: this.channelsBy(['skyBl']) }); out.push({ label: 'ARD / ZDF', chans: this.channelsBy(['freeTv']) }); }
+            else if (m.c === 'EL' || m.c === 'ECL') out.push({ label: 'RTL / RTL+', chans: this.channelsBy(['rtl']) });
             else if (m.c === 'PL') out.push({ label: 'Sky', chans: this.channelsBy(['skyPl']) });
             else if (m.c === 'SA' || m.c === 'PD' || m.c === 'FL1') out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
             else if (m.c === 'CL') {
@@ -5339,7 +5342,7 @@
         var self = this;
         root.appendChild(topbar('Fußball', 'OK: Sender einschalten'));
         var wrap = h('div', 'fb');
-        var chips = h('div', 'fb-chips');
+        var chips = h('div', 'fb-chips hscroll');
         Football.LEAGUES.forEach(function (l) {
             var c = h('div', 'fb-chip' + (self.league === l[0] ? ' active' : ''), l[1]);
             chips.appendChild(focusable(c, 'fbl-' + (l[0] || 'all'), function () {
@@ -5417,7 +5420,7 @@
             teams.appendChild(mid);
             teams.appendChild(side(m.a, false));
             row.appendChild(teams);
-            var stTxt = live ? ({ PAUSED: 'HALBZEIT', EXTRA_TIME: 'VERLÄNGERUNG', PENALTY_SHOOTOUT: 'ELFMETER', SUSPENDED: 'UNTERBROCHEN' }[m.s] || 'LIVE')
+            var stTxt = live ? ({ PAUSED: 'HALBZEIT', EXTRA_TIME: 'VERLÄNGERUNG' + (m.mn ? ' ' + m.mn : ''), PENALTY_SHOOTOUT: 'ELFMETER', SUSPENDED: 'UNTERBROCHEN' }[m.s] || (m.mn ? 'LIVE ' + m.mn : 'LIVE'))
                 : (m.s === 'FINISHED' || m.s === 'AWARDED') ? 'Ende' : m.s === 'POSTPONED' ? 'verlegt' : '';
             row.appendChild(h('div', 'fb-state' + (live ? ' live' : ''), stTxt));
             var tv = h('div', 'fb-tv');
