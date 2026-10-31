@@ -6008,9 +6008,11 @@
         function create() {
             textDialog('Neues Profil', 'Wie heißt die Person?', '', function (name) {
                 setTimeout(function () {
-                    Modal.open('Was für ein Profil?', '„' + name + '“ bekommt eigene Favoriten, Weiterschauen und Gesehen-Haken.', [
-                        { label: 'Normales Profil', primary: true, action: function () { done(Profiles.add(name, false)); } },
-                        { label: 'Kinder-Profil', action: function () {
+                    Modal.open('Kinder-Profil für „' + name + '“?', 'Soll „' + name + '“ ein Kinder-Profil bekommen?\n\n' +
+                        'Kinder-Profil: nur Kinder-Kategorien, keine Einstellungen, verlassen nur mit PIN.\n' +
+                        'Normales Profil: alles wie bei dir, mit eigenen Favoriten und „Weiterschauen“.', [
+                        { label: 'Nein, normales Profil', primary: true, action: function () { done(Profiles.add(name, false)); } },
+                        { label: 'Ja, Kinder-Profil', action: function () {
                             var p = Profiles.add(name, true);
                             if (Parental.hasPin()) {
                                 toast('Kinder-Profil: nur Kinder-Kategorien. Verlassen nur mit deiner PIN.', 7000);
