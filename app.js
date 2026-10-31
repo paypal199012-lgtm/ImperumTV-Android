@@ -3719,14 +3719,19 @@
         onStatus: function (resetAt) {
             var now = resetAt || '';
             this.lastReset = now;
-            if (!this.enabled()) return;
+            var profilePins = Profiles.list().some(function (p) { return !!p.pin; });
+            if (!this.enabled() && !profilePins) return;
             var seen = Storage.get('parentalResetSeen', '?');
             if (seen === '?') { Storage.set('parentalResetSeen', now); return; }
             if (now && now !== seen) {
                 Storage.remove('parentalPin');
                 Storage.set('parentalResetSeen', now);
                 this.lock();
-                toast('Die Kindersicherung wurde vom Anbieter zurückgesetzt. Du kannst in den Einstellungen eine neue PIN vergeben.', 8000);
+                // auch die PINs der Profile (sonst käme man nie mehr in ein Profil mit vergessener PIN)
+                Profiles.list().forEach(function (p) { if (p.pin) Profiles.update(p.id, { pin: '' }); });
+                toast('Die PINs wurden vom Anbieter zurückgesetzt (Kindersicherung und Profile). Du kannst in den Einstellungen neue vergeben.', 8000);
+                var top = Nav.top();
+                if (top && (top instanceof HomeScreen || top instanceof SettingsScreen || top instanceof WhoScreen) && !Modal.node) Nav.show(top);
             }
         },
         /** PIN abfragen, dann onOk. Ohne Kindersicherung oder bereits geöffnet: sofort. */
@@ -6007,8 +6012,19 @@
                         { label: 'Normales Profil', primary: true, action: function () { done(Profiles.add(name, false)); } },
                         { label: 'Kinder-Profil', action: function () {
                             var p = Profiles.add(name, true);
-                            toast('Kinder-Profil: nur Kinder-Kategorien. Anpassen unter Einstellungen → Profile.', 7000);
-                            done(p);
+                            if (Parental.hasPin()) {
+                                toast('Kinder-Profil: nur Kinder-Kategorien. Verlassen nur mit deiner PIN.', 7000);
+                                done(p);
+                                return;
+                            }
+                            // Ohne PIN könnte man das Kinder-Profil einfach verlassen: jetzt festlegen
+                            setTimeout(function () {
+                                Modal.open('PIN festlegen', 'Mit dieser PIN verlässt man das Kinder-Profil (gleiche PIN wie die Kindersicherung). ' +
+                                    'Vergessen? Dein Anbieter kann sie auf der Website zurücksetzen.', [
+                                    { label: 'PIN festlegen', primary: true, action: function () { setTimeout(function () { newPinFlow(function () { done(p); }); }, 50); } },
+                                    { label: 'Später', action: function () { toast('Ohne PIN fragt die App beim Öffnen des Kinder-Profils danach.', 6000); done(p); } }
+                                ]);
+                            }, 50);
                         } },
                         { label: 'Abbrechen' }
                     ]);
@@ -6028,6 +6044,14 @@
     /** Profil öffnen – mit PIN, falls gesetzt; aus dem Kinder-Profil heraus nur mit der Kindersicherungs-PIN */
     function openProfile(p, onOk) {
         var cur = Profiles.cur();
+        if (p.kids && !Parental.hasPin()) {
+            Modal.open('PIN für das Kinder-Profil', 'Damit Kinder das Kinder-Profil nicht ohne dich verlassen können, lege jetzt eine 4-stellige PIN fest. ' +
+                'Es ist dieselbe PIN wie für die Kindersicherung. Vergessen? Dein Anbieter kann sie auf der Website zurücksetzen.', [
+                { label: 'PIN festlegen', primary: true, action: function () { setTimeout(function () { newPinFlow(function () { Profiles.use(p.id); onOk(); }); }, 50); } },
+                { label: 'Abbrechen' }
+            ]);
+            return;
+        }
         function pinOf() {
             if (!p.pin) { Profiles.use(p.id); onOk(); return; }
             pinDialog('PIN für „' + p.name + '“', 'Dieses Profil ist mit einer PIN geschützt.', function (pin, fail) {
@@ -6121,8 +6145,8 @@
             });
         }
         box.appendChild(h('div', 'set-note', 'Jedes Profil hat eigene Favoriten, „Weiterschauen“, Gesehen-Haken und Hinweise auf neue Folgen. ' +
-            'Wiedergabeliste, VPN und Einstellungen gelten für alle. Ein Kinder-Profil zeigt nur freigegebene Kategorien; ' +
-            'ist die Kindersicherung an, braucht man zum Verlassen des Kinder-Profils deren PIN.'));
+            'Wiedergabeliste, VPN und Einstellungen gelten für alle. Ein Kinder-Profil zeigt nur freigegebene Kategorien und lässt sich nur mit der PIN ' +
+            'der Kindersicherung verlassen. PIN vergessen? Dein Anbieter kann sie auf der Website zurücksetzen (MAC ' + Device.macText() + ').'));
         root.appendChild(box);
         if (!this.focusKey) this.focusKey = 'pfs-' + (cur ? cur.id : 'add');
     };
