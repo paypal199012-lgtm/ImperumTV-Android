@@ -970,6 +970,72 @@ class MainActivity : Activity() {
         }
     }
 
+    private val marks = Regex("\\p{M}+")
+    private fun foldText(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(marks, "").replace("ß", "ss")
+
+    /** Ganzes Wort enthalten? (verhindert z. B. „roma“ in „romantik“) */
+    private fun hasWord(text: String, w: String): Boolean {
+        var i = text.indexOf(w)
+        while (i >= 0) {
+            val before = if (i > 0) text[i - 1] else ' '
+            val after = if (i + w.length < text.length) text[i + w.length] else ' '
+            if (!before.isLetterOrDigit() && !after.isLetterOrDigit()) return true
+            i = text.indexOf(w, i + 1)
+        }
+        return false
+    }
+
+    private class FbQuery(val key: String, val words: List<String>, val t: Long) { val hits = ArrayList<LongArray>(); val titles = ArrayList<String>(); val ids = ArrayList<String>() }
+
+    private fun epgSearchRun(map: Map<String, String>, query: String, out: JSONObject) {
+        val q = JSONArray(query)
+        val qs = ArrayList<FbQuery>()
+        for (i in 0 until q.length()) {
+            val o = q.getJSONObject(i)
+            val w = o.getJSONArray("w")
+            val words = (0 until w.length()).map { w.getString(it) }.filter { it.length >= 3 }
+            if (words.isNotEmpty()) qs.add(FbQuery(o.getString("k"), words, o.getLong("t")))
+        }
+        if (qs.isEmpty()) return
+        val allWords = qs.flatMap { it.words }.toSet()
+        val minT = qs.minOf { it.t } - 3 * 3600_000L
+        val maxT = qs.maxOf { it.t } + 3 * 3600_000L
+        for ((id, raw) in map) {
+            val folded = foldText(raw)
+            if (allWords.none { folded.contains(it) }) continue
+            val list = try { JSONArray(raw) } catch (e: Throwable) { continue }
+            for (j in 0 until list.length()) {
+                val e = list.optJSONArray(j) ?: continue
+                val start = e.optLong(0); val end = e.optLong(1)
+                if (end < minT || start > maxT) continue
+                val titleRaw = e.optString(2)
+                val title = foldText(titleRaw); val desc = foldText(e.optString(3))
+                for (fq in qs) {
+                    val near = Math.abs(start - fq.t) <= 45 * 60_000L || (start <= fq.t + 10 * 60_000L && end >= fq.t + 30 * 60_000L)
+                    if (!near) continue
+                    var score = 0
+                    for (w in fq.words) { if (hasWord(title, w)) score += 2 else if (hasWord(desc, w)) score += 1 }
+                    if (score == 0) continue
+                    fq.hits.add(longArrayOf(score.toLong(), start, end, Math.abs(start - fq.t)))
+                    fq.titles.add(titleRaw); fq.ids.add(id)
+                }
+            }
+        }
+        for (fq in qs) {
+            if (fq.hits.isEmpty()) continue
+            val order = fq.hits.indices.sortedWith(compareBy<Int>({ -fq.hits[it][0] }, { fq.hits[it][3] }))
+            val arr = JSONArray()
+            val seen = HashSet<String>()
+            for (i in order) {
+                if (!seen.add(fq.ids[i])) continue
+                arr.put(JSONArray().put(fq.ids[i]).put(fq.hits[i][0]).put(fq.hits[i][1]).put(fq.hits[i][2]).put(fq.titles[i]))
+                if (arr.length() >= 4) break
+            }
+            out.put(fq.key, arr)
+        }
+    }
+
     /** GET mit Weiterleitungen (auch http ↔ https). null = Server nicht erreichbar. */
     private fun providerFetch(address: String, agent: String): Pair<Int, HttpURLConnection>? {
         var url = URL(address)
@@ -1323,6 +1389,19 @@ class MainActivity : Activity() {
                 }
             } catch (e: Throwable) { }
             return out.toString()
+        }
+
+        /** Fußball: Spiele im gespeicherten Programm suchen. query = [{"k":"Spiel-ID","w":["bayern","dortmund"],"t":Anstoß-ms},…]
+         *  Läuft im Hintergrund; Antwort kommt über window.__androidEpgSearch(cb, {"Spiel-ID":[[epgId,Punkte,Start,Ende,"Titel"],…]}) */
+        @JavascriptInterface
+        fun epgSearch(query: String, cb: String) {
+            val map = epgMap
+            Thread {
+                val out = JSONObject()
+                try { epgSearchRun(map, query, out) } catch (e: Throwable) { }
+                val js = "window.__androidEpgSearch && window.__androidEpgSearch(" + JSONObject.quote(cb) + "," + JSONObject.quote(out.toString()) + ")"
+                handler.post { try { webView.evaluateJavascript(js, null) } catch (e: Throwable) { } }
+            }.start()
         }
 
         /** Programm komplett neu laden (XMLTV des Anbieters). ids: JSON-Liste der benötigten Sender */
