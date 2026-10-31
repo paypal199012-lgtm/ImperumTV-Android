@@ -31,19 +31,30 @@
 
     function fmtClock(date) { return pad2(date.getHours()) + ':' + pad2(date.getMinutes()); }
 
+    // Diese Daten hat jedes Profil für sich (Hauptprofil „p0“ nutzt die bisherigen Schlüssel)
+    var PROFILE_KEYS = { favs: 1, seen: 1, newEps: 1, resume: 1, kidsCats: 1 };
+    function profileKey(key) {
+        if (!PROFILE_KEYS[key] || !Profiles) return key;
+        var id = Profiles.curId();
+        return id && id !== 'p0' ? 'p.' + id + '.' + key : key;
+    }
     var Storage = {
         get: function (key, fallback) {
             try {
-                var v = localStorage.getItem('imptv.' + key);
+                var v = localStorage.getItem('imptv.' + profileKey(key));
                 return v === null ? fallback : JSON.parse(v);
             } catch (e) { return fallback; }
         },
         set: function (key, value) {
-            try { localStorage.setItem('imptv.' + key, JSON.stringify(value)); } catch (e) { /* voll oder gesperrt */ }
+            try { localStorage.setItem('imptv.' + profileKey(key), JSON.stringify(value)); } catch (e) { /* voll oder gesperrt */ }
         },
         remove: function (key) {
-            try { localStorage.removeItem('imptv.' + key); } catch (e) { /* egal */ }
-        }
+            try { localStorage.removeItem('imptv.' + profileKey(key)); } catch (e) { /* egal */ }
+        },
+        /** Direkt mit festem Schlüssel (ohne Profil) */
+        rawGet: function (k, fallback) { try { var v = localStorage.getItem('imptv.' + k); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; } },
+        rawSet: function (k, value) { try { localStorage.setItem('imptv.' + k, JSON.stringify(value)); } catch (e) { /* egal */ } },
+        rawRemove: function (k) { try { localStorage.removeItem('imptv.' + k); } catch (e) { /* egal */ } }
     };
 
     function b64(s) {
@@ -955,6 +966,93 @@
                 (found.length > 3 ? ' …' : '') + '  –  zu finden unter Serien → Neue Folgen', 9000);
             var top = Nav.top();
             if (top && top instanceof HomeScreen && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
+        }
+    };
+
+    // =====================================================================
+    // Profile: mehrere Personen auf einem Gerät (eigene Favoriten, Weiterschauen, Gesehen, neue Folgen)
+    // =====================================================================
+
+    var Profiles = {
+        COLORS: [['#e8c77c', '#8a6a2c', '#1a1408'], ['#c2185b', '#6a1b9a', '#fff'], ['#29b6f6', '#1565c0', '#fff'],
+                 ['#66bb6a', '#1b5e20', '#fff'], ['#ff8a65', '#bf360c', '#fff'], ['#9575cd', '#311b92', '#fff']],
+        KIDS: /(kids|kinder|kid\b|junior|cartoon|zeichentrick|disney|nick|toon|famil|baby|kika|super\s*rtl|anima)/i,
+        data: null,
+        load: function () {
+            if (!this.data) {
+                var d = Storage.rawGet('profiles', null);
+                this.data = (d && Array.isArray(d.list)) ? d : { list: [], cur: 'p0', ask: true, next: 1 };
+            }
+            return this.data;
+        },
+        save: function () { Storage.rawSet('profiles', this.data); },
+        list: function () { return this.load().list; },
+        count: function () { return this.list().length; },
+        byId: function (id) { var l = this.list(); for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; },
+        cur: function () { return this.count() ? (this.byId(this.load().cur) || this.list()[0]) : null; },
+        curId: function () { var c = this.data ? this.cur() : (this.load(), this.cur()); return c ? c.id : 'p0'; },
+        isKids: function () { var c = this.cur(); return !!(c && c.kids); },
+        askOnStart: function () { return this.count() >= 2 && this.load().ask !== false; },
+        colors: function (p) { return this.COLORS[(p && p.color || 0) % this.COLORS.length]; },
+        /** Runder Kreis mit Anfangsbuchstabe (Kinder: Smiley) */
+        avatar: function (p, cls) {
+            var c = this.colors(p), a = h('div', 'pf-av' + (cls ? ' ' + cls : ''));
+            a.style.background = 'linear-gradient(135deg,' + c[0] + ',' + c[1] + ')';
+            a.style.color = c[2];
+            a.textContent = p.kids ? '☺' : (String(p.name || '?').charAt(0).toUpperCase() || '?');
+            return a;
+        },
+        /** Profil wechseln: Zwischenspeicher leeren, damit Favoriten usw. des neuen Profils gelten */
+        use: function (id) {
+            this.load().cur = id;
+            this.save();
+            Favs.load();
+            Seen.cache = null; Resume.cache = null; NewEps.raw = null;
+            Parental.lock();
+        },
+        add: function (name, kids) {
+            var d = this.load();
+            if (!d.list.length) d.list.push({ id: 'p0', name: 'Ich', color: 0 });
+            var id = 'p' + (d.next || 1);
+            d.next = (d.next || 1) + 1;
+            var p = { id: id, name: name, color: d.list.length % this.COLORS.length, kids: !!kids };
+            d.list.push(p);
+            this.save();
+            return p;
+        },
+        update: function (id, fields) { var p = this.byId(id); if (!p) return; for (var k in fields) if (fields.hasOwnProperty(k)) p[k] = fields[k]; this.save(); },
+        remove: function (id) {
+            if (id === 'p0') return;
+            var d = this.load();
+            d.list = d.list.filter(function (p) { return p.id !== id; });
+            Object.keys(PROFILE_KEYS).forEach(function (k) { Storage.rawRemove('p.' + id + '.' + k); });
+            if (d.list.length === 1) d.list = [];          // nur noch ein Profil: Auswahl verschwindet wieder
+            if (d.cur === id) d.cur = 'p0';
+            this.save();
+            this.use(d.cur);
+        },
+        /** Kinder-Profil: erlaubte Kategorien (eigene Auswahl, sonst automatisch nach dem Namen) */
+        kidsCatsOf: function (id) { var l = Storage.rawGet(id === 'p0' ? 'kidsCats' : 'p.' + id + '.kidsCats', null); return Array.isArray(l) ? l : null; },
+        setKidsCats: function (id, list) { Storage.rawSet(id === 'p0' ? 'kidsCats' : 'p.' + id + '.kidsCats', list); },
+        kidAllowedFor: function (id, kind, cat) {
+            if (!cat || Parental.ADULT.test(cat)) return false;
+            var l = this.kidsCatsOf(id);
+            return l ? l.indexOf(kind + ':' + cat) >= 0 : this.KIDS.test(cat);
+        },
+        kidAllowed: function (kind, cat) {
+            if (!this.isRealCat(kind, cat)) return true;       // „Alle“, „★ Favoriten“ usw. zeigen ohnehin nur Freigegebenes
+            var c = this.cur(); return this.kidAllowedFor(c ? c.id : 'p0', kind, cat);
+        },
+        /** Echte Kategorie des Anbieters (nicht „Alle“, „★ Favoriten“, „Neue Folgen“ …)? */
+        isRealCat: function (kind, cat) {
+            var list = kind === 'live' ? Data.channels : kind === 'movie' ? Data.movies : Data.series;
+            if (!this._real) this._real = {};
+            var r = this._real[kind];
+            if (!r || r.list !== list || r.len !== list.length) {
+                var m = {}; list.forEach(function (it) { if (it.cat) m[it.cat] = 1; });
+                r = this._real[kind] = { list: list, len: list.length, m: m };
+            }
+            return !!r.m[cat];
         }
     };
 
@@ -2865,7 +2963,9 @@
         scroll.appendChild(h('div', 'col-head', 'Kategorien'));
         var kind = search && search.kind;
         var counts = search && search.counts;               // Anzahl je Kategorie (gleiche Reihenfolge wie cats)
+        var kidsHide = kind && Profiles.isKids();
         cats.forEach(function (name, i) {
+            if (kidsHide && Parental.catProtected(kind, name)) return;     // Kinder-Profil: nicht freigegebene Kategorien gar nicht zeigen
             var item = h('div', 'cat' + (i === activeIndex ? ' active' : ''));
             if (kind && Parental.catProtected(kind, name)) {
                 item.classList.add('locked');
@@ -3568,17 +3668,19 @@
         unlockedUntil: 0,
         lastReset: undefined,     // letzter Stand von der Website (undefined = noch unbekannt)
 
-        enabled: function () { return !!Storage.get('parentalPin', ''); },
+        enabled: function () { return Profiles.isKids() || !!Storage.get('parentalPin', ''); },
+        hasPin: function () { return !!Storage.get('parentalPin', ''); },
         hash: function (pin) { return 'p' + hash32('imperum-pin:' + pin + ':' + Device.key, 7).toString(16); },
         check: function (pin) { return this.hash(pin) === Storage.get('parentalPin', ''); },
         autoAdult: function () { return Storage.get('parentalAdult', true) !== false; },
         cats: function () { var c = Storage.get('parentalCats', []); return Array.isArray(c) ? c : []; },
-        unlocked: function () { return Date.now() < this.unlockedUntil; },
+        unlocked: function () { return !Profiles.isKids() && Date.now() < this.unlockedUntil; },
         lock: function () { this.unlockedUntil = 0; },
         unlock: function () { this.unlockedUntil = Date.now() + 60 * 60 * 1000; },   // 1 Stunde frei
 
         /** Ist diese Kategorie geschützt? kind: 'live', 'movie' oder 'series' */
         catProtected: function (kind, cat) {
+            if (Profiles.isKids()) return !Profiles.kidAllowed(kind, cat);
             if (!cat || !this.enabled()) return false;
             if (this.autoAdult() && this.ADULT.test(cat)) return true;
             return this.cats().indexOf(kind + ':' + cat) >= 0;
@@ -3628,6 +3730,7 @@
         /** PIN abfragen, dann onOk. Ohne Kindersicherung oder bereits geöffnet: sofort. */
         ask: function (title, onOk, force) {
             var self = this;
+            if (Profiles.isKids()) { toast('Im Kinder-Profil nicht verfügbar.'); return; }
             if (!this.enabled() || (!force && this.unlocked())) { onOk(); return; }
             pinDialog(title || 'PIN eingeben', 'Diese Inhalte sind mit der Kindersicherung geschützt.', function (pin, fail) {
                 if (!self.check(pin)) { fail('Falsche PIN. Bitte noch einmal.'); return false; }
@@ -3787,8 +3890,19 @@
             btns.appendChild(focusable(node, 'home-top-' + b[0], b[2], 'topbtns'));
         });
         head.appendChild(btns);
+        var me = Profiles.count() >= 2 ? Profiles.cur() : null;
+        if (me) {
+            var chip = h('div', 'pf-chip');
+            chip.appendChild(Profiles.avatar(me, 'small'));
+            var ct = h('div', 'pf-chip-t', me.name);
+            ct.appendChild(h('small', null, 'Profil wechseln'));
+            chip.appendChild(ct);
+            head.appendChild(focusable(chip, 'home-top-profile', function () {
+                Nav.push(new WhoScreen(function () { Nav.stack.length = 0; Nav.push(new HomeScreen()); }, true));
+            }, 'topbtns'));
+        }
         var vpn = OVpn.badge();
-        if (vpn) head.appendChild(vpn);
+        if (vpn) { if (me) vpn.classList.add('below'); head.appendChild(vpn); }
         root.appendChild(head);
 
         var circles = h('div', 'home-circles');
@@ -3816,7 +3930,7 @@
             ['search', 'search', 'SUCHE', function () { Nav.push(new SearchScreen()); }]
         );
         if (Rec.available()) tileList.push(['recs', 'rec', 'AUFNAHMEN', function () { Nav.push(new RecordingsScreen()); }]);
-        tileList.push(
+        if (!Profiles.isKids()) tileList.push(           // Kinder-Profil: keine Einstellungen, keine Listen
             ['account', 'user', 'KONTO', function () { Nav.push(new AccountScreen()); }],
             ['settings', 'gear', 'EINSTELLUNGEN', function () { Nav.push(new SettingsScreen()); }],
             ['lists', 'list', 'LISTEN', function () { Nav.push(new PlaylistsScreen()); }]
@@ -5369,11 +5483,12 @@
         var start = Math.max(0, Math.min(this.catIndex - 2, cats.length - 12));
         var buttons = cats.slice(start, start + 12).map(function (name, i) {
             var prot = Parental.catProtected('live', name);
+            if (prot && Profiles.isKids()) return null;
             return { label: (prot ? '[PIN] ' : '') + name, primary: start + i === self.catIndex, action: function () {
                 function go() { self.catIndex = start + i; self.chIndex = 0; self.rowTop = 0; self.col = 'prog'; Nav.show(self); }
                 if (Parental.catLocked('live', name)) Parental.ask('PIN für „' + name + '“', go); else go();
             } };
-        });
+        }).filter(function (b) { return !!b; });
         if (start + 12 < cats.length) buttons.push({ label: 'Weitere …', action: function () { self.catIndex = Math.min(cats.length - 1, start + 12); self.chooseCategory(); } });
         Modal.open('Kategorie wählen', '', buttons);
         if (Modal.node) Modal.node.classList.add('modal-list');
@@ -5573,6 +5688,9 @@
             return r;
         }
         row('reload', 'Alles neu laden', 'Sender, Filme und Serien neu vom Anbieter holen', function () { reloadAll(); });
+        if (!Profiles.isKids()) {
+            row('profiles', 'Profile', Profiles.count() ? Profiles.count() + ' Profile · aktiv: ' + Profiles.cur().name : 'Mehrere Personen auf diesem Gerät', function () { Nav.push(new ProfilesScreen()); });
+        }
         row('format', 'Live-Format', Settings.liveExt.toUpperCase(), function (v) {
             Settings.setLiveExt(Settings.liveExt === 'ts' ? 'm3u8' : 'ts');
             v.textContent = Settings.liveExt.toUpperCase();
@@ -5676,6 +5794,273 @@
             'PIN vergessen? Dein Anbieter kann sie für die MAC-Adresse ' + Device.macText() + ' zurücksetzen.'));
         root.appendChild(box);
         if (!this.focusKey) this.focusKey = 'par-adult';
+    };
+
+
+    // =====================================================================
+    // Profile: „Wer schaut?“, Profil anlegen, Profile verwalten
+    // =====================================================================
+
+    /** Texteingabe mit Bildschirm-Tastatur (z. B. Profilname) */
+    function textDialog(title, text, initial, onDone) {
+        var box = h('div', 'modal-box kbd-box');
+        box.appendChild(h('div', 'modal-title', title));
+        if (text) box.appendChild(h('div', 'modal-text', text));
+        var input = h('input', 'input search-input');
+        input.type = 'text';
+        input.maxLength = 20;
+        input.value = initial || '';
+        input.placeholder = 'Name …';
+        input.setAttribute('autocomplete', 'off');
+        focusable(input, 'td-input', null, 'searchbox');
+        box.appendChild(input);
+        var kb = Keyboard.build(input, 'td');
+        box.appendChild(kb);
+        var row = h('div', 'modal-buttons');
+        function btn(label, primary, action) {
+            var b = h('div', 'button' + (primary ? ' primary' : ''), label);
+            focusable(b, 'td-' + label, function () { action(); }, 'dialog');
+            row.appendChild(b);
+        }
+        btn('Fertig', true, function () {
+            var v = input.value.replace(/\s+/g, ' ').trim();
+            if (!v) { toast('Bitte einen Namen eingeben.'); return; }
+            v = v.charAt(0).toUpperCase() + v.slice(1);
+            Modal.close();
+            onDone(v);
+        });
+        btn('Abbrechen', false, function () { Modal.close(); });
+        box.appendChild(row);
+        Modal.openBox(box, Keyboard.first(kb));
+    }
+
+    /** Neue PIN zweimal abfragen. onPin(hash) */
+    function profilePinFlow(name, onPin) {
+        pinDialog('PIN für „' + name + '“', 'Neue 4-stellige PIN eingeben.', function (pin) {
+            setTimeout(function () {
+                pinDialog('PIN wiederholen', 'Zur Sicherheit noch einmal.', function (pin2, fail) {
+                    if (pin2 !== pin) { fail('Die PINs sind verschieden. Bitte noch einmal.'); return false; }
+                    onPin(Parental.hash(pin));
+                    return true;
+                });
+            }, 50);
+            return true;
+        });
+    }
+
+    /** Neues Profil anlegen (beim ersten Mal wird auch dein Hauptprofil benannt). done(profil) */
+    function addProfileFlow(done) {
+        function create() {
+            textDialog('Neues Profil', 'Wie heißt die Person?', '', function (name) {
+                setTimeout(function () {
+                    Modal.open('Was für ein Profil?', '„' + name + '“ bekommt eigene Favoriten, Weiterschauen und Gesehen-Haken.', [
+                        { label: 'Normales Profil', primary: true, action: function () { done(Profiles.add(name, false)); } },
+                        { label: 'Kinder-Profil', action: function () {
+                            var p = Profiles.add(name, true);
+                            toast('Kinder-Profil: nur Kinder-Kategorien. Anpassen unter Einstellungen → Profile.', 7000);
+                            done(p);
+                        } },
+                        { label: 'Abbrechen' }
+                    ]);
+                }, 50);
+            });
+        }
+        if (Profiles.count()) { create(); return; }
+        // Erstes Mal: dein bisheriges Profil bekommt einen Namen (deine Favoriten usw. bleiben dort)
+        textDialog('Dein Profil', 'Wie heißt du? Deine bisherigen Favoriten und „Weiterschauen“ bleiben in deinem Profil.', '', function (me) {
+            var d = Profiles.load();
+            if (!d.list.length) d.list.push({ id: 'p0', name: me, color: 0 });
+            Profiles.save();
+            setTimeout(create, 50);
+        });
+    }
+
+    /** Profil öffnen – mit PIN, falls gesetzt; aus dem Kinder-Profil heraus nur mit der Kindersicherungs-PIN */
+    function openProfile(p, onOk) {
+        var cur = Profiles.cur();
+        function pinOf() {
+            if (!p.pin) { Profiles.use(p.id); onOk(); return; }
+            pinDialog('PIN für „' + p.name + '“', 'Dieses Profil ist mit einer PIN geschützt.', function (pin, fail) {
+                if (Parental.hash(pin) !== p.pin) { fail('Falsche PIN. Bitte noch einmal.'); return false; }
+                setTimeout(function () { Profiles.use(p.id); onOk(); }, 0);
+                return true;
+            });
+        }
+        if (cur && cur.kids && cur.id !== p.id && Parental.hasPin()) {
+            pinDialog('Kinder-Profil verlassen', 'Bitte die PIN der Kindersicherung eingeben.', function (pin, fail) {
+                if (!Parental.check(pin)) { fail('Falsche PIN. Bitte noch einmal.'); return false; }
+                setTimeout(pinOf, 50);
+                return true;
+            });
+            return;
+        }
+        pinOf();
+    }
+
+    /** „Wer schaut?“ – onDone() wenn ein Profil gewählt ist. switching: vom Startbildschirm aus geöffnet */
+    function WhoScreen(onDone, switching) { this.onDone = onDone; this.switching = !!switching; this.lastBack = 0; }
+    WhoScreen.prototype.render = function (root) {
+        var self = this;
+        var wrap = h('div', 'pf');
+        var logo = h('img', 'pf-logo');
+        logo.src = 'img/logo-frei.png';
+        wrap.appendChild(logo);
+        wrap.appendChild(h('div', 'pf-title', 'Wer schaut?'));
+        var row = h('div', 'pf-row');
+        var cur = Profiles.cur();
+        Profiles.list().forEach(function (p) {
+            var item = h('div', 'pf-item' + (p.kids ? ' kids' : ''));
+            item.appendChild(Profiles.avatar(p));
+            if (p.kids) item.appendChild(h('span', 'pf-tag', 'KIDS'));
+            var name = h('div', 'pf-name', p.name);
+            if (p.pin) name.appendChild(h('span', 'pf-lock', ' 🔒'));
+            item.appendChild(name);
+            item.appendChild(h('div', 'pf-sub', p.kids ? 'Kinder-Profil' : (p.pin ? 'mit PIN' : (p.id === (cur && cur.id) ? 'zuletzt benutzt' : ''))));
+            row.appendChild(focusable(item, 'pf-' + p.id, function () { openProfile(p, function () { self.onDone(); }); }, 'pf'));
+        });
+        if (!Profiles.isKids()) {
+            var add = h('div', 'pf-item pf-add');
+            add.appendChild(h('div', 'pf-av', '+'));
+            add.appendChild(h('div', 'pf-name', 'Profil hinzufügen'));
+            row.appendChild(focusable(add, 'pf-add', function () {
+                addProfileFlow(function () { Nav.show(self); });
+            }, 'pf'));
+        }
+        wrap.appendChild(row);
+        wrap.appendChild(h('div', 'pf-hint', 'Jedes Profil hat eigene Favoriten, „Weiterschauen“, Gesehen-Haken und Hinweise auf neue Folgen.'));
+        root.appendChild(wrap);
+        if (!this.focusKey) this.focusKey = 'pf-' + (cur ? cur.id : 'p0');
+    };
+    WhoScreen.prototype.onRootBack = function () {
+        if (WEBOS) { exitApp(); return; }
+        var now = Date.now();
+        if (now - this.lastBack < 3000) { exitApp(); return; }
+        this.lastBack = now;
+        toast('Zum Beenden noch einmal Zurück drücken');
+    };
+
+    /** Einstellungen → Profile */
+    function ProfilesScreen() { }
+    ProfilesScreen.prototype.render = function (root) {
+        var self = this;
+        root.appendChild(topbar('Profile', 'OK: bearbeiten'));
+        var box = h('div', 'settings vscroll');
+        function row(key, label, value, action, avatarOf) {
+            var r = h('div', 'set-row' + (avatarOf ? ' pf-set-row' : ''));
+            if (avatarOf) r.appendChild(Profiles.avatar(avatarOf, 'small'));
+            r.appendChild(h('div', 'set-label', label));
+            r.appendChild(h('div', 'set-value', value || ''));
+            focusable(r, 'pfs-' + key, function () { self.focusKey = 'pfs-' + key; action(); }, 'setlist');
+            box.appendChild(r);
+        }
+        var cur = Profiles.cur();
+        Profiles.list().forEach(function (p) {
+            var bits = [];
+            if (p.id === 'p0') bits.push('Hauptprofil');
+            if (p.kids) bits.push('Kinder-Profil');
+            if (p.pin) bits.push('PIN');
+            if (cur && cur.id === p.id) bits.push('aktiv');
+            row(p.id, p.name, bits.join(' · '), function () { self.edit(p); }, p);
+        });
+        row('add', '+ Profil hinzufügen', Profiles.count() ? '' : 'Dein Profil wird dabei zum Hauptprofil', function () {
+            addProfileFlow(function () { Nav.show(self); });
+        });
+        if (Profiles.count() >= 2) {
+            row('ask', '„Wer schaut?“ beim Start', Profiles.load().ask !== false ? 'An' : 'Aus · startet mit dem zuletzt benutzten Profil', function () {
+                var d = Profiles.load(); d.ask = d.ask === false; Profiles.save(); Nav.show(self);
+            });
+        }
+        box.appendChild(h('div', 'set-note', 'Jedes Profil hat eigene Favoriten, „Weiterschauen“, Gesehen-Haken und Hinweise auf neue Folgen. ' +
+            'Wiedergabeliste, VPN und Einstellungen gelten für alle. Ein Kinder-Profil zeigt nur freigegebene Kategorien; ' +
+            'ist die Kindersicherung an, braucht man zum Verlassen des Kinder-Profils deren PIN.'));
+        root.appendChild(box);
+        if (!this.focusKey) this.focusKey = 'pfs-' + (cur ? cur.id : 'add');
+    };
+    ProfilesScreen.prototype.edit = function (p) {
+        var self = this, buttons = [];
+        buttons.push({ label: 'Umbenennen', primary: true, action: function () {
+            setTimeout(function () { textDialog('Profil umbenennen', '', p.name, function (n) { Profiles.update(p.id, { name: n }); Nav.show(self); }); }, 50);
+        } });
+        buttons.push({ label: 'Farbe ändern', action: function () { Profiles.update(p.id, { color: ((p.color || 0) + 1) % Profiles.COLORS.length }); Nav.show(self); } });
+        if (p.pin) buttons.push({ label: 'PIN entfernen', action: function () { Profiles.update(p.id, { pin: '' }); toast('PIN entfernt.'); Nav.show(self); } });
+        else buttons.push({ label: 'PIN festlegen', action: function () {
+            setTimeout(function () { profilePinFlow(p.name, function (hsh) { Profiles.update(p.id, { pin: hsh }); toast('PIN gespeichert.'); Nav.show(self); }); }, 50);
+        } });
+        if (p.kids) {
+            buttons.push({ label: 'Kinder-Kategorien: Live TV', action: function () { Nav.push(new KidsCatsScreen(p.id, 'live')); } });
+            buttons.push({ label: 'Kinder-Kategorien: Filme', action: function () { Nav.push(new KidsCatsScreen(p.id, 'movie')); } });
+            buttons.push({ label: 'Kinder-Kategorien: Serien', action: function () { Nav.push(new KidsCatsScreen(p.id, 'series')); } });
+        }
+        if (p.id !== 'p0') buttons.push({ label: 'Profil löschen', action: function () {
+            setTimeout(function () {
+                Modal.open('„' + p.name + '“ löschen?', 'Favoriten, Weiterschauen und Gesehen-Haken dieses Profils werden gelöscht.', [
+                    { label: 'Löschen', primary: true, action: function () { Profiles.remove(p.id); toast('Profil gelöscht.'); Nav.show(self); } },
+                    { label: 'Abbrechen' }
+                ]);
+            }, 50);
+        } });
+        buttons.push({ label: 'Schließen' });
+        Modal.open(p.name, p.id === 'p0' ? 'Hauptprofil – kann nicht gelöscht werden.' : '', buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+    };
+
+    /** Kinder-Profil: Kategorien freigeben (ohne eigene Auswahl: automatisch nach dem Namen) */
+    function KidsCatsScreen(id, kind) { this.id = id; this.kind = kind; }
+    KidsCatsScreen.prototype.render = function (root) {
+        var self = this, kind = this.kind, id = this.id;
+        var p = Profiles.byId(id) || { name: '' };
+        var what = kind === 'live' ? 'Live TV' : kind === 'movie' ? 'Filme' : 'Serien';
+        root.appendChild(topbar('Kinder-Kategorien · ' + what, p.name + ' sieht nur freigegebene Kategorien · OK: freigeben / sperren'));
+        var list = kind === 'live' ? Data.channels : kind === 'movie' ? Data.movies : Data.series;
+        var loaded = kind === 'live' || (kind === 'movie' ? Data.moviesLoaded : Data.seriesLoaded);
+        if (!loaded) {
+            loader(true, (kind === 'movie' ? 'Filme' : 'Serien') + ' werden geladen …');
+            (kind === 'movie' ? Data.loadMovies() : Data.loadSeries()).then(function () {
+                loader(false);
+                if (Nav.top() === self) Nav.show(self);
+            }, function (e) { loader(false); toast(e.message || String(e), 6000); });
+            return;
+        }
+        var seen = {}, cats = [];
+        list.forEach(function (it) { if (it.cat && !seen[it.cat]) { seen[it.cat] = true; cats.push(it.cat); } });
+        var col = h('div', 'col col-list par-cats');
+        var scroll = h('div', 'scroll');
+        col.appendChild(scroll);
+        root.appendChild(col);
+        var auto = !Profiles.kidsCatsOf(id);
+        scroll.appendChild(h('div', 'empty-note kids-note', auto ? 'Noch automatisch: freigegeben sind Kategorien mit „Kids“, „Kinder“, „Disney“, „Cartoon“ … im Namen. Mit OK änderst du die Auswahl.' : 'Eigene Auswahl. Erwachsenen-Kategorien sind immer gesperrt.'));
+        if (!cats.length) scroll.appendChild(h('div', 'empty-note', 'Keine Kategorien gefunden.'));
+        batchRender(scroll, cats, function (cat, i) {
+            var r = h('div', 'row par-row');
+            var mark = h('div', 'par-mark');
+            var note = h('div', 'par-note', '');
+            function draw() {
+                var ok = Profiles.kidAllowedFor(id, kind, cat);
+                mark.innerHTML = ok ? '✓' : '';
+                r.classList.toggle('on', ok);
+                note.textContent = Parental.ADULT.test(cat) ? 'immer gesperrt' : (ok ? 'freigegeben' : '');
+            }
+            r.appendChild(mark);
+            r.appendChild(h('div', 'name', cat));
+            r.appendChild(note);
+            draw();
+            return focusable(r, 'kc-' + i, function () {
+                if (Parental.ADULT.test(cat)) { toast('Erwachsenen-Kategorien bleiben im Kinder-Profil gesperrt.'); return; }
+                var l = Profiles.kidsCatsOf(id);
+                if (!l) {      // erste Änderung: automatische Auswahl (alle Arten) als Startpunkt übernehmen
+                    l = [];
+                    [['live', Data.channels], ['movie', Data.movies], ['series', Data.series]].forEach(function (x) {
+                        var s2 = {};
+                        (x[1] || []).forEach(function (it) { if (it.cat && !s2[it.cat]) { s2[it.cat] = 1; if (Profiles.kidAllowedFor(id, x[0], it.cat)) l.push(x[0] + ':' + it.cat); } });
+                    });
+                }
+                var k = kind + ':' + cat, at = l.indexOf(k);
+                if (at >= 0) l.splice(at, 1); else l.push(k);
+                Profiles.setKidsCats(id, l);
+                draw();
+            }, 'list');
+        }, 80);
+        if (!this.focusKey) this.focusKey = 'kc-0';
     };
 
     /** Kategorien zum Sperren an- und abhaken */
@@ -6552,6 +6937,10 @@
             });
         }
 
+        if (Profiles.askOnStart()) Nav.replace(new WhoScreen(loadLists));
+        else loadLists();
+
+        function loadLists() {
         loader(true, 'Wiedergabelisten werden geladen …');
         Remote.load().then(function () {
             loader(false);
@@ -6568,6 +6957,7 @@
             if (lastId !== null && saved && saved.server && saved.username && saved.password) start(saved);
             else Nav.replace(new PlaylistsScreen(e.message || String(e)));
         });
+        }
 
         // Läuft die Testphase während der Nutzung ab: alle 10 Minuten nachsehen
         setInterval(function () {
