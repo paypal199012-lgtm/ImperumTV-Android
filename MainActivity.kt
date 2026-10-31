@@ -40,6 +40,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
@@ -212,8 +213,18 @@ class MainActivity : Activity() {
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         // Standard-Einstellungen für TS-Sender (Sonder-Flags ließen auf manchen Fire-TV-Chips das Bild hängen)
         val extractors = DefaultExtractorsFactory()
+        // Schneller Start: schon nach 1 s Video loslegen (Standard 2,5 s), nach einem Hänger nach 2 s (Standard 5 s).
+        // Der große Vorrat (bis 50 s) bleibt, damit es danach nicht öfter nachlädt.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                1_000,
+                2_000)
+            .build()
         player = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors))
+            .setLoadControl(loadControl)
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
