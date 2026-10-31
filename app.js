@@ -312,6 +312,7 @@
             if (finished) return;
             finished = true;
             setTimeout(function () { Epg.sync(false); }, skipped ? 15000 : 6000);   // Programm erst nach den Listen
+            setTimeout(function () { NewEps.check(); }, skipped ? 25000 : 12000);   // neue Folgen bei verfolgten Serien
             if (skipped) { Sync.hide(); onOk(); return; }
             Sync.finish(mvOk && srOk ? 'Alles aktuell' : 'Live TV ist bereit', onOk, 1100);
         }
@@ -816,6 +817,128 @@
             }
             this.cache = all;
             Storage.set('seen', all);
+        },
+        /** Filme: eigener Schlüssel, damit sich Film- und Folgen-Nummern nicht in die Quere kommen */
+        movieId: function (id) { return 'mv' + id; },
+        movie: function (id) { var e = this.get(this.movieId(id)); return e && e.d ? e : null; },
+        /** Film von Hand als gesehen / ungesehen markieren */
+        setMovie: function (id, done) {
+            if (done) { this.mark(this.movieId(id), 1, true); return; }
+            var all = this.raw();
+            delete all[this.key(this.movieId(id))];
+            this.cache = all;
+            Storage.set('seen', all);
+        },
+        dateText: function (e) {
+            if (!e || !e.at) return '';
+            var d = new Date(e.at), months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+            return d.getDate() + '. ' + months[d.getMonth()] + (d.getFullYear() !== new Date().getFullYear() ? ' ' + d.getFullYear() : '');
+        }
+    };
+
+    /**
+     * Neue Folgen bei Serien, die man schaut (angefangen oder Favorit).
+     * Nach dem Abgleich wird für diese Serien nachgesehen, ob der Anbieter Folgen dazugelegt hat
+     * (nur wenn sich „zuletzt geändert“ verschoben hat). Beim ersten Mal wird nur der Stand gemerkt.
+     */
+    var NewEps = {
+        MAX_SERIES: 30, KEEP_DAYS: 14, raw: null, running: false,
+        load: function () {
+            if (!this.raw) { var o = Storage.get('newEps', {}); this.raw = (o && typeof o === 'object' && !Array.isArray(o)) ? o : {}; }
+            return this.raw;
+        },
+        save: function () { Storage.set('newEps', this.raw); },
+        key: function (sid) { return Resume.accKey() + '|' + sid; },
+        byId: function () {
+            if (this._byIdOf !== Data.series) {
+                var m = {}; Data.series.forEach(function (x) { m[String(x.id)] = x; });
+                this._byId = m; this._byIdOf = Data.series;
+            }
+            return this._byId;
+        },
+        tracked: function () {
+            var ids = {}, out = [], byId = this.byId();
+            Resume.all().forEach(function (e) { if (e.kind === 'episode' && e.series) ids[String(e.series.id)] = 1; });
+            for (var k in Favs.set) if (Favs.set.hasOwnProperty(k) && k.indexOf('series:') === 0) ids[k.slice(7)] = 1;
+            Object.keys(ids).forEach(function (id) { if (byId[id]) out.push(byId[id]); });
+            return out.slice(0, this.MAX_SERIES);
+        },
+        /** Neue, noch nicht gesehene Folgen einer Serie: [{id, s, n, at}] */
+        fresh: function (sid) {
+            var e = this.load()[this.key(sid)];
+            if (!e || !e.fresh) return [];
+            var out = [], now = Date.now(), keep = this.KEEP_DAYS * 864e5;
+            for (var id in e.fresh) {
+                if (!e.fresh.hasOwnProperty(id)) continue;
+                var f = e.fresh[id], sn = Seen.get(id);
+                if (now - f.at > keep || (sn && sn.d)) continue;
+                out.push({ id: id, s: f.s, n: f.n, at: f.at });
+            }
+            out.sort(function (a, b) { return a.s - b.s || a.n - b.n; });
+            return out;
+        },
+        isFresh: function (sid, epId) {
+            var list = this.fresh(sid);
+            for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(epId)) return list[i];
+            return null;
+        },
+        /** Serien (der aktuellen Liste) mit neuen Folgen, neueste zuerst */
+        series: function () {
+            var acc = Resume.accKey() + '|', all = this.load(), byId = this.byId(), out = [];
+            for (var k in all) {
+                if (!all.hasOwnProperty(k) || k.indexOf(acc) !== 0) continue;
+                var sid = k.slice(acc.length), s = byId[sid];
+                if (!s) continue;
+                var f = this.fresh(sid);
+                if (f.length) out.push({ s: s, at: f[f.length - 1].at });
+            }
+            out.sort(function (a, b) { return b.at - a.at; });
+            return out.map(function (x) { return x.s; });
+        },
+        label: function (list) {
+            if (!list.length) return '';
+            var a = list[0], b = list[list.length - 1];
+            if (list.length === 1) return 'S' + a.s + ' F' + a.n;
+            return a.s === b.s ? 'S' + a.s + ' F' + a.n + '–F' + b.n : 'S' + a.s + ' F' + a.n + ' … S' + b.s + ' F' + b.n;
+        },
+        check: function () {
+            if (this.running || !Api.acc || Api.acc.demo || !Data.seriesLoaded || safeMode()) return;
+            var self = this, list = this.tracked(), store = this.load(), i = 0, found = [];
+            if (!list.length) return;
+            this.running = true;
+            function next() {
+                if (i >= list.length) {
+                    self.running = false;
+                    self.save();
+                    self.finished(found);
+                    return;
+                }
+                var s = list[i++], k = self.key(s.id), e = store[k];
+                if (e && s.added && e.lm === s.added) { next(); return; }      // beim Anbieter unverändert
+                Data.seriesDetails(s.id).then(function (res) {
+                    var ids = res.episodes.map(function (x) { return String(x.id); });
+                    if (!e) { store[k] = { lm: s.added || 0, known: ids, fresh: {} }; return; }   // erstes Mal: Stand merken
+                    var known = {};
+                    (e.known || []).forEach(function (x) { known[x] = 1; });
+                    var added = res.episodes.filter(function (x) { return !known[String(x.id)]; });
+                    e.fresh = e.fresh || {};
+                    added.forEach(function (x) { e.fresh[String(x.id)] = { s: x.season, n: x.num, at: Date.now() }; });
+                    // Alte Einträge aufräumen
+                    for (var fid in e.fresh) if (e.fresh.hasOwnProperty(fid) && Date.now() - e.fresh[fid].at > self.KEEP_DAYS * 864e5) delete e.fresh[fid];
+                    e.known = ids;
+                    e.lm = s.added || 0;
+                    if (added.length) found.push(s);
+                }, function () { /* Serie gerade nicht abrufbar */ }).then(function () { setTimeout(next, 400); });
+            }
+            next();
+        },
+        finished: function (found) {
+            if (!found.length) return;
+            var parts = found.slice(0, 3).map(function (s) { return s.name + ' (' + NewEps.label(NewEps.fresh(s.id)) + ')'; });
+            toast('Neue Folgen bei ' + found.length + (found.length === 1 ? ' Serie: ' : ' Serien: ') + parts.join(' · ') +
+                (found.length > 3 ? ' …' : '') + '  –  zu finden unter Serien → Neue Folgen', 9000);
+            var top = Nav.top();
+            if (top && top instanceof HomeScreen && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
         }
     };
 
@@ -883,10 +1006,9 @@
             var it = items[index];
             if (!it || it.type === 'recording' || it.url) return;
             var done = ended || (dur > 60 && (pos >= dur * 0.95 || dur - pos < 60));
-            if (kind === 'episode') {
-                if (done) Seen.mark(it.id, 1, true);
-                else if (dur > 60 && pos >= 30) Seen.mark(it.id, pos / dur, false);
-            }
+            var seenId = kind === 'episode' ? it.id : Seen.movieId(it.id);
+            if (done) Seen.mark(seenId, 1, true);
+            else if (dur > 60 && pos >= 30) Seen.mark(seenId, pos / dur, false);
             if (done) {
                 var next = kind === 'episode' ? items[index + 1] : null;
                 if (next) this.save('episode', next, 0, 0, true);
@@ -2723,11 +2845,22 @@
         if (item.type === 'movie') { e = Resume.forItem('movie', item); if (e && e.pos < 30) e = null; }
         else if (item.type === 'series') e = Resume.forSeries(item.id);
         if (e && !e.next) img.appendChild(progressNode(Resume.part(e)));
+        // Film schon gesehen: Haken; Serie mit neuen Folgen: „+2 NEU“
+        if (item.type === 'movie' && !e && Seen.movie(item.id)) {
+            node.classList.add('seen');
+            img.appendChild(h('div', 'seen-chk', '✓'));
+            img.appendChild(h('div', 'seen-lbl', 'GESEHEN'));
+        }
+        var fresh = item.type === 'series' ? NewEps.fresh(item.id) : [];
+        if (fresh.length) img.appendChild(h('div', 'new-badge', '+' + fresh.length + ' NEU'));
         node.appendChild(img);
         node.appendChild(h('div', 'title', item.name));
         var favType = item.type === 'live' ? 'live' : item.type === 'movie' ? 'movie' : item.type === 'series' ? 'series' : null;
         if (favType) node._onLong = function () { favToggleNode(node, favType, item); };
-        if (e && item.type === 'series') {
+        if (fresh.length) {
+            node.classList.add('has-sub');
+            node.appendChild(h('div', 'sub new', 'Neu: ' + NewEps.label(fresh)));
+        } else if (e && item.type === 'series') {
             node.classList.add('has-sub');
             node.appendChild(h('div', 'sub', 'S' + e.season + ' F' + (e.num || '?') + ' · ' + Resume.leftText(e)));
         }
@@ -3486,6 +3619,10 @@
         ].forEach(function (c) {
             var node = h('div', 'circle');
             node.innerHTML = '<div class="icon">' + icon(c[1], 120) + '</div><div class="label">' + c[2] + '</div>';
+            if (c[0] === 'series' && Data.seriesLoaded) {
+                var nNew = NewEps.series().length;
+                if (nNew) node.appendChild(h('span', 'circle-nb', String(nNew)));
+            }
             circles.appendChild(focusable(node, 'home-' + c[0], c[3], 'circles'));
         });
         root.appendChild(circles);
@@ -3746,6 +3883,11 @@
     MoviesScreen.prototype.yearLabel = function () { return 'Filme ' + new Date().getFullYear(); };
     var RESUME_CAT = '▶ Weiter ansehen';
     var NEW_CAT = 'Zuletzt hinzugefügt';
+    var NEWEP_CAT = 'Neue Folgen';
+    var SEEN_CAT = '✓ Gesehen';
+    var UNSEEN_CAT = 'Nicht gesehen';
+    /** Sonder-Kategorien, deren Inhalt sich beim Schauen ändert (Liste nicht wiederverwenden) */
+    function liveCat(cat) { return cat === RESUME_CAT || cat === NEWEP_CAT || cat === SEEN_CAT || cat === UNSEEN_CAT; }
     /** Die neuesten Titel des Anbieters (nach Datum, sonst nach Reihenfolge der Liste) */
     MoviesScreen.prototype.newItems = function () {
         var items = this.items();
@@ -3766,8 +3908,10 @@
     MoviesScreen.prototype.categories = function () {
         var seen = {}, cats = [];
         this.allItems().forEach(function (m) { if (m.cat && !seen[m.cat]) { seen[m.cat] = true; cats.push(m.cat); } });
-        var base = ['Alle', '★ Favoriten', RESUME_CAT, NEW_CAT];
-        if (this.kind === 'movies') base.push(this.yearLabel());
+        var base = ['Alle', '★ Favoriten', RESUME_CAT];
+        if (this.kind === 'series') base.push(NEWEP_CAT);
+        base.push(NEW_CAT);
+        if (this.kind === 'movies') base.push(this.yearLabel(), SEEN_CAT, UNSEEN_CAT);
         return base.concat(cats);
     };
     /** Wie viele Filme/Serien in jeder Kategorie stecken (ein Durchlauf über alle Einträge) */
@@ -3786,13 +3930,21 @@
         }
         var favs = 0, pre = fav + ':';
         for (var k in Favs.set) if (Favs.set.hasOwnProperty(k) && k.indexOf(pre) === 0 && c.ids[k.slice(pre.length)]) favs++;
+        var seenMovies = 0;
+        if (this.kind === 'movies') {
+            var raw = Seen.raw(), sp = Resume.accKey() + '|mv';
+            for (var sk in raw) if (raw.hasOwnProperty(sk) && raw[sk].d && sk.indexOf(sp) === 0 && c.ids[sk.slice(sp.length)]) seenMovies++;
+        }
         var self = this;
         return this.categories().map(function (cat, i) {
             if (i === 0) return items.length;
             if (i === 1) return favs;
             if (cat === RESUME_CAT) return self.resumeItems().length;
             if (cat === NEW_CAT) return self.newItems().length;
+            if (cat === NEWEP_CAT) return NewEps.series().length;
             if (self.kind === 'movies' && cat === self.yearLabel()) return c.year;
+            if (self.kind === 'movies' && cat === SEEN_CAT) return seenMovies;
+            if (self.kind === 'movies' && cat === UNSEEN_CAT) return items.length - seenMovies;
             return c.per[cat] || 0;
         });
     };
@@ -3864,7 +4016,7 @@
     MoviesScreen.prototype.filter = function () {
         var cat0 = this.categories()[this.catIndex];
         var list = this.filterRaw();
-        return !this.query && cat0 === RESUME_CAT ? list : this.sortList(list);
+        return !this.query && (cat0 === RESUME_CAT || cat0 === NEWEP_CAT) ? list : this.sortList(list);
     };
     MoviesScreen.prototype.filterRaw = function () {
         if (this.query) return this.items().filter(searchMatcher(this.query));
@@ -3874,6 +4026,9 @@
         if (this.catIndex === 1) return items.filter(function (m) { return Favs.has(fav, m.id); });
         if (cat === RESUME_CAT) return this.resumeItems();
         if (cat === NEW_CAT) return this.newItems();
+        if (cat === NEWEP_CAT) return Parental.visible('series', NewEps.series());
+        if (cat === SEEN_CAT) return items.filter(function (m) { return !!Seen.movie(m.id); });
+        if (cat === UNSEEN_CAT) return items.filter(function (m) { return !Seen.movie(m.id); });
         if (this.kind === 'movies' && cat === this.yearLabel()) {
             var year = new Date().getFullYear();
             return items.filter(function (m) { return m.year === year; });
@@ -3921,6 +4076,8 @@
         if (!list.length) {
             var note = this.query ? 'Nichts gefunden für „' + this.query + '“.' :
                 this.categories()[this.catIndex] === RESUME_CAT ? 'Hier erscheinen ' + (this.kind === 'movies' ? 'Filme' : 'Serien') + ', die du angefangen hast.' :
+                this.categories()[this.catIndex] === NEWEP_CAT ? 'Hier erscheinen Serien, die du schaust oder als Favorit hast, sobald dein Anbieter neue Folgen hinzufügt.' :
+                this.categories()[this.catIndex] === SEEN_CAT ? 'Hier erscheinen Filme, die du bis zum Ende geschaut hast.' :
                 this.catIndex === 1 ? 'Noch keine Favoriten. Drücke bei einem Poster die gelbe Taste.'
                 : (this.categories()[this.catIndex] === this.yearLabel() ? 'Dein Anbieter hat keine Filme mit dem Jahr ' + new Date().getFullYear() + ' gekennzeichnet.' : 'Nichts gefunden.');
             grid.appendChild(h('div', 'empty-note', note));
@@ -3952,7 +4109,7 @@
     MoviesScreen.prototype.canRevive = function () {
         if (this.query) return true;
         var cat = this.categories()[this.catIndex];
-        return this.catIndex !== 1 && cat !== RESUME_CAT;     // Favoriten/Weiterschauen ändern sich, die sind kurz
+        return this.catIndex !== 1 && !liveCat(cat);     // Favoriten/Weiterschauen/Gesehen ändern sich, die sind kurz
     };
     /** Nur das geöffnete Poster auffrischen (Favorit-Stern, Fortschritt) */
     MoviesScreen.prototype.revived = function () {
@@ -4287,7 +4444,8 @@
         body.appendChild(meta);
         body.appendChild(rating);
 
-        var saved = Resume.forItem('movie', m);
+        var saved = Resume.forItem('movie', m), seenMv = Seen.movie(m.id);
+        if (seenMv && !(saved && saved.pos >= 30)) body.appendChild(h('div', 'seenline', '✓  Gesehen am ' + Seen.dateText(seenMv)));
         if (saved && saved.pos >= 30) {
             var cont = h('div', 'button primary', '▶  Weiter ab ' + fmtTime(saved.pos));
             focusable(cont, 'play', function () { VodPlayer.play([m], 0, 'movie', saved.pos); }, 'buttons');
@@ -4296,16 +4454,26 @@
             focusable(again, 'restart', function () { VodPlayer.play([m], 0, 'movie', 0); }, 'buttons');
             body.appendChild(again);
         } else {
-            var play = h('div', 'button primary', '▶  Abspielen');
+            var play = h('div', 'button primary', seenMv ? '↺  Nochmal ansehen' : '▶  Abspielen');
             focusable(play, 'play', function () { VodPlayer.play([m], 0, 'movie', 0); }, 'buttons');
             body.appendChild(play);
         }
+        var seenBtn = h('div', 'button', seenMv ? '✕  Als ungesehen markieren' : '✓  Als gesehen markieren');
+        focusable(seenBtn, 'seen', function () {
+            var now = !Seen.movie(m.id);
+            Seen.setMovie(m.id, now);
+            if (now) Resume.remove(Resume.keyFor('movie', m));
+            toast(now ? 'Als gesehen markiert' : 'Als ungesehen markiert');
+            self.focusKey = 'seen';
+            Nav.show(self);
+        }, 'buttons');
         var fav = h('div', 'button', Favs.has('movie', m.id) ? '★  Favorit' : '☆  Zu Favoriten');
         focusable(fav, 'fav', function () {
             var on = Favs.toggle('movie', m.id);
             fav.textContent = on ? '★  Favorit' : '☆  Zu Favoriten';
         }, 'buttons');
         body.appendChild(fav);
+        body.appendChild(seenBtn);
         // Player-Wahl nur noch unter Einstellungen (Knopf hier ausgeblendet)
 
         var plot = h('div', 'plot', 'Infos werden geladen …');
@@ -4377,6 +4545,12 @@
                 // Mit der Staffel weitermachen, in der man zuletzt war
                 var last = Resume.forSeries(s.id);
                 if (last && self.episodes.some(function (e) { return e.season === last.season; })) self.season = last.season;
+                // Neue Folgen da? Dann deren Staffel zeigen
+                var nf = NewEps.fresh(s.id);
+                if (nf.length && self.episodes.some(function (e) { return e.season === nf[0].s; })) {
+                    self.season = nf[0].s;
+                    self.focusKey = 'snew';
+                }
                 if (Nav.top() === self) Nav.show(self);
             }, function (e) {
                 toast(e.message || String(e), 6000);
@@ -4424,6 +4598,13 @@
             }, 'buttons');
             body.appendChild(cont);
         }
+        var freshEps = NewEps.fresh(s.id), firstNew = -1;
+        if (freshEps.length) for (var fi = 0; fi < all.length; fi++) if (String(all[fi].id) === String(freshEps[0].id)) { firstNew = fi; break; }
+        if (firstNew >= 0 && firstNew !== lastIndex) {
+            var nb = h('div', 'button' + (lastIndex < 0 ? ' primary' : ''), '★  Neue Folge: S' + all[firstNew].season + ' F' + (all[firstNew].num || firstNew + 1));
+            focusable(nb, 'snew', function () { VodPlayer.play(all, firstNew, 'episode', 0); }, 'buttons');
+            body.appendChild(nb);
+        }
 
         var fav = h('div', 'button', Favs.has('series', s.id) ? '★  Favorit' : '☆  Zu Favoriten');
         focusable(fav, 'sfav', function () {
@@ -4438,8 +4619,11 @@
         var seasons = [];
         this.episodes.forEach(function (e) { if (seasons.indexOf(e.season) < 0) seasons.push(e.season); });
         var row = h('div', 'seasons hscroll');          // viele Staffeln: Leiste scrollt seitlich mit
+        var newPerSeason = {};
+        freshEps.forEach(function (f) { newPerSeason[f.s] = (newPerSeason[f.s] || 0) + 1; });
         seasons.forEach(function (n) {
             var b = h('div', 'season' + (n === self.season ? ' active' : ''), 'Staffel ' + n);
+            if (newPerSeason[n]) b.appendChild(h('span', 'season-nb', String(newPerSeason[n])));
             focusable(b, 'season-' + n, function () {
                 self.season = n;
                 self.focusKey = 'season-' + n;
@@ -4475,6 +4659,9 @@
                 n.classList.add('started');
                 n.appendChild(h('span', 'ep-left', Resume.leftText(e)));
                 n.appendChild(progressNode(Resume.part(e)));
+            } else if (NewEps.isFresh(s.id, ep.id)) {
+                n.classList.add('nw');
+                n.appendChild(h('span', 'ep-badge neu', 'NEU'));
             } else if (e && e.next) {
                 n.classList.add('upnext');
                 n.appendChild(h('span', 'ep-badge next', '▶ Als Nächstes'));
@@ -6184,7 +6371,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
