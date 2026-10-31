@@ -74,6 +74,8 @@ class MainActivity : Activity() {
         private const val REQ_EXTERNAL = 4711
         /** Erfundene Adresse: Anfragen dorthin beantwortet die App selbst mit verkleinerten Postern */
         const val THUMB_HOST = "thumbs.imperum.local"
+        /** Erfundene Adresse: große Listen des Anbieters liest der Android-Teil und gibt sie gekürzt weiter */
+        const val LIST_HOST = "lists.imperum.local"
     }
 
     private lateinit var root: FrameLayout
@@ -336,6 +338,7 @@ class MainActivity : Activity() {
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     val uri = request.url
                     if (uri.host == THUMB_HOST) return thumbResponse(uri)
+                    if (uri.host == LIST_HOST) return listResponse(uri)
                     // Anfragen an den IPTV-Server selbst stellen: ohne die Zusatz-Kennungen der Oberfläche
                     // (Origin: null, X-Requested-With …), die manche Server/Firewalls mit 403 ablehnen
                     if (isProviderApi(request)) return try { providerResponse(uri.toString()) } catch (e: Throwable) { null }
@@ -937,6 +940,34 @@ class MainActivity : Activity() {
             return last
         }
         return last
+    }
+
+    private fun plainResponse(code: Int, text: String): WebResourceResponse =
+        WebResourceResponse("text/plain", "utf-8", code, if (code in 200..299) "OK" else "Error",
+            mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store"),
+            java.io.ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
+
+    /** Große Liste (Sender/Filme/Serien) beim Anbieter holen und hier gekürzt umrechnen, siehe ListMapper.
+     *  599 = bitte auf den alten Weg ausweichen (die Oberfläche lädt dann selbst). */
+    private fun listResponse(uri: Uri): WebResourceResponse {
+        val src = uri.getQueryParameter("u") ?: return plainResponse(400, "Adresse fehlt")
+        val kind = uri.getQueryParameter("kind") ?: "live"
+        val res = (try { providerResponse(src) } catch (e: Throwable) { null })
+            ?: return plainResponse(502, "Der Server ist nicht erreichbar. Prüfe die Adresse und die Internetverbindung.")
+        val body = res.data ?: return plainResponse(599, "")
+        if (res.statusCode !in 200..299) return res
+        return try {
+            val bytes = ListMapper.map(body, res.encoding ?: "utf-8", kind)
+            WebResourceResponse("application/x-ndjson", "utf-8", 200, "OK",
+                mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store"),
+                java.io.ByteArrayInputStream(bytes))
+        } catch (e: OutOfMemoryError) {
+            plainResponse(599, "")
+        } catch (e: Throwable) {
+            plainResponse(599, "")
+        } finally {
+            try { body.close() } catch (e: Throwable) { }
+        }
     }
 
     /** GET mit Weiterleitungen (auch http ↔ https). null = Server nicht erreichbar. */
@@ -1652,6 +1683,10 @@ class MainActivity : Activity() {
         /** Die Oberfläche fragt, ob Poster über die Verkleinerung geladen werden können */
         @JavascriptInterface
         fun thumbHost(): String = THUMB_HOST
+
+        /** Große Listen über den Android-Teil laden (siehe listResponse) */
+        @JavascriptInterface
+        fun listHost(): String = LIST_HOST
 
         @JavascriptInterface
         fun openYoutube(id: String): Boolean {
