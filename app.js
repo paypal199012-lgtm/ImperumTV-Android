@@ -351,6 +351,7 @@
         search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/>',
         sort: '<path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5"/>',
         resume: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.2 3.8v4.6h4.6"/><path d="M10 8.6l5.2 3.4-5.2 3.4z"/>',
+        shield: '<path d="M12 2.8l7.5 3.1v5.6c0 4.6-3.1 8.4-7.5 9.9-4.4-1.5-7.5-5.3-7.5-9.9V5.9z"/><path d="M8.6 12.1l2.3 2.3 4.6-4.6"/>',
         lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
         rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
         gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M5.5 18.5l1.9-1.9M16.6 7.4l1.9-1.9"/><circle cx="12" cy="12" r="6.2"/>',
@@ -1509,6 +1510,28 @@
                 if (done) done();
             }, function () { if (done) done(); });   // offline / noch nicht eingerichtet: Gespeichertes behalten
         },
+        /** „de-ber.prod.surfshark.com“ → „Deutschland“ (sonst Kurzname) */
+        place: function (server) {
+            var m = /^([a-z]{2})(?:-([a-z]{2,4}))?[.-]/i.exec(server || '');
+            if (!m) return '';
+            var names = { de: 'Deutschland', it: 'Italien', at: 'Österreich', ch: 'Schweiz', fr: 'Frankreich', es: 'Spanien', nl: 'Niederlande',
+                uk: 'Großbritannien', gb: 'Großbritannien', us: 'USA', pl: 'Polen', tr: 'Türkei', gr: 'Griechenland', pt: 'Portugal', be: 'Belgien',
+                se: 'Schweden', no: 'Norwegen', dk: 'Dänemark', ro: 'Rumänien', hr: 'Kroatien', rs: 'Serbien', al: 'Albanien', ca: 'Kanada' };
+            return names[m[1].toLowerCase()] || m[1].toUpperCase();
+        },
+        /** Anzeige auf dem Startbildschirm (nur wenn ein VPN eingerichtet ist) */
+        badge: function () {
+            if (!this.native()) return null;
+            var i = this.info();
+            if (!i.has) return null;
+            var place = this.place(i.server), cls = 'off', text = 'VPN aus';
+            if (i.state === 'an') { cls = 'on'; text = 'VPN verbunden' + (place ? ' · ' + place : ''); }
+            else if (i.state === 'verbindet') { cls = 'wait'; text = 'VPN verbindet …'; }
+            else if (i.state === 'fehler') { cls = 'err'; text = 'VPN-Fehler'; }
+            var node = h('div', 'vpn-badge ' + cls);
+            node.innerHTML = icon('shield', 34) + '<span>' + text + '</span>';
+            return node;
+        },
         text: function (i) {
             i = i || this.info();
             if (i.state === 'an') return 'Verbunden · OK zum Trennen';
@@ -1527,7 +1550,7 @@
             Report.send('fehler', 'OpenVPN: ' + (err || 'Verbindung fehlgeschlagen') + (log ? '\n\nProtokoll:\n' + log : ''));
         }
         var top = Nav.top();
-        if (top && top instanceof SettingsScreen && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
+        if (top && (top instanceof SettingsScreen || top instanceof HomeScreen) && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
     };
 
     var Remote = {
@@ -3655,6 +3678,8 @@
             btns.appendChild(focusable(node, 'home-top-' + b[0], b[2], 'topbtns'));
         });
         head.appendChild(btns);
+        var vpn = OVpn.badge();
+        if (vpn) head.appendChild(vpn);
         root.appendChild(head);
 
         var circles = h('div', 'home-circles');
