@@ -5468,6 +5468,7 @@
             row.appendChild(tv);
             list.appendChild(focusable(row, 'fbm-' + m.id, function () { self.open(m); }, 'fblist'));
         });
+        list.appendChild(h('div', 'fb-src', 'Daten: OpenLigaDB · Football data provided by the Football-Data.org API · API-Football'));
         // Event-Sender mit beiden Vereinen im Namen gleich eintragen (braucht kein Programm)
         this.events = {};
         shown.forEach(function (m) {
