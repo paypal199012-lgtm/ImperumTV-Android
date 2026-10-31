@@ -1024,3 +1024,12 @@ body.lowfx .sy-logo { filter: none; }
 .vpn-badge.wait svg { animation: vpnpulse 1.2s ease-in-out infinite; }
 .vpn-badge.err { color: #ff8a80; border-color: rgba(255,138,128,.7); }
 @keyframes vpnpulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* Breite Handy-Bildschirme: Vorschau und Programm nutzen die zusätzliche Breite */
+body.wide .preview-box, body.wide .info-panel { width: auto; right: 30px; }
+body.wide .pl-left { width: auto; right: 630px; }
+body.wide .pl-side { left: auto; right: 0; }
+
+/* VPN-Knopf oben auf dem Wiedergabelisten-Bildschirm */
+.vpn-badge.vpn-btn { position: relative; left: auto; top: auto; margin-right: 26px; cursor: pointer; }
+.vpn-badge.vpn-btn.focused { background: #f4dc9e; color: #1a1408; border-color: #f4dc9e; box-shadow: 0 0 24px rgba(244,220,158,.45); }

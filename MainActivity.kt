@@ -143,6 +143,14 @@ class MainActivity : Activity() {
 
     private fun buildUi() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Handys mit Kamera-Loch: Bild bis an den Rand (die Oberfläche hält selbst Abstand zum Loch)
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                val lp = window.attributes
+                lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                window.attributes = lp
+            } catch (e: Throwable) { }
+        }
 
         root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
@@ -330,8 +338,23 @@ class MainActivity : Activity() {
     /** Oberfläche neu an die Displaygröße anpassen */
     private fun fitToScreen() {
         handler.postDelayed({
+            updateSafeInsets()
             webView.evaluateJavascript("window.dispatchEvent(new Event('resize'))", null)
         }, 100)
+    }
+
+    /** Abstand links/rechts wegen Kamera-Loch (in CSS-Pixeln der Oberfläche) */
+    @Volatile private var safeInsetsJson = "{\"l\":0,\"r\":0}"
+
+    private fun updateSafeInsets() {
+        try {
+            if (Build.VERSION.SDK_INT < 28) return
+            val cut = webView.rootWindowInsets?.displayCutout
+            val d = resources.displayMetrics.density
+            val l = ((cut?.safeInsetLeft ?: 0) / d).toInt()
+            val r = ((cut?.safeInsetRight ?: 0) / d).toInt()
+            safeInsetsJson = "{\"l\":$l,\"r\":$r}"
+        } catch (e: Throwable) { }
     }
 
     // ---------- Tasten der Fernbedienung ----------
@@ -1157,6 +1180,9 @@ class MainActivity : Activity() {
         /** OpenVPN: in dieser Version eingebaut? */
         @JavascriptInterface
         fun ovpnAvailable(): Boolean = ImperumOVpn.available()
+
+        @JavascriptInterface
+        fun safeInsets(): String = safeInsetsJson
 
         @JavascriptInterface
         fun ovpnLog(): String = try { ImperumOVpn.log() } catch (e: Throwable) { "" }
