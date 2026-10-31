@@ -1362,6 +1362,14 @@
         movie: function (id) { for (var i = 0; i < this.movies.length; i++) if (String(this.movies[i].id) === String(id)) return this.movies[i]; return null; },
         liveUrl: function (id) { for (var i = 0; i < this.live.length; i++) if (this.live[i].id === Number(id)) return this.live[i].url; return this.live[0].url; },
         movieUrl: function (id) { var m = this.movie(id) || this.movies[0]; return this.FILMS + m.file; },
+        /** Zweite Quelle, falls der Google-Speicher ablehnt (z. B. 403 über VPN) */
+        ALT: {
+            101: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+            102: 'https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4',
+            103: 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8',
+            104: 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8'
+        },
+        altMovieUrl: function (id) { return this.ALT[Number(id)] || ''; },
         episodeUrl: function (id) { var m = this.movies[(Number(id) - 301) % this.movies.length] || this.movies[0]; return this.FILMS + m.file; }
     };
 
@@ -6756,6 +6764,7 @@
     PlayerScreen.prototype.url = function () {
         var it = this.item();
         if (it.url) return it.url;          // z. B. eigene Aufnahme
+        if (this.altUrl && this.altFor === this.index) return this.altUrl;   // zweiter Versuch mit anderer Quelle/Format
         if (this.kind === 'live') return Api.liveUrl(it.id);
         if (this.kind === 'movie') return Api.movieUrl(it.id, it.ext);
         return Api.episodeUrl(it.id, it.ext);
@@ -6945,6 +6954,27 @@
         toast('Automatische Wiedergabe abgebrochen');
     };
     PlayerScreen.prototype.onError = function (msg) {
+        var it = this.item(), self = this;
+        // Demo-Film lädt nicht (z. B. 403): einmal die zweite Quelle versuchen
+        if (Api.acc && Api.acc.demo && this.kind === 'movie' && !(this.altUrl && this.altFor === this.index) && Demo.altMovieUrl(it.id)) {
+            this.altUrl = Demo.altMovieUrl(it.id); this.altFor = this.index;
+            toast('Andere Quelle wird versucht …', 3000);
+            this.start();
+            return;
+        }
+        // Bild lässt sich auf diesem Gerät nicht dekodieren: einmal als HLS (M3U8) statt TS versuchen
+        if (this.kind === 'live' && /DECOD/i.test(msg || '') && !(this.altUrl && this.altFor === this.index) && Api.acc && !Api.acc.demo && Settings.liveExt === 'ts') {
+            this.altUrl = Api.acc.server + '/live/' + Api.creds() + '/' + it.id + '.m3u8'; this.altFor = this.index;
+            toast('Bild ließ sich nicht abspielen – anderes Format wird versucht …', 3500);
+            this.start();
+            return;
+        }
+        if (/DECOD/i.test(msg || '')) {
+            toast('Dieses Bild kann der eingebaute Player auf diesem Gerät nicht abspielen. Tipp: im Player mit ⇄ einen anderen Player wie VLC wählen oder einen anderen Sender.', 8000);
+            Report.player(it, msg);
+            this.showOverlay();
+            return;
+        }
         if (this.kind === 'live' && this.retries < 1) {
             this.retries++;
             this.start();
@@ -7217,7 +7247,7 @@
     PlayerScreen.prototype.step = function (delta) {
         if (this.items.length < 2) return;
         this.index = (this.index + delta + this.items.length) % this.items.length;
-        this.retries = 0;
+        this.retries = 0; this.altUrl = '';
         this.start();
         this.showOverlay(2000);                       // Kanal gewechselt: nur kurz einblenden
     };
@@ -7299,7 +7329,7 @@
         this.closeZap();
         if (i !== this.index) {
             this.index = i;
-            this.retries = 0;
+            this.retries = 0; this.altUrl = '';
             this.start();
         }
         this.showOverlay(2000);                       // kurz Name und Programm des Senders zeigen
