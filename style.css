@@ -987,3 +987,27 @@ body.lowfx .sy-logo { filter: none; }
 .vol-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: #d9b066; border-radius: 7px; -webkit-transition: height .12s; transition: height .12s; }
 .vol-num { font-size: 26px; font-weight: bold; color: #fff; }
 .vol.muted .vol-num { color: #e88; font-size: 22px; }
+
+/* ---------- Gesehene Filme ---------- */
+.poster.seen .img::before { content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: 8px; background: rgba(10,10,12,.5); }
+.poster .img .seen-chk { position: absolute; left: 50%; top: 42%; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 32px; background: #d9b066; color: #1a1408;
+    font-size: 38px; font-weight: bold; line-height: 64px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.7); }
+.poster .img .seen-lbl { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 0; text-align: center; font-size: 17px; font-weight: bold;
+    letter-spacing: 1px; color: #f4dc9e; background: rgba(0,0,0,.65); border-radius: 0 0 8px 8px; }
+.poster.seen .title { color: rgba(255,255,255,.6); }
+.poster.seen.focused .title { color: #fff; }
+.seenline { display: table; margin: 4px 0 14px; padding: 8px 18px; border-radius: 12px; border: 2px solid #d9b066;
+    background: rgba(217,176,102,.18); color: #f4dc9e; font-size: 26px; font-weight: bold; }
+
+/* ---------- Neue Folgen ---------- */
+.circle { position: relative; }
+.circle .circle-nb { position: absolute; top: 14px; right: 10px; min-width: 56px; height: 56px; padding: 0 12px; border-radius: 28px; box-sizing: border-box;
+    background: #e5372d; color: #fff; font-size: 28px; font-weight: bold; line-height: 50px; text-align: center; border: 3px solid #141416; }
+.poster .img .new-badge { position: absolute; left: 8px; bottom: 26px; background: #e5372d; color: #fff; font-size: 18px; font-weight: bold;
+    padding: 4px 10px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,.6); }
+.poster .sub.new { color: #ff8a80; }
+.season { position: relative; }
+.season .season-nb { position: absolute; top: -10px; right: -10px; min-width: 30px; height: 30px; padding: 0 8px; border-radius: 15px; box-sizing: border-box;
+    background: #e5372d; color: #fff; font-size: 18px; font-weight: bold; line-height: 30px; text-align: center; }
+.episode .ep-badge.neu { background: #e5372d; color: #fff; }
+.episode.nw { border-left: 5px solid #e5372d; }
