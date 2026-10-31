@@ -1011,3 +1011,16 @@ body.lowfx .sy-logo { filter: none; }
     background: #e5372d; color: #fff; font-size: 18px; font-weight: bold; line-height: 30px; text-align: center; }
 .episode .ep-badge.neu { background: #e5372d; color: #fff; }
 .episode.nw { border-left: 5px solid #e5372d; }
+
+/* VPN-Anzeige oben links auf dem Startbildschirm */
+.vpn-badge {
+    position: absolute; left: 150px; top: 22px; height: 60px; padding: 0 26px 0 18px; border-radius: 30px;
+    display: flex; align-items: center; font-size: 28px; font-weight: bold; white-space: nowrap;
+    background: rgba(20,22,28,.78); border: 2px solid rgba(255,255,255,.18); color: #b8bcc6;
+}
+.vpn-badge svg { margin-right: 12px; flex: none; }
+.vpn-badge.on { color: #7ee08a; border-color: rgba(126,224,138,.7); background: rgba(22,48,28,.85); box-shadow: 0 0 18px rgba(126,224,138,.25); }
+.vpn-badge.wait { color: #f4dc9e; border-color: rgba(217,176,102,.7); }
+.vpn-badge.wait svg { animation: vpnpulse 1.2s ease-in-out infinite; }
+.vpn-badge.err { color: #ff8a80; border-color: rgba(255,138,128,.7); }
+@keyframes vpnpulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }

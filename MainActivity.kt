@@ -1167,6 +1167,7 @@ class MainActivity : Activity() {
             JSONObject().put("state", ImperumOVpn.state).put("error", ImperumOVpn.lastError)
                 .put("has", ImperumOVpn.config(this@MainActivity).isNotBlank())
                 .put("user", ImperumOVpn.user(this@MainActivity))
+                .put("server", Regex("(?im)^\\s*remote\\s+(\\S+)").find(ImperumOVpn.config(this@MainActivity))?.groupValues?.get(1) ?: "")
                 .put("auto", ImperumOVpn.autoStart(this@MainActivity)).toString()
         } catch (e: Throwable) { "{}" }
 
