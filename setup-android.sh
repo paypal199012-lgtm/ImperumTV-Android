@@ -32,9 +32,18 @@ cat > "$RES/xml/update_paths.xml" <<'XML'
     <external-cache-path name="updates_ext" path="updates/" />
 </paths>
 XML
-for d in drawable drawable-mdpi drawable-hdpi drawable-xhdpi; do cp banner.png "$RES/$d/banner.png"; done
-for d in drawable-xxhdpi drawable-xxxhdpi; do cp banner-2x.png "$RES/$d/banner.png"; done
-for d in drawable drawable-mdpi drawable-hdpi drawable-xhdpi drawable-xxhdpi drawable-xxxhdpi; do cp ic_launcher.png "$RES/$d/ic_launcher.png"; done
+# Fire TV / Android TV: Banner in Standard-Größe (320x180 dp) je Dichte, App-Symbol als mipmap.
+# Manche Fire-TV-Versionen zeigen bei selbst installierten Apps sonst nur ein graues Bild.
+for d in mdpi hdpi xhdpi; do cp "icons/banner-$d.png" "$RES/drawable-$d/banner.png"; done
+cp icons/banner-xhdpi.png "$RES/drawable-xxhdpi/banner.png"
+cp icons/banner-xhdpi.png "$RES/drawable-xxxhdpi/banner.png"
+cp icons/banner-mdpi.png "$RES/drawable/banner.png"
+for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+  mkdir -p "$RES/mipmap-$d"
+  cp "icons/icon-$d.png" "$RES/mipmap-$d/ic_launcher.png"
+  cp "icons/icon-$d.png" "$RES/drawable-$d/ic_launcher.png"
+done
+cp icons/icon-mdpi.png "$RES/drawable/ic_launcher.png"
 
 cp index.html "$OUT/app/src/main/assets/www/index.html"
 cp style.css "$OUT/app/src/main/assets/www/css/style.css"
