@@ -5514,18 +5514,15 @@
             o.sure.forEach(function (x, i) {
                 buttons.push({ label: x.label + '   (' + x.chans.length + ' Sender)', primary: i === 0, action: function () { channels(x, choose); } });
             });
-            o.guess.forEach(function (x) {
-                buttons.push({ label: 'Alle ' + x.label + '-Sender anzeigen (ohne Gewähr)', action: function () { channels(x, choose); } });
-            });
             buttons.push({ label: 'Schließen', action: function () { } });
             var text = o.sure.length ? when
                 : when + ' · Kein Sender in deiner Liste zeigt dieses Spiel laut Sendername oder Programm.' + (o.guess.length ? '' : ' Voraussichtlich: ' + (Football.rights(m) || 'unbekannt') + '.');
             Modal.open(title, text, buttons);
             if (Modal.node) Modal.node.classList.add('modal-list');
         }
-        // Genau ein sicherer Treffer: direkt die Senderliste
-        if (o.sure.length === 1 && !o.guess.length) { channels(o.sure[0], function () { }); return; }
-        if (!o.sure.length && !o.guess.length) {
+        // Nur Sender anzeigen, die das Spiel nachweislich zeigen (Sendername oder Programm)
+        if (o.sure.length === 1) { channels(o.sure[0], function () { }); return; }
+        if (!o.sure.length) {
             var r = Football.rights(m);
             toast(title + ': kein passender Sender in deiner Liste gefunden' + (r ? ' (voraussichtlich ' + r + ').' : '.'), 6000);
             return;
