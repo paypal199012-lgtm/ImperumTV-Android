@@ -75,6 +75,37 @@ if [ "${OPENVPN:-1}" != "0" ] && git clone -q "$OVPN_REPO" "$OUT/openvpn" 2>/dev
         "$OUT/openvpn/src/main/AndroidManifest.xml"
     grep -q "tv.imperum.app.ovpnprefs" "$OUT/openvpn/src/main/java/de/blinkt/openvpn/core/MultiProvider.java" \
         && grep -q "core.MultiProvider" "$OUT/openvpn/src/main/AndroidManifest.xml" || { echo "OpenVPN: Provider nicht eingetragen"; exit 1; }
+    # Netz-Erkennung robuster: Die Bibliothek wartet sonst endlos auf „kein Netz“ (NONETWORK),
+    # wenn Android das aktive Netz nicht meldet (Fire TV / BlueStacks) oder die Prüfung vor der Netz-Abfrage kommt.
+    python3 - "$OUT/openvpn/src/main/java/de/blinkt/openvpn/core" <<'EOF' || { echo "OpenVPN: Netz-Patch fehlgeschlagen"; exit 1; }
+import sys, os
+d = sys.argv[1]
+def patch(name, old, new):
+    p = os.path.join(d, name)
+    s = open(p, encoding="utf-8").read()
+    if old not in s:
+        raise SystemExit("nicht gefunden in " + name)
+    open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
+patch("DeviceStateReceiver.java", "        return conn.getActiveNetworkInfo();",
+"""        NetworkInfo active = conn.getActiveNetworkInfo();
+        if (active != null && active.getState() == State.CONNECTED)
+            return active;
+        // Manche Geräte melden kein „aktives“ Netz, obwohl WLAN/LAN verbunden ist: alle Netze durchsehen
+        try {
+            for (android.net.Network n : conn.getAllNetworks()) {
+                NetworkInfo info = conn.getNetworkInfo(n);
+                if (info == null || info.getType() == ConnectivityManager.TYPE_VPN) continue;
+                if (info.getState() == State.CONNECTED)
+                    return info;
+            }
+        } catch (Exception ignored) {
+        }
+        return active;""")
+# Kommt die Prüfung, bevor die Netz-Abfrage eingerichtet ist: nicht als „kein Netz“ werten
+patch("OpenVpnManagementThread.java", """        if (mPauseCallback == null)
+            return false;""", """        if (mPauseCallback == null)
+            return true;""")
+EOF
     echo 'include(":openvpn")' >> "$OUT/settings.gradle.kts"
     sed -i 's|// OPENVPN.*|implementation(project(":openvpn"))|' "$OUT/app/build.gradle.kts"
     cp OVpn.kt "$JAVA_DIR/OVpn.kt"

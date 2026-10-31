@@ -52,10 +52,12 @@ object ImperumOVpn {
             val c = appCtx ?: return
             val text = try { logItem.getString(c) } catch (e: Throwable) { return } ?: return
             if (text.isBlank()) return
+            // Lange Liste der OpenVPN-Optionen („  name = wert“) weglassen – sonst verdrängt sie die wichtigen Zeilen
+            if (Regex("^\\s+[a-z0-9_]+(\\[\\d+\\])? = ").containsMatchIn(text)) return
             val error = try { logItem.logLevel == VpnStatus.LogLevel.ERROR } catch (e: Throwable) { false }
             synchronized(logLines) {
                 logLines.addLast((if (error) "FEHLER: " else "") + text.take(300))
-                while (logLines.size > 40) logLines.removeFirst()
+                while (logLines.size > 80) logLines.removeFirst()
             }
         }
     }
