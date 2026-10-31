@@ -5403,20 +5403,28 @@
         var words = Football.words(m.h).concat(Football.words(m.a));
         function channels(opt) {
             var now = Epg.nowMap(opt.chans);
-            // Läuft das Spiel laut Programm gerade auf einem Sender? Dann diesen nach oben
-            function hits(ch) {
-                var t = Football.fold(ch.epg && now[ch.epg] || '');
-                var n = words.filter(function (w) { return t.indexOf(w) >= 0; }).length;
-                if (opt.konf && t.indexOf('konferenz') >= 0) n += 5;          // „Bundesliga Konferenz“ läuft gerade
-                return n;
+            // Reihenfolge: Spiel steht im Programm oder im Sendernamen → ganz oben; Sender ohne Programm ans Ende
+            function score(ch) {
+                var prog = ch.epg && now[ch.epg] || '';
+                var t = Football.fold(prog), nm = Football.fold(ch.name);
+                var hitT = words.filter(function (w) { return t.indexOf(w) >= 0; }).length;
+                var hitN = words.filter(function (w) { return nm.indexOf(w) >= 0; }).length;
+                var sc = hitT * 10 + hitN * 8;
+                if (opt.konf && t.indexOf('konferenz') >= 0) sc += 6;
+                if (!prog) sc -= 1;
+                return sc;
             }
-            var list = opt.chans.slice().sort(function (a, b) { return hits(b) - hits(a); });
+            var scored = opt.chans.map(function (ch, i) { return { ch: ch, sc: score(ch), i: i }; });
+            scored.sort(function (a, b) { return b.sc - a.sc || a.i - b.i; });
+            var list = scored.map(function (x) { return x.ch; });
+            var sure = scored.length && scored[0].sc >= 8;
             var buttons = list.map(function (ch, i) {
                 var t = ch.epg && now[ch.epg];
-                return { label: '▶  ' + ch.name + (t ? '   ·   ' + t : ''), primary: i === 0, action: function () { play(ch); } };
+                return { label: '▶  ' + ch.name + (t ? '   ·   ' + t : '   ·   kein Programm'), primary: i === 0, action: function () { play(ch); } };
             });
             buttons.push({ label: 'Zurück', action: function () { choose(); } });
-            Modal.open(title + ' · ' + opt.label, when, buttons);
+            Modal.open(title + ' · ' + opt.label, sure ? when + ' · ganz oben: laut Programm läuft das Spiel dort'
+                : when + ' · Kein Sender nennt dieses Spiel im Programm – die Liste zeigt nur, welche Sender in Frage kommen.', buttons);
             if (Modal.node) Modal.node.classList.add('modal-list');
         }
         function choose() {
