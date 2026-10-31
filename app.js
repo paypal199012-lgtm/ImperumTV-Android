@@ -1286,6 +1286,7 @@
     // =====================================================================
 
     var Demo = {
+        ENABLED: false,                  // Demo ausgeblendet (zum Wiedereinschalten auf true setzen)
         playlist: { id: 'demo', name: 'Demo', demo: true },
         account: function () { return { server: 'demo://imperumtv', username: 'demo', password: 'demo', demo: true }; },
         FILMS: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/',
@@ -1849,7 +1850,7 @@
         },
 
         find: function (id) {
-            if (String(id) === 'demo') return Demo.playlist;
+            if (String(id) === 'demo') return Demo.ENABLED ? Demo.playlist : null;
             var list = this.lists || [];
             for (var i = 0; i < list.length; i++) if (list[i].id === String(id)) return list[i];
             return null;
@@ -3471,7 +3472,7 @@
             grid.appendChild(note);
         }
         if (!(this.loading && !lists.length)) {
-            lists.concat([Demo.playlist]).forEach(function (p) {
+            lists.concat(Demo.ENABLED ? [Demo.playlist] : []).forEach(function (p) {
                 var card = h('div', 'pl-card' + (p.demo ? ' pl-demo' : ''));
                 card.appendChild(h('div', 'pl-name', p.name));
                 card.appendChild(h('div', 'pl-url', playlistAddress(p)));
@@ -3634,8 +3635,10 @@
         var buttons = h('div', 'pl-buttons');
         var refresh = h('div', 'button primary', 'Ich habe bezahlt');
         buttons.appendChild(focusable(refresh, 'lock-refresh', function () { self.check(true); }, 'side'));
-        var demo = h('div', 'button', 'Demo ansehen');
-        buttons.appendChild(focusable(demo, 'lock-demo', function () { new PlaylistsScreen().connect(Demo.playlist); }, 'side'));
+        if (Demo.ENABLED) {
+            var demo = h('div', 'button', 'Demo ansehen');
+            buttons.appendChild(focusable(demo, 'lock-demo', function () { new PlaylistsScreen().connect(Demo.playlist); }, 'side'));
+        }
         if (AB && AB.openUrl) {                          // Android und Fire TV: Website direkt öffnen
             var open = h('div', 'button', 'Website öffnen');
             buttons.appendChild(focusable(open, 'lock-open', function () { AB.openUrl(Device.link()); }, 'side'));
@@ -7606,8 +7609,8 @@
         }, function (e) {
             loader(false);
             // Website nicht erreichbar: zuletzt bekannter Stand der Testphase gilt
-            if (!License.active() && !(saved && saved.demo && lastId === 'demo')) { Nav.replace(new LockScreen()); return; }
-            if (lastId !== null && saved && saved.server && saved.username && saved.password) start(saved);
+            if (!License.active() && !(Demo.ENABLED && saved && saved.demo && lastId === 'demo')) { Nav.replace(new LockScreen()); return; }
+            if (lastId !== null && saved && saved.server && saved.username && saved.password && !(saved.demo && !Demo.ENABLED)) start(saved);
             else Nav.replace(new PlaylistsScreen(e.message || String(e)));
         });
         }
