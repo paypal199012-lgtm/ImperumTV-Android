@@ -2258,10 +2258,56 @@
             out.sort(function (a, b) { return rank(a.name) - rank(b.name) || String(a.name).localeCompare(String(b.name), 'de', { numeric: true }); });
             return out.slice(0, 80);
         },
+        /** Kommt das Wort im (vereinfachten) Text vor? Kurze Wörter nur als ganzes Wort */
+        has: function (text, w) {
+            if (w.length >= 6) return text.indexOf(w) >= 0;
+            var i = text.indexOf(w);
+            while (i >= 0) {
+                var b = i ? text.charAt(i - 1) : ' ', a = text.charAt(i + w.length) || ' ';
+                if (!/[a-z0-9]/.test(b) && !/[a-z0-9]/.test(a)) return true;
+                i = text.indexOf(w, i + 1);
+            }
+            return false;
+        },
+        /** PPV-/Event-Sender, die das Spiel im Namen tragen (z. B. „Live | Mönchengladbach vs. Paderborn“) */
+        eventChannels: function (m) {
+            if (this._namesOf !== Data.channels) {
+                var me = this;
+                this._names = [];
+                Data.channels.forEach(function (c) {
+                    var n = c.name || '';
+                    if (/#{2,}|^\s*[-=*#]|[-=*]{3,}/.test(n)) return;
+                    me._names.push({ c: c, f: me.fold(n) });
+                });
+                this._namesOf = Data.channels;
+            }
+            var hw = this.words(m.h), aw = this.words(m.a), me2 = this, out = [];
+            var teams = this.fold((m.h.n || '') + ' ' + (m.a.n || ''));
+            var youth = /(^|[^a-z0-9])(u ?1[5-9]|u ?2[0-3]|ii|frauen|women|damen|jugend|youth|reserves?)([^a-z0-9]|$)/;
+            var teamYouth = youth.test(teams);
+            for (var i = 0; i < this._names.length; i++) {
+                var x = this._names[i];
+                if (!teamYouth && youth.test(x.f)) continue;
+                var hh = hw.some(function (w) { return me2.has(x.f, w); });
+                var ah = aw.some(function (w) { return me2.has(x.f, w); });
+                if (!hh && !ah) continue;
+                var sc = (hh ? 10 : 0) + (ah ? 10 : 0) + (/(^|[^a-z])(live|ppv|event)([^a-z]|$)| vs\.? | v /.test(x.f) ? 2 : 0);
+                if (sc < 12) continue;          // nur ein Verein ohne „Live/Event/vs“: eher ein normaler Vereinssender
+                out.push({ c: x.c, sc: sc });
+            }
+            out.sort(function (a, b) { return b.sc - a.sc; });
+            return out.slice(0, 20);
+        },
+
         /** Auswahl beim Spiel: im Programm gefunden, Einzelspiel, Konferenz … */
         options: function (m, found) {
             var d = new Date(m.t), wd = d.getDay(), hr = d.getHours(), out = [];
-            if (found && found.length) out.push({ label: 'Im Programm gefunden', chans: found });
+            var ev = this.eventChannels(m);
+            var evSure = ev.filter(function (x) { return x.sc >= 20; }).map(function (x) { return x.c; });
+            var evMaybe = ev.filter(function (x) { return x.sc < 20; }).map(function (x) { return x.c; });
+            if (evSure.length) out.push({ label: 'Event-Sender mit diesem Spiel', chans: evSure, sure: true });
+            if (found && found.length) out.push({ label: 'Im Programm gefunden', chans: found, sure: true });
+            if (evMaybe.length) out.push({ label: 'Event-Sender (ein Verein im Namen)', chans: evMaybe });
             if (m.c === 'BL1') {
                 if (wd === 6 && hr < 17) {
                     out.push({ label: 'Einzelspiel · Sky', chans: this.channelsBy(['skyBl']) });
@@ -5283,7 +5329,7 @@
     // =====================================================================
     // Fußball-Bildschirm: wer spielt wann, auf welchem Sender
     // =====================================================================
-    function FootballScreen() { this.league = ''; this.found = {}; this.timer = null; }
+    function FootballScreen() { this.league = ''; this.found = {}; this.events = {}; this.timer = null; }
     FootballScreen.prototype.render = function (root) {
         var self = this;
         root.appendChild(topbar('Fußball', 'OK: Sender einschalten'));
@@ -5376,14 +5422,22 @@
             row.appendChild(tv);
             list.appendChild(focusable(row, 'fbm-' + m.id, function () { self.open(m); }, 'fblist'));
         });
-        if (Object.keys(this.found).length) this.markChannels();
+        // Event-Sender mit beiden Vereinen im Namen gleich eintragen (braucht kein Programm)
+        this.events = {};
+        shown.forEach(function (m) {
+            if (m.s === 'FINISHED' || m.s === 'AWARDED') return;
+            var ev = Football.eventChannels(m).filter(function (x) { return x.sc >= 20; });
+            if (ev.length) self.events[String(m.id)] = ev.map(function (x) { return x.c; });
+        });
+        this.markChannels();
     };
     /** Gefundene Sender aus deiner Liste eintragen */
     FootballScreen.prototype.markChannels = function () {
         var self = this;
         var rows = document.querySelectorAll('#app .fb-row');
         for (var i = 0; i < rows.length; i++) {
-            var list = self.found[rows[i].getAttribute('data-match')];
+            var id = rows[i].getAttribute('data-match');
+            var list = (self.events && self.events[id] || []).concat(self.found[id] || []);
             if (!list || !list.length) continue;
             var tv = rows[i].querySelector('.fb-tv');
             tv.innerHTML = '';
@@ -5421,13 +5475,13 @@
             var scored = opt.chans.map(function (ch, i) { return { ch: ch, sc: score(ch), i: i }; });
             scored.sort(function (a, b) { return b.sc - a.sc || a.i - b.i; });
             var list = scored.map(function (x) { return x.ch; });
-            var sure = scored.length && scored[0].sc >= 8;
+            var sure = opt.sure || (scored.length && scored[0].sc >= 8);
             var buttons = list.map(function (ch, i) {
                 var t = ch.epg && now[ch.epg];
-                return { label: '▶  ' + ch.name + (t ? '   ·   ' + t : '   ·   kein Programm'), primary: i === 0, action: function () { play(ch); } };
+                return { label: '▶  ' + ch.name + (t ? '   ·   ' + t : (opt.sure ? '' : '   ·   kein Programm')), primary: i === 0, action: function () { play(ch); } };
             });
             buttons.push({ label: 'Zurück', action: function () { choose(); } });
-            Modal.open(title + ' · ' + opt.label, sure ? when + ' · ganz oben: laut Programm läuft das Spiel dort'
+            Modal.open(title + ' · ' + opt.label, sure ? when + (opt.sure ? '' : ' · ganz oben: laut Programm läuft das Spiel dort')
                 : when + ' · Kein Sender nennt dieses Spiel im Programm – die Liste zeigt nur, welche Sender in Frage kommen.', buttons);
             if (Modal.node) Modal.node.classList.add('modal-list');
         }
