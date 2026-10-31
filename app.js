@@ -2234,7 +2234,7 @@
         },
         /** Sender deiner Liste nach Namen (z. B. alle „Sky Sport Bundesliga …“) */
         PATTERNS: {
-            skyBl: /sky.*(bundesliga|buli)|bundesliga.*sky/i,
+            skyBl: /sky.*(bundesliga|buli|top ?event)|bundesliga.*sky/i,
             sky: /(^|[^a-z])sky([^a-z]|$).*(sport|bundesliga|premier|top ?event|fussball|fußball|football)/i,
             dazn: /dazn/i,
             prime: /prime|amazon/i,
@@ -2243,7 +2243,9 @@
         channelsBy: function (keys) {
             var me = this, out = [];
             Data.channels.forEach(function (c) {
-                for (var i = 0; i < keys.length; i++) if (me.PATTERNS[keys[i]].test(c.name || '')) { out.push(c); return; }
+                var n = c.name || '';
+                if (/#{2,}|^\s*[-=*#]|[-=*]{3,}/.test(n)) return;          // Trennzeilen wie „### DAZN EXCLUSIVE ###“
+                for (var i = 0; i < keys.length; i++) if (me.PATTERNS[keys[i]].test(n)) { out.push(c); return; }
             });
             out.sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'de', { numeric: true }); });
             return out.slice(0, 40);
@@ -2255,7 +2257,7 @@
             if (m.c === 'BL1') {
                 if (wd === 6 && hr < 17) {
                     out.push({ label: 'Einzelspiel · Sky', chans: this.channelsBy(['skyBl']) });
-                    out.push({ label: 'Konferenz · DAZN', chans: this.channelsBy(['konferenz', 'dazn']) });
+                    out.push({ label: 'Konferenz · DAZN', konf: true, chans: this.channelsBy(['konferenz', 'dazn']) });
                 } else if (wd === 0) out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
                 else out.push({ label: 'Sky', chans: this.channelsBy(['skyBl']) });
             } else if (m.c === 'PL') out.push({ label: 'Sky', chans: this.channelsBy(['sky']) });
@@ -5396,7 +5398,9 @@
             // Läuft das Spiel laut Programm gerade auf einem Sender? Dann diesen nach oben
             function hits(ch) {
                 var t = Football.fold(ch.epg && now[ch.epg] || '');
-                return words.filter(function (w) { return t.indexOf(w) >= 0; }).length;
+                var n = words.filter(function (w) { return t.indexOf(w) >= 0; }).length;
+                if (opt.konf && t.indexOf('konferenz') >= 0) n += 5;          // „Bundesliga Konferenz“ läuft gerade
+                return n;
             }
             var list = opt.chans.slice().sort(function (a, b) { return hits(b) - hits(a); });
             var buttons = list.map(function (ch, i) {
