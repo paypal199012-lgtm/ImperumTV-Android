@@ -2235,6 +2235,7 @@
         /** Sender deiner Liste nach Namen (z. B. alle „Sky Sport Bundesliga …“) */
         PATTERNS: {
             skyBl: /sky.*(bundesliga|buli|top ?event)|bundesliga.*sky/i,
+            skyPl: /sky.*(premier|top ?event|mix)/i,
             sky: /(^|[^a-z])sky([^a-z]|$).*(sport|bundesliga|premier|top ?event|fussball|fußball|football)/i,
             dazn: /dazn/i,
             prime: /prime|amazon/i,
@@ -2248,7 +2249,7 @@
                 for (var i = 0; i < keys.length; i++) if (me.PATTERNS[keys[i]].test(n)) { out.push(c); return; }
             });
             out.sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'de', { numeric: true }); });
-            return out.slice(0, 40);
+            return out.slice(0, 80);
         },
         /** Auswahl beim Spiel: im Programm gefunden, Einzelspiel, Konferenz … */
         options: function (m, found) {
@@ -2260,7 +2261,7 @@
                     out.push({ label: 'Konferenz · DAZN', konf: true, chans: this.channelsBy(['konferenz', 'dazn']) });
                 } else if (wd === 0) out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
                 else out.push({ label: 'Sky', chans: this.channelsBy(['skyBl']) });
-            } else if (m.c === 'PL') out.push({ label: 'Sky', chans: this.channelsBy(['sky']) });
+            } else if (m.c === 'PL') out.push({ label: 'Sky', chans: this.channelsBy(['skyPl']) });
             else if (m.c === 'SA' || m.c === 'PD' || m.c === 'FL1') out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
             else if (m.c === 'CL') {
                 out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
