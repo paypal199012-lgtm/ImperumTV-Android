@@ -2346,7 +2346,7 @@
             return out.filter(function (o) { return o.chans.length; });
         },
         /** Live-Senderliste beim Anbieter neu laden (für neue Event-Sender).
-         *  Schonend: per Knopf höchstens alle 2 Minuten, automatisch höchstens alle 10 Minuten.
+         *  Schonend: per Knopf höchstens alle 20 Sekunden, automatisch höchstens alle 10 Minuten.
          *  Antwort: Anzahl der Sender, oder false = zu früh (nichts geladen). */
         lastReload: Date.now(),
         reloading: null,
@@ -2354,7 +2354,7 @@
             var me = this;
             if (!Api.acc || Api.acc.demo) return Promise.resolve(false);
             if (this.reloading) return this.reloading;
-            if (Date.now() - this.lastReload < (manual ? 120000 : 600000)) return Promise.resolve(false);
+            if (Date.now() - this.lastReload < (manual ? 20000 : 600000)) return Promise.resolve(false);
             this.lastReload = Date.now();
             this.reloading = Api.list('get_live_streams', 'live', Api.call('get_live_categories')).then(function (list) {
                 me.reloading = null;
@@ -5437,8 +5437,8 @@
             if (!manual) return;
             var after = Object.keys(self.events || {}).length, more = after - before;
             if (n === false) {
-                var min = Math.max(1, Math.round((Date.now() - Football.lastReload) / 60000));
-                toast('Senderliste ist aktuell (vor ' + min + ' Min. geladen). Suche wurde erneuert.', 4000);
+                var sec = Math.max(1, Math.round((Date.now() - Football.lastReload) / 1000));
+                toast('Senderliste ist aktuell (vor ' + sec + ' Sek. geladen). Suche wurde erneuert.', 4000);
             } else toast(more > 0 ? 'Senderliste neu geladen – ' + more + (more === 1 ? ' neues Spiel' : ' neue Spiele') + ' mit Event-Sender gefunden.'
                 : 'Senderliste neu geladen – keine neuen Event-Sender.', 4500);
         });
