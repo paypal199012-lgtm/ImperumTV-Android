@@ -2313,19 +2313,23 @@
             return out.slice(0, 20);
         },
 
-        /** Auswahl beim Spiel: im Programm gefunden, Einzelspiel, Konferenz … */
-        options: function (m, found) {
+        /** Programm eines Senders zur Anstoßzeit (Titel + Text, vereinfacht) */
+        progAt: function (ch, t) {
+            var l = Epg.list(ch);
+            if (!l) return '';
+            for (var i = 0; i < l.length; i++) {
+                var e = l[i];
+                if (e.start <= t + 15 * 60000 && e.end >= t + 20 * 60000) return this.fold(e.title + ' ' + (e.desc || ''));
+            }
+            return '';
+        },
+        /** Welche Sender kommen laut Rechtelage in Frage? */
+        rightsLists: function (m) {
             var d = new Date(m.t), wd = d.getDay(), hr = d.getHours(), out = [];
-            var ev = this.eventChannels(m);
-            var evSure = ev.filter(function (x) { return x.sc >= 20; }).map(function (x) { return x.c; });
-            var evMaybe = ev.filter(function (x) { return x.sc < 20; }).map(function (x) { return x.c; });
-            if (evSure.length) out.push({ label: 'Event-Sender mit diesem Spiel', chans: evSure, sure: true });
-            if (found && found.length) out.push({ label: 'Im Programm gefunden', chans: found, sure: true });
-            if (evMaybe.length) out.push({ label: 'Event-Sender (ein Verein im Namen)', chans: evMaybe });
             if (m.c === 'BL1') {
                 if (wd === 6 && hr < 17) {
-                    out.push({ label: 'Einzelspiel · Sky', chans: this.channelsBy(['skyBl']) });
-                    out.push({ label: 'Konferenz · DAZN', konf: true, chans: this.channelsBy(['konferenz', 'dazn']) });
+                    out.push({ label: 'Sky (Einzelspiele)', chans: this.channelsBy(['skyBl']) });
+                    out.push({ label: 'DAZN (Konferenz)', konf: true, chans: this.channelsBy(['konferenz', 'dazn']) });
                 } else if (wd === 0) out.push({ label: 'DAZN', chans: this.channelsBy(['dazn']) });
                 else out.push({ label: 'Sky', chans: this.channelsBy(['skyBl']) });
             } else if (m.c === 'BL2') out.push({ label: 'Sky', chans: this.channelsBy(['skyBl']) });
@@ -2338,6 +2342,29 @@
                 if (wd === 2) out.push({ label: 'Prime Video', chans: this.channelsBy(['prime']) });
             }
             return out.filter(function (o) { return o.chans.length; });
+        },
+        /** Auswahl beim Spiel. sure: Sender, die das Spiel nachweislich zeigen (Sendername oder Programm).
+         *  guess: alle Sender des Rechteinhabers – nur auf Wunsch, ohne Gewähr. */
+        options: function (m, found) {
+            var me = this, sure = [], guess = this.rightsLists(m);
+            var words = this.words(m.h).concat(this.words(m.a));
+            var ev = this.eventChannels(m);
+            var evSure = ev.filter(function (x) { return x.sc >= 20; }).map(function (x) { return x.c; });
+            if (evSure.length) sure.push({ label: 'Event-Sender mit diesem Spiel', chans: evSure, sure: true });
+            // Programm zur Anstoßzeit: Spiel (Vereinsnamen) oder Konferenz steht drin
+            var prog = (found || []).slice(), konf = [];
+            guess.forEach(function (o) {
+                o.chans.forEach(function (ch) {
+                    var t = me.progAt(ch, m.t);
+                    if (!t) return;
+                    var hits = words.filter(function (w) { return me.has(t, w); }).length;
+                    if (hits >= 1 && prog.indexOf(ch) < 0) prog.push(ch);
+                    else if (o.konf && t.indexOf('konferenz') >= 0 && konf.indexOf(ch) < 0) konf.push(ch);
+                });
+            });
+            if (prog.length) sure.push({ label: 'Laut Programm', chans: prog, sure: true });
+            if (konf.length) sure.push({ label: 'Konferenz laut Programm', chans: konf, sure: true });
+            return { sure: sure, guess: guess };
         },
 
         /** Sender im Programm suchen (Android/Fire TV). cb({spielId: [Sender…]}) */
@@ -5467,51 +5494,41 @@
     FootballScreen.prototype.open = function (m) {
         var title = (m.h.s || m.h.n) + ' – ' + (m.a.s || m.a.n);
         var when = fmtClock(new Date(m.t)) + ' Uhr';
-        var opts = Football.options(m, this.found[String(m.id)]);
-        if (!opts.length) {
-            var r = Football.rights(m);
-            toast(title + ': kein passender Sender in deiner Liste gefunden' + (r ? ' (voraussichtlich ' + r + ').' : '.'), 6000);
-            return;
-        }
+        var o = Football.options(m, this.found[String(m.id)]);
         function play(ch) {
             var i = Data.channels.indexOf(ch);
             Nav.push(new PlayerScreen(Data.channels, i < 0 ? 0 : i, 'live'));
         }
-        var words = Football.words(m.h).concat(Football.words(m.a));
-        function channels(opt) {
+        function channels(opt, back) {
             var now = Epg.nowMap(opt.chans);
-            // Reihenfolge: Spiel steht im Programm oder im Sendernamen → ganz oben; Sender ohne Programm ans Ende
-            function score(ch) {
-                var prog = ch.epg && now[ch.epg] || '';
-                var t = Football.fold(prog), nm = Football.fold(ch.name);
-                var hitT = words.filter(function (w) { return t.indexOf(w) >= 0; }).length;
-                var hitN = words.filter(function (w) { return nm.indexOf(w) >= 0; }).length;
-                var sc = hitT * 10 + hitN * 8;
-                if (opt.konf && t.indexOf('konferenz') >= 0) sc += 6;
-                if (!prog) sc -= 1;
-                return sc;
-            }
-            var scored = opt.chans.map(function (ch, i) { return { ch: ch, sc: score(ch), i: i }; });
-            scored.sort(function (a, b) { return b.sc - a.sc || a.i - b.i; });
-            var list = scored.map(function (x) { return x.ch; });
-            var sure = opt.sure || (scored.length && scored[0].sc >= 8);
-            var buttons = list.map(function (ch, i) {
+            var buttons = opt.chans.map(function (ch, i) {
                 var t = ch.epg && now[ch.epg];
-                return { label: '▶  ' + ch.name + (t ? '   ·   ' + t : (opt.sure ? '' : '   ·   kein Programm')), primary: i === 0, action: function () { play(ch); } };
+                return { label: '▶  ' + ch.name + (t ? '   ·   ' + t : ''), primary: i === 0, action: function () { play(ch); } };
             });
-            buttons.push({ label: 'Zurück', action: function () { choose(); } });
-            Modal.open(title + ' · ' + opt.label, sure ? when + (opt.sure ? '' : ' · ganz oben: laut Programm läuft das Spiel dort')
-                : when + ' · Kein Sender nennt dieses Spiel im Programm – die Liste zeigt nur, welche Sender in Frage kommen.', buttons);
+            buttons.push({ label: 'Zurück', action: back });
+            Modal.open(title + ' · ' + opt.label, opt.sure ? when : when + ' · ohne Gewähr: alle Sender dieses Anbieters aus deiner Liste. Ob das Spiel dort läuft, steht nicht im Programm.', buttons);
             if (Modal.node) Modal.node.classList.add('modal-list');
         }
         function choose() {
-            if (opts.length === 1) { channels(opts[0]); return; }
-            var buttons = opts.map(function (o, i) {
-                return { label: o.label + '   (' + o.chans.length + (o.chans.length === 1 ? ' Sender)' : ' Sender)'), primary: i === 0, action: function () { channels(o); } };
+            var buttons = [];
+            o.sure.forEach(function (x, i) {
+                buttons.push({ label: x.label + '   (' + x.chans.length + ' Sender)', primary: i === 0, action: function () { channels(x, choose); } });
+            });
+            o.guess.forEach(function (x) {
+                buttons.push({ label: 'Alle ' + x.label + '-Sender anzeigen (ohne Gewähr)', action: function () { channels(x, choose); } });
             });
             buttons.push({ label: 'Schließen', action: function () { } });
-            Modal.open(title, when, buttons);
+            var text = o.sure.length ? when
+                : when + ' · Kein Sender in deiner Liste zeigt dieses Spiel laut Sendername oder Programm.' + (o.guess.length ? '' : ' Voraussichtlich: ' + (Football.rights(m) || 'unbekannt') + '.');
+            Modal.open(title, text, buttons);
             if (Modal.node) Modal.node.classList.add('modal-list');
+        }
+        // Genau ein sicherer Treffer: direkt die Senderliste
+        if (o.sure.length === 1 && !o.guess.length) { channels(o.sure[0], function () { }); return; }
+        if (!o.sure.length && !o.guess.length) {
+            var r = Football.rights(m);
+            toast(title + ': kein passender Sender in deiner Liste gefunden' + (r ? ' (voraussichtlich ' + r + ').' : '.'), 6000);
+            return;
         }
         choose();
     };
