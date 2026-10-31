@@ -2202,7 +2202,7 @@
         data: null, at: 0, pending: null, searchSeq: 0, searchCb: {},
         load: function (force) {
             var self = this;
-            if (!force && this.data && Date.now() - this.at < 8000) return Promise.resolve(this.data);
+            if (!force && this.data && Date.now() - this.at < 15000) return Promise.resolve(this.data);
             if (this.pending) return this.pending;
             this.pending = fetch(REMOTE.website + 'api/fussball').then(function (r) { return r.json(); }).then(function (d) {
                 self.pending = null;
@@ -5423,7 +5423,7 @@
         if (!this.timer) this.timer = setInterval(function () {
             if (Nav.top() !== self || Modal.node) return;
             if (Date.now() - Football.lastReload >= 600000) self.refreshChannels(false); else self.reload();
-        }, 10000);
+        }, 20000);
     };
     /** Senderliste neu laden und Event-Sender neu suchen. manual: per Knopf (mit Meldung) */
     FootballScreen.prototype.refreshChannels = function (manual) {
