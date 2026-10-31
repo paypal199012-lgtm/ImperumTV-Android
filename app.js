@@ -5360,15 +5360,19 @@
                 return s;
             }
             teams.appendChild(side(m.h, true));
-            var live = m.s === 'IN_PLAY' || m.s === 'PAUSED';
-            var mid = h('span', 'fb-mid' + (live ? ' live' : ''), (live || m.s === 'FINISHED') && m.sc[0] !== null ? m.sc[0] + ' : ' + m.sc[1] : '–');
+            var live = /^(IN_PLAY|PAUSED|LIVE|EXTRA_TIME|PENALTY_SHOOTOUT|SUSPENDED)$/.test(m.s);
+            var hasScore = m.sc && m.sc[0] !== null && m.sc[0] !== undefined && (live || m.s === 'FINISHED' || m.s === 'AWARDED' || m.t <= Date.now());
+            var mid = h('span', 'fb-mid' + (live ? ' live' : ''), hasScore ? m.sc[0] + ' : ' + m.sc[1] : '–');
             teams.appendChild(mid);
             teams.appendChild(side(m.a, false));
             row.appendChild(teams);
-            row.appendChild(h('div', 'fb-state' + (live ? ' live' : ''), live ? (m.s === 'PAUSED' ? 'HALBZEIT' : 'LIVE') : m.s === 'FINISHED' ? 'Ende' : m.s === 'POSTPONED' ? 'verlegt' : ''));
+            var stTxt = live ? ({ PAUSED: 'HALBZEIT', EXTRA_TIME: 'VERLÄNGERUNG', PENALTY_SHOOTOUT: 'ELFMETER', SUSPENDED: 'UNTERBROCHEN' }[m.s] || 'LIVE')
+                : (m.s === 'FINISHED' || m.s === 'AWARDED') ? 'Ende' : m.s === 'POSTPONED' ? 'verlegt' : '';
+            row.appendChild(h('div', 'fb-state' + (live ? ' live' : ''), stTxt));
             var tv = h('div', 'fb-tv');
-            var r = m.s === 'FINISHED' ? '' : Football.rights(m);
-            if (m.s !== 'FINISHED') tv.appendChild(h('span', 'fb-guess', r ? r : 'Sender unbekannt'));
+            var over = m.s === 'FINISHED' || m.s === 'AWARDED';
+            var r = over ? '' : Football.rights(m);
+            if (!over) tv.appendChild(h('span', 'fb-guess', r ? r : 'Sender unbekannt'));
             row.appendChild(tv);
             list.appendChild(focusable(row, 'fbm-' + m.id, function () { self.open(m); }, 'fblist'));
         });
