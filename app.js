@@ -3501,7 +3501,6 @@
         if (License.known() && !License.activated() && !License.free()) {
             col1.appendChild(h('div', 'pl-price', 'Danach ' + REMOTE.price + ' einmalig auf der Website aktivieren.'));
         }
-        col1.appendChild(h('div', 'pl-site', REMOTE.website.replace(/^https?:\/\//, '').replace(/\/$/, '')));
         col2.appendChild(h('div', 'pl-label', 'MAC-Adresse'));
         col2.appendChild(h('div', 'pl-value', Device.macText()));
         col2.appendChild(h('div', 'pl-label', 'Geräte-Schlüssel'));
