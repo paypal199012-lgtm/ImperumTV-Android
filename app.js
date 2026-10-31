@@ -2248,7 +2248,14 @@
                 if (/#{2,}|^\s*[-=*#]|[-=*]{3,}/.test(n)) return;          // Trennzeilen wie „### DAZN EXCLUSIVE ###“
                 for (var i = 0; i < keys.length; i++) if (me.PATTERNS[keys[i]].test(n)) { out.push(c); return; }
             });
-            out.sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'de', { numeric: true }); });
+            // Deutsche Sender zuerst (DE:, DE|, DE GO …), ausländische (AT, CH, IT, FR, UK …) ans Ende
+            function rank(n) {
+                n = String(n || '').toUpperCase();
+                if (/^\s*(DE|GER|GERMANY|DEUTSCHLAND)\b/.test(n)) return 0;
+                if (/^\s*(AT|CH|IT|FR|ES|UK|GB|US|NL|PL|TR|PT|BE|AR|AL|EX[- ]?YU)\b/.test(n)) return 2;
+                return 1;
+            }
+            out.sort(function (a, b) { return rank(a.name) - rank(b.name) || String(a.name).localeCompare(String(b.name), 'de', { numeric: true }); });
             return out.slice(0, 80);
         },
         /** Auswahl beim Spiel: im Programm gefunden, Einzelspiel, Konferenz … */
