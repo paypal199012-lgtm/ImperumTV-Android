@@ -7970,7 +7970,7 @@
                     var vpnOffer = !acc.demo && i.has && i.state !== 'an';
                     Nav.replace(new PlaylistsScreen(vpnOffer ? '' : (e.message || String(e))));
                     if (vpnOffer) OVpn.offerRetry(e, function () { start(acc); });
-                }, pending, true);
+                }, pending);
             });
         }
 
