@@ -284,8 +284,11 @@ class MainActivity : Activity() {
                 // Poster verkleinert liefern (läuft im Hintergrund, nicht auf dem Haupt-Thread)
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     val uri = request.url
-                    if (uri.host != THUMB_HOST) return null
-                    return thumbResponse(uri)
+                    if (uri.host == THUMB_HOST) return thumbResponse(uri)
+                    // Anfragen an den IPTV-Server selbst stellen: ohne die Zusatz-Kennungen der Oberfläche
+                    // (Origin: null, X-Requested-With …), die manche Server/Firewalls mit 403 ablehnen
+                    if (isProviderApi(request)) return try { providerResponse(uri.toString()) } catch (e: Throwable) { null }
+                    return null
                 }
             }
             webChromeClient = WebChromeClient()
@@ -822,6 +825,78 @@ class MainActivity : Activity() {
     // Hier wird jedes Bild einmal geladen, klein gerechnet und als kleines JPEG im Zwischenspeicher abgelegt.
 
     private val thumbDir: File by lazy { File(cacheDir, "thumbs").apply { mkdirs() } }
+
+    // ---------- Anfragen an den IPTV-Server (Xtream) ----------
+
+    private val apiAgents: List<String> by lazy {
+        listOf("ImperumTV/1.0 (Linux; Android " + Build.VERSION.RELEASE + ")", "okhttp/4.12.0", "VLC/3.0.20 LibVLC/3.0.20")
+    }
+
+    private fun isProviderApi(request: WebResourceRequest): Boolean {
+        if (request.method != "GET") return false
+        val uri = request.url
+        val scheme = uri.scheme ?: return false
+        if (scheme != "http" && scheme != "https") return false
+        val path = (uri.path ?: "").lowercase()
+        return path.endsWith("/player_api.php") || path.endsWith("/get.php") || path.endsWith("/xmltv.php") || path.endsWith("/panel_api.php")
+    }
+
+    /** Stellt die Anfrage selbst. Lehnt der Server mit 403 ab, wird es mit einer anderen Kennung erneut versucht;
+     *  die passende Kennung wird pro Server gemerkt und auch für den Player benutzt. */
+    private fun providerResponse(address: String): WebResourceResponse? {
+        val host = Uri.parse(address).host ?: return null
+        val prefs = getSharedPreferences("api_agents", MODE_PRIVATE)
+        val known = prefs.getString(host, null)
+        val order = if (known != null) listOf(known) + apiAgents.filter { it != known } else apiAgents
+        var last: WebResourceResponse? = null
+        for ((i, agent) in order.withIndex()) {
+            val res = providerFetch(address, agent) ?: return last
+            val (code, conn) = res
+            if (code == 403 && i < order.size - 1) {
+                try { conn.errorStream?.close() } catch (e: Throwable) { }
+                conn.disconnect()
+                continue
+            }
+            if (code in 200..299) {
+                if (agent != known) prefs.edit().putString(host, agent).apply()
+                if (agent != apiAgents[0]) { try { httpFactory.setUserAgent(agent) } catch (e: Throwable) { } }
+            }
+            val type = (conn.contentType ?: "application/json").substringBefore(';').trim().ifEmpty { "application/json" }
+            val charset = Regex("charset=([^;]+)", RegexOption.IGNORE_CASE).find(conn.contentType ?: "")?.groupValues?.get(1)?.trim() ?: "utf-8"
+            val body = try { if (code >= 400) conn.errorStream else conn.inputStream } catch (e: Throwable) { conn.errorStream }
+            val reason = conn.responseMessage?.takeIf { it.isNotBlank() } ?: (if (code in 200..299) "OK" else "Error")
+            val headers = mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store")
+            val status = if (code in 300..399 || code < 100 || code > 599) 502 else code
+            last = WebResourceResponse(type, charset, status, reason, headers, body ?: java.io.ByteArrayInputStream(ByteArray(0)))
+            return last
+        }
+        return last
+    }
+
+    /** GET mit Weiterleitungen (auch http ↔ https). null = Server nicht erreichbar. */
+    private fun providerFetch(address: String, agent: String): Pair<Int, HttpURLConnection>? {
+        var url = URL(address)
+        var redirects = 0
+        while (true) {
+            val conn = url.openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 60_000
+            conn.setRequestProperty("User-Agent", agent)
+            conn.setRequestProperty("Accept", "*/*")
+            conn.setRequestProperty("Connection", "keep-alive")
+            val code = try { conn.responseCode } catch (e: Throwable) { conn.disconnect(); return null }
+            if (code in 300..399 && redirects < 5) {
+                val loc = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (loc.isNullOrBlank()) return null
+                url = URL(url, loc)
+                redirects++
+                continue
+            }
+            return Pair(code, conn)
+        }
+    }
 
     private fun thumbResponse(uri: Uri): WebResourceResponse {
         val src = uri.getQueryParameter("u")
