@@ -367,6 +367,15 @@
     // =====================================================================
 
     var scale = 1, offX = 0, offY = 0;
+    // Breite der Oberfläche: 1920 (16:9). Breitere Bildschirme (Handys 19,5:9 / 20:9) bekommen mehr Breite statt Ränder.
+    var SW = 1920, wideStyle = null;
+    function setStageWidth(sw) {
+        SW = sw;
+        if (!wideStyle) { wideStyle = document.createElement('style'); (document.head || document.documentElement).appendChild(wideStyle); }
+        wideStyle.textContent = sw === 1920 ? '' :
+            '#stage,#app,.detail-bg,.detail-shade,#player-ui,#loader,.pl,.eg,#modal,.trailer{width:' + sw + 'px !important}';
+        if (document.body) document.body.classList.toggle('wide', sw > 1920);
+    }
     function viewportSize() {
         var de = document.documentElement;
         var w = window.innerWidth || (de && de.clientWidth) || 0;
@@ -377,8 +386,14 @@
     }
     function applyScale() {
         var vp = viewportSize(), w = vp.w, hh = vp.h;
-        scale = Math.min(w / 1920, hh / 1080);
-        offX = Math.round((w - 1920 * scale) / 2);
+        // Handy mit Kamera-Loch: links/rechts etwas Abstand lassen (Android meldet ihn)
+        var ins = { l: 0, r: 0 };
+        try { if (window.AndroidBridge && AndroidBridge.safeInsets) ins = JSON.parse(AndroidBridge.safeInsets()) || ins; } catch (e) { /* egal */ }
+        var il = Math.max(0, ins.l || 0), ir = Math.max(0, ins.r || 0), uw = Math.max(100, w - il - ir);
+        var sw = uw / hh > 16 / 9 + 0.03 ? Math.min(2560, Math.round(1080 * uw / hh)) : 1920;
+        if (sw !== SW) setStageWidth(sw);
+        scale = Math.min(uw / SW, hh / 1080);
+        offX = il + Math.round((uw - SW * scale) / 2);
         offY = Math.round((hh - 1080 * scale) / 2);
         var st = $('#stage');
         st.style.transform = 'scale(' + scale + ')';
@@ -1519,6 +1534,26 @@
                 se: 'Schweden', no: 'Norwegen', dk: 'Dänemark', ro: 'Rumänien', hr: 'Kroatien', rs: 'Serbien', al: 'Albanien', ca: 'Kanada' };
             return names[m[1].toLowerCase()] || m[1].toUpperCase();
         },
+        /** VPN ein/aus (gleich wie in den Einstellungen) */
+        toggle: function () {
+            var st = this.info().state;
+            var on = st === 'aus' || st === 'fehler' || st === 'kein Zugang' || !st;
+            try { AB.ovpnConnect(on); } catch (e) { /* egal */ }
+            return on;
+        },
+        /** Knopf für den Wiedergabelisten-Bildschirm: verbinden, bevor eine Liste geladen wird */
+        button: function (key, group) {
+            var self = this, node = this.badge();
+            if (!node) return null;
+            node.className += ' vpn-btn';
+            var i = this.info(), span = node.getElementsByTagName('span')[0];
+            if (span && (i.state === 'aus' || i.state === 'fehler' || !i.state)) span.textContent = i.state === 'fehler' ? 'VPN-Fehler · erneut verbinden' : 'VPN verbinden';
+            if (span && i.state === 'an') span.textContent += ' · trennen';
+            return focusable(node, key, function () {
+                var on = self.toggle();
+                if (span) span.textContent = on ? 'VPN verbindet …' : 'VPN wird getrennt …';
+            }, group);
+        },
         /** Anzeige auf dem Startbildschirm (nur wenn ein VPN eingerichtet ist) */
         badge: function () {
             if (!this.native()) return null;
@@ -1550,7 +1585,7 @@
             Report.send('fehler', 'OpenVPN: ' + (err || 'Verbindung fehlgeschlagen') + (log ? '\n\nProtokoll:\n' + log : ''));
         }
         var top = Nav.top();
-        if (top && (top instanceof SettingsScreen || top instanceof HomeScreen) && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
+        if (top && (top instanceof SettingsScreen || top instanceof HomeScreen || top instanceof PlaylistsScreen) && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
     };
 
     var Remote = {
@@ -2206,7 +2241,7 @@
                 AB.setRect(fr.x, fr.y, fr.w, fr.h);
                 return;
             }
-            var r = rect || { x: 0, y: 0, w: 1920, h: 1080 };
+            var r = rect || { x: 0, y: 0, w: SW, h: 1080 };
             var node = this.tizen ? $('#av-player') : this.video;
             node.style.left = (offX + r.x * scale) + 'px';
             node.style.top = (offY + r.y * scale) + 'px';
@@ -2298,7 +2333,7 @@
         applyAspect: function (mode) {
             // Festes Seitenverhältnis (16:9, 4:3, 21:9): Bildfläche mittig in genau diesem Format, Bild darin strecken
             var ratio = this.ratioOf(mode);
-            var area = this.curRect || { x: 0, y: 0, w: 1920, h: 1080 };
+            var area = this.curRect || { x: 0, y: 0, w: SW, h: 1080 };
             if (ratio) {
                 var bw = area.w, bh = area.w / ratio;
                 if (bh > area.h) { bh = area.h; bw = area.h * ratio; }
@@ -2963,6 +2998,8 @@
             head.appendChild(h('div', 'pl-divider'));
         }
         head.appendChild(h('div', 'pl-title', 'Wiedergabelisten'));
+        var vpnBtn = OVpn.button('pl-vpn', 'plhead');
+        if (vpnBtn) head.appendChild(vpnBtn);
         var logo = h('img', 'pl-logo');
         logo.src = 'img/icon.png';
         head.appendChild(logo);
@@ -6350,7 +6387,15 @@
         Player.init();
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
         setTimeout(function () { Report.flushNative(); }, 8000);   // Absturzbericht vom letzten Mal an die Website
-        setTimeout(function () { OVpn.sync(); }, 3500);             // eigene OpenVPN-Datei von der Website
+        setTimeout(function () {
+            var had = OVpn.native() && OVpn.info().has;
+            OVpn.sync(function () {
+                var top = Nav.top();
+                if (!had && OVpn.native() && OVpn.info().has && top && (top instanceof PlaylistsScreen || top instanceof HomeScreen) && !Modal.node) {
+                    top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top);
+                }
+            });
+        }, 3500);             // eigene OpenVPN-Datei von der Website
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', function (e) { if (e.keyCode === KEY.ENTER) LongPress.up(); });
 
