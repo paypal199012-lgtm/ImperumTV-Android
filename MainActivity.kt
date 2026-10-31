@@ -303,6 +303,14 @@ class MainActivity : Activity() {
         trimThumbs()
         epgLoadSaved()
 
+        // VPN (nur eigene Geräte, Zugang kommt vom Admin): Stand an die Oberfläche melden, ggf. gleich verbinden
+        ImperumVpn.listener = { s, e ->
+            handler.post {
+                if (uiReady) webView.evaluateJavascript("window.__androidVpn && window.__androidVpn(${JSONObject.quote(s)}, ${JSONObject.quote(e)})", null)
+            }
+        }
+        try { ImperumVpn.autoStart(this) } catch (e: Throwable) { }
+
         // Geplante Aufnahmen: Wecker neu stellen, verpasste Starts nachholen
         try { Recorder.armAll(this) } catch (e: Exception) { }
         // Android 13+: Erlaubnis für die Benachrichtigung während einer Aufnahme
@@ -429,6 +437,10 @@ class MainActivity : Activity() {
     @Deprecated("Einfachster Weg, die Position vom externen Player zurückzubekommen")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == ImperumVpn.REQUEST) {
+            try { ImperumVpn.onPermission(this, resultCode == RESULT_OK) } catch (e: Throwable) { }
+            return
+        }
         if (requestCode != REQ_EXTERNAL || !uiReady) return
         val extras = data?.extras
         fun num(vararg keys: String): Long {
@@ -1063,6 +1075,30 @@ class MainActivity : Activity() {
             } catch (e: Throwable) { }
             handler.post { try { if (uiReady) webView.clearCache(true) } catch (e: Throwable) { } }
             return freed.toString()
+        }
+
+        /** VPN: Ist WireGuard in dieser Version eingebaut? */
+        @JavascriptInterface
+        fun vpnAvailable(): Boolean = ImperumVpn.available()
+
+        /** VPN-Stand: {"state":"an|aus|verbindet|fehler|kein Zugang","error":"…","enabled":true,"has":true} */
+        @JavascriptInterface
+        fun vpnInfo(): String = try {
+            JSONObject().put("state", ImperumVpn.state).put("error", ImperumVpn.lastError)
+                .put("enabled", ImperumVpn.enabled(this@MainActivity))
+                .put("has", ImperumVpn.config(this@MainActivity).isNotBlank()).toString()
+        } catch (e: Throwable) { "{}" }
+
+        /** Zugang vom Admin übernehmen ("" = entfernt) */
+        @JavascriptInterface
+        fun vpnSetConfig(conf: String) {
+            handler.post { try { ImperumVpn.setConfig(this@MainActivity, conf) } catch (e: Throwable) { } }
+        }
+
+        /** VPN in den Einstellungen ein-/ausschalten */
+        @JavascriptInterface
+        fun vpnSetEnabled(on: Boolean) {
+            handler.post { try { ImperumVpn.setEnabled(this@MainActivity, on) } catch (e: Throwable) { } }
         }
 
         /** Gerätename für Fehlerberichte */
