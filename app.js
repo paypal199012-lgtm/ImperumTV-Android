@@ -355,6 +355,7 @@
         star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
         refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
         user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>',
+        ball: '<circle cx="12" cy="12" r="9"/><path d="M12 7.2l4.2 3-1.6 5h-5.2l-1.6-5z"/><path d="M12 7.2V3M16.2 10.2l4.1-1.4M14.6 15.2l2.6 3.6M9.4 15.2l-2.6 3.6M7.8 10.2L3.7 8.8"/>',
         logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/>',
         crown: '<path d="M3 18h18M4 16l-1-9 5 4 4-6 4 6 5-4-1 9z"/>',
         list: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/>',
@@ -491,7 +492,7 @@
     }
 
     var VERTICAL_LOCK = { cats: true, list: true, grid: true };
-    var HORIZONTAL_LOCK = { plgrid: true, sethead: true, setquick: true, similar: true, cast: true, seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true, topbtns: true };
+    var HORIZONTAL_LOCK = { fbchips: true, plgrid: true, sethead: true, setquick: true, similar: true, cast: true, seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true, topbtns: true };
 
     var Focus = {
         cur: null,
@@ -2182,6 +2183,87 @@
             return map;
         }
     };
+    // =====================================================================
+    // Fußball: Spielplan von der Website (football-data.org) + passender Sender aus dem Programm
+    // =====================================================================
+    var Football = {
+        LEAGUES: [['', 'Alle'], ['BL1', 'Bundesliga'], ['CL', 'Champions League'], ['PL', 'Premier League'], ['SA', 'Serie A'], ['PD', 'LaLiga'], ['FL1', 'Ligue 1']],
+        SHORT: { BL1: 'BL', CL: 'CL', PL: 'PL', SA: 'SA', PD: 'LL', FL1: 'L1' },
+        STOP: { 'club': 1, 'real': 1, 'borussia': 1, 'united': 1, 'city': 1, 'sporting': 1, 'athletic': 1, 'atletico': 1, 'olympique': 1, 'stade': 1, 'calcio': 1, 'football': 1, 'fussball': 1, 'hotspur': 1, 'albion': 1, 'wanderers': 1, 'deportivo': 1, 'racing': 1, 'union': 1, 'saint': 1, 'paris': 1, 'germain': 1, 'munchen': 1, 'internazionale': 1, 'milano': 1 },
+        data: null, at: 0, pending: null, searchSeq: 0, searchCb: {},
+        load: function (force) {
+            var self = this;
+            if (!force && this.data && Date.now() - this.at < 120000) return Promise.resolve(this.data);
+            if (this.pending) return this.pending;
+            this.pending = fetch(REMOTE.website + 'api/fussball').then(function (r) { return r.json(); }).then(function (d) {
+                self.pending = null;
+                if (d && d.ok) { self.data = d; self.at = Date.now(); }
+                return d;
+            }, function () { self.pending = null; return { ok: false, error: 'net' }; });
+            return this.pending;
+        },
+        fold: function (t) {
+            t = String(t || '').toLowerCase();
+            try { t = t.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) { /* alte Geräte */ }
+            return t.replace(/ß/g, 'ss');
+        },
+        /** Suchwörter für eine Mannschaft, z. B. „Bayern“, „Dortmund“, „Inter“ */
+        words: function (team) {
+            var me = this, out = [];
+            [team.s, team.n].forEach(function (name) {
+                me.fold(name).split(/[^a-z0-9]+/).forEach(function (w) {
+                    if (w.length >= 4 && !me.STOP[w] && out.indexOf(w) < 0) out.push(w);
+                });
+            });
+            if (!out.length && team.x && team.x.length >= 3) out.push(this.fold(team.x));
+            return out.slice(0, 3);
+        },
+        /** Wer zeigt es in Deutschland? (Rechtelage, ohne Gewähr) */
+        rights: function (m) {
+            var d = new Date(m.t), wd = d.getDay(), hr = d.getHours();
+            switch (m.c) {
+                case 'BL1':
+                    if (wd === 0) return 'DAZN';
+                    if (wd === 6 && hr < 17) return 'Sky · Konferenz DAZN';
+                    return 'Sky';
+                case 'PL': return 'Sky';
+                case 'SA': case 'PD': return 'DAZN';
+                case 'CL': return wd === 2 ? 'DAZN · Prime Video' : 'DAZN';
+                default: return '';
+            }
+        },
+        /** Sender im Programm suchen (Android/Fire TV). cb({spielId: [Sender…]}) */
+        findChannels: function (matches, cb) {
+            if (!AB || !AB.epgSearch || !Epg.valid) { cb({}); return; }
+            var me = this, q = [];
+            matches.forEach(function (m) {
+                if (m.s === 'FINISHED' || m.s === 'POSTPONED' || m.s === 'CANCELLED') return;
+                var w = me.words(m.h).concat(me.words(m.a));
+                if (w.length) q.push({ k: String(m.id), w: w, t: m.t });
+            });
+            if (!q.length) { cb({}); return; }
+            var id = 'fb' + (++this.searchSeq);
+            this.searchCb[id] = function (raw) {
+                var res = {}, hits = {};
+                try { hits = JSON.parse(raw || '{}') || {}; } catch (e) { hits = {}; }
+                var byEpg = {};
+                Data.channels.forEach(function (c) { if (c.epg && !byEpg[c.epg]) byEpg[c.epg] = c; });
+                Object.keys(hits).forEach(function (k) {
+                    var list = [];
+                    hits[k].forEach(function (x) { var c = byEpg[x[0]]; if (c && list.indexOf(c) < 0) list.push(c); });
+                    if (list.length) res[k] = list;
+                });
+                cb(res);
+            };
+            try { AB.epgSearch(JSON.stringify(q), id); } catch (e) { delete this.searchCb[id]; cb({}); }
+        }
+    };
+    window.__androidEpgSearch = function (id, raw) {
+        var f = Football.searchCb[id];
+        delete Football.searchCb[id];
+        if (f) f(raw);
+    };
+
     window.__androidEpg = function (state, info) {
         if (state === 'done') {
             Epg.valid = true; Epg.cache = {}; Epg.nowCache = null; Epg.status = info;
@@ -4031,7 +4113,7 @@
         );
         if (Rec.available()) tileList.push(['recs', 'rec', 'AUFNAHMEN', function () { Nav.push(new RecordingsScreen()); }]);
         if (!Profiles.isKids()) tileList.push(           // Kinder-Profil: keine Einstellungen, keine Listen
-            ['account', 'user', 'KONTO', function () { Nav.push(new AccountScreen()); }],
+            ['football', 'ball', 'FUSSBALL', function () { Nav.push(new FootballScreen()); }],
             ['settings', 'gear', 'EINSTELLUNGEN', function () { Nav.push(new SettingsScreen()); }],
             ['lists', 'list', 'LISTEN', function () { Nav.push(new PlaylistsScreen()); }]
         );
@@ -5152,6 +5234,132 @@
     // =====================================================================
     // Konto
     // =====================================================================
+
+    // =====================================================================
+    // Fußball-Bildschirm: wer spielt wann, auf welchem Sender
+    // =====================================================================
+    function FootballScreen() { this.league = ''; this.found = {}; this.timer = null; }
+    FootballScreen.prototype.render = function (root) {
+        var self = this;
+        root.appendChild(topbar('Fußball', 'OK: Sender einschalten'));
+        var wrap = h('div', 'fb');
+        var chips = h('div', 'fb-chips');
+        Football.LEAGUES.forEach(function (l) {
+            var c = h('div', 'fb-chip' + (self.league === l[0] ? ' active' : ''), l[1]);
+            chips.appendChild(focusable(c, 'fbl-' + (l[0] || 'all'), function () {
+                self.league = l[0]; self.focusKey = 'fbl-' + (l[0] || 'all'); Nav.show(self, true);
+            }, 'fbchips'));
+        });
+        wrap.appendChild(chips);
+        var list = h('div', 'fb-list scroll');
+        wrap.appendChild(list);
+        root.appendChild(wrap);
+        var d = Football.data;
+        if (!d) {
+            list.appendChild(h('div', 'fb-note', 'Spielplan wird geladen …'));
+            this.reload();
+        } else this.fill(list, d);
+        if (!this.focusKey) this.focusKey = 'fbl-' + (this.league || 'all');
+        if (!this.timer) this.timer = setInterval(function () { if (Nav.top() === self) self.reload(); }, 90000);
+    };
+    FootballScreen.prototype.hide = function () { clearInterval(this.timer); this.timer = null; };
+    FootballScreen.prototype.reload = function () {
+        var self = this;
+        Football.load(false).then(function (d) {
+            if (Nav.top() !== self || Modal.node) return;
+            if (!d || !d.ok) {
+                var list = document.querySelector('#app .fb-list');
+                if (!list) return;
+                list.innerHTML = '';
+                list.appendChild(h('div', 'fb-note', d && d.error === 'nokey'
+                    ? 'Der Fußball-Spielplan ist noch nicht eingerichtet.'
+                    : 'Der Spielplan ist gerade nicht erreichbar. Bitte später noch einmal versuchen.'));
+                return;
+            }
+            var key = Focus.cur ? Focus.cur.getAttribute('data-key') : null;
+            if (key) self.focusKey = key;
+            Nav.show(self, true);
+            Football.findChannels(d.matches, function (found) {
+                if (Nav.top() !== self) return;
+                self.found = found;
+                self.markChannels();
+            });
+        });
+    };
+    FootballScreen.prototype.fill = function (list, d) {
+        var self = this, lastDay = '', now = Date.now();
+        var today = new Date(); today.setHours(0, 0, 0, 0);
+        var days = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+        var months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+        var shown = d.matches.filter(function (m) {
+            if (self.league && m.c !== self.league) return false;
+            if (m.s === 'FINISHED' && m.t < now - 6 * 3600 * 1000) return false;   // alte Ergebnisse weglassen
+            return m.s !== 'CANCELLED';
+        });
+        if (!shown.length) { list.appendChild(h('div', 'fb-note', 'In den nächsten Tagen keine Spiele.')); return; }
+        shown.forEach(function (m) {
+            var dt = new Date(m.t), dd = new Date(dt); dd.setHours(0, 0, 0, 0);
+            var diff = Math.round((dd - today) / 86400000);
+            var label = (diff === 0 ? 'Heute · ' : diff === 1 ? 'Morgen · ' : diff === -1 ? 'Gestern · ' : '') +
+                days[dt.getDay()] + ', ' + dt.getDate() + '. ' + months[dt.getMonth()];
+            if (label !== lastDay) { list.appendChild(h('div', 'fb-day', label)); lastDay = label; }
+            var row = h('div', 'fb-row');
+            row.setAttribute('data-match', String(m.id));
+            row.appendChild(h('div', 'fb-time', fmtClock(dt)));
+            row.appendChild(h('div', 'fb-lg lg-' + m.c, Football.SHORT[m.c] || m.c));
+            var teams = h('div', 'fb-teams');
+            function side(t, home) {
+                var s = h('span', 'fb-team' + (home ? ' home' : ''));
+                if (t.l) { var img = h('img', 'fb-crest'); img.src = t.l; img.alt = ''; img.onerror = function () { img.style.visibility = 'hidden'; }; s.appendChild(img); }
+                s.appendChild(h('span', 'fb-name', t.s || t.n));
+                return s;
+            }
+            teams.appendChild(side(m.h, true));
+            var live = m.s === 'IN_PLAY' || m.s === 'PAUSED';
+            var mid = h('span', 'fb-mid' + (live ? ' live' : ''), (live || m.s === 'FINISHED') && m.sc[0] !== null ? m.sc[0] + ' : ' + m.sc[1] : '–');
+            teams.appendChild(mid);
+            teams.appendChild(side(m.a, false));
+            row.appendChild(teams);
+            row.appendChild(h('div', 'fb-state' + (live ? ' live' : ''), live ? (m.s === 'PAUSED' ? 'HALBZEIT' : 'LIVE') : m.s === 'FINISHED' ? 'Ende' : m.s === 'POSTPONED' ? 'verlegt' : ''));
+            var tv = h('div', 'fb-tv');
+            var r = m.s === 'FINISHED' ? '' : Football.rights(m);
+            if (m.s !== 'FINISHED') tv.appendChild(h('span', 'fb-guess', r ? r : 'Sender unbekannt'));
+            row.appendChild(tv);
+            list.appendChild(focusable(row, 'fbm-' + m.id, function () { self.open(m); }, 'fblist'));
+        });
+        if (Object.keys(this.found).length) this.markChannels();
+    };
+    /** Gefundene Sender aus deiner Liste eintragen */
+    FootballScreen.prototype.markChannels = function () {
+        var self = this;
+        var rows = document.querySelectorAll('#app .fb-row');
+        for (var i = 0; i < rows.length; i++) {
+            var list = self.found[rows[i].getAttribute('data-match')];
+            if (!list || !list.length) continue;
+            var tv = rows[i].querySelector('.fb-tv');
+            tv.innerHTML = '';
+            tv.appendChild(h('span', 'fb-ch', '▶ ' + list[0].name));
+            if (list.length > 1) tv.appendChild(h('span', 'fb-more', '+' + (list.length - 1)));
+        }
+    };
+    FootballScreen.prototype.open = function (m) {
+        var list = this.found[String(m.id)];
+        var title = (m.h.s || m.h.n) + ' – ' + (m.a.s || m.a.n);
+        if (!list || !list.length) {
+            var r = Football.rights(m);
+            toast(r ? title + ': voraussichtlich bei ' + r + '. Kein passender Sender in deinem Programm gefunden.' : title + ': kein passender Sender in deinem Programm gefunden.', 6000);
+            return;
+        }
+        function play(ch) {
+            var i = Data.channels.indexOf(ch);
+            Nav.push(new PlayerScreen(Data.channels, i < 0 ? 0 : i, 'live'));
+        }
+        if (list.length === 1) { play(list[0]); return; }
+        var buttons = list.map(function (ch, i) { return { label: '▶  ' + ch.name, primary: i === 0, action: function () { play(ch); } }; });
+        buttons.push({ label: 'Schließen', action: function () { } });
+        Modal.open(title, fmtClock(new Date(m.t)) + ' Uhr', buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+    };
 
     function AccountScreen() { }
     AccountScreen.prototype.render = function (root) {
