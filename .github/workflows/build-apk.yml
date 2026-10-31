@@ -26,8 +26,18 @@ jobs:
         run: sh setup-android.sh
 
       - name: APK bauen
+        id: full
+        continue-on-error: true
         working-directory: build-project
         run: gradle assembleRelease --no-daemon --stacktrace
+
+      # Klappt der Bau mit OpenVPN nicht, wird die App ohne OpenVPN gebaut (Updates kommen trotzdem)
+      - name: APK ohne OpenVPN bauen (nur falls oben ein Fehler war)
+        if: steps.full.outcome == 'failure'
+        run: |
+          echo "::warning::OpenVPN ließ sich nicht mitbauen – APK wird ohne OpenVPN gebaut"
+          OPENVPN=0 sh setup-android.sh
+          cd build-project && gradle assembleRelease --no-daemon --stacktrace
 
       - name: APK umbenennen
         run: cp build-project/app/build/outputs/apk/release/app-release.apk ImperumTV.apk
