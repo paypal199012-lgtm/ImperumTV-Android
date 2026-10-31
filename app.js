@@ -6774,8 +6774,7 @@
         var empty = audio ? 'Dieser Film hat nur eine Tonspur.' : 'Dieser Film hat keine Untertitel.';
         if (this.kind === 'live') empty = audio ? 'Dieser Sender hat nur eine Tonspur.' : 'Dieser Sender sendet keine Untertitel.';
         buttons.push({ label: 'Schließen', action: function () { self.showOverlay(); } });
-        var hint = audio && this.kind !== 'live' ? 'Filme und Serien starten automatisch auf Deutsch, sonst auf Englisch. Deine Wahl gilt für diesen Film.'
-            : (audio ? 'Die Auswahl merkt sich die App für den nächsten Sender.' : 'Die Auswahl merkt sich die App für den nächsten Film.');
+        var hint = audio ? '' : 'Die Auswahl merkt sich die App für den nächsten Film.';
         Modal.open(audio ? '♪ Sprache' : 'CC Untertitel', (audio ? list.length < 2 : !list.length) ? empty : hint, buttons);
         if (Modal.node) Modal.node.classList.add('modal-list');
         // Fokus auf die gewählte Spur
