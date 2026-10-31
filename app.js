@@ -2202,7 +2202,7 @@
         data: null, at: 0, pending: null, searchSeq: 0, searchCb: {},
         load: function (force) {
             var self = this;
-            if (!force && this.data && Date.now() - this.at < 15000) return Promise.resolve(this.data);
+            if (!force && this.data && Date.now() - this.at < 8000) return Promise.resolve(this.data);
             if (this.pending) return this.pending;
             this.pending = fetch(REMOTE.website + 'api/fussball').then(function (r) { return r.json(); }).then(function (d) {
                 self.pending = null;
@@ -5397,7 +5397,7 @@
             this.reload();
         } else this.fill(list, d);
         if (!this.focusKey) this.focusKey = 'fbl-' + (this.league || 'all');
-        if (!this.timer) this.timer = setInterval(function () { if (Nav.top() === self && !Modal.node) self.reload(); }, 20000);
+        if (!this.timer) this.timer = setInterval(function () { if (Nav.top() === self && !Modal.node) self.reload(); }, 10000);
     };
     FootballScreen.prototype.hide = function () { clearInterval(this.timer); this.timer = null; };
     FootballScreen.prototype.reload = function () {
