@@ -6796,6 +6796,19 @@
         this.start();
         this.showOverlay(this.kind === 'live' ? 2000 : 0);   // Sender gewählt: Name kurz zeigen, dann freies Bild
         var self = this;
+        // Maus/Finger (Handy, BlueStacks): Tippen aufs Bild blendet das Menü ein bzw. wieder aus
+        if (this.tapHandler) this.ui.removeEventListener('click', this.tapHandler);
+        this.tapHandler = function (ev) {
+            if (Nav.top() !== self || Modal.node) return;
+            var t = ev.target;
+            while (t && t !== self.ui) {                      // Klick auf Knopf, Leiste oder Senderliste: nicht umschalten
+                if (t.getAttribute && (t.getAttribute('data-key') || /zap|bar|btn|button|row|pl-bottom|pl-top/.test(t.className || ''))) return;
+                t = t.parentNode;
+            }
+            if (self.zapOpen) { self.closeZap(); self.showOverlay(); return; }
+            if (self.overlay) self.hideOverlay(); else self.showOverlay();
+        };
+        this.ui.addEventListener('click', this.tapHandler);
         clearInterval(this.watchdog);
         this.watchdog = setInterval(function () { self.checkStall(); }, 2000);
     };
@@ -7420,6 +7433,7 @@
         Player.on({});
         Player.aspectKey = null;                           // Vorschau & Co. zeigen immer das ganze Bild
         this.ui.innerHTML = '';
+        if (this.tapHandler) { this.ui.removeEventListener('click', this.tapHandler); this.tapHandler = null; }
         this.ui.classList.add('hidden');
         this.ui.classList.remove('player-ui-visible');
         $('#subtitle').classList.add('hidden');
