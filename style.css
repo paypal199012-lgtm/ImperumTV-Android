@@ -786,7 +786,10 @@ body.touch .settings { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .cast-grid .actor .name { font-size: 17px; line-height: 21px; height: 42px; margin-top: 4px; }
 .cast-grid .cast-inner { white-space: normal; padding: 0; }
 .detail .body.with-plot .episodes { top: 400px; }
-.modal-list .modal-buttons { max-height: 640px; overflow: hidden; position: relative; padding: 4px 0; }
+.modal-list .modal-buttons { max-height: 640px; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; position: relative; padding: 4px 10px 4px 0; scrollbar-width: thin; scrollbar-color: rgba(217,176,102,.7) transparent; }
+.modal-list .modal-buttons::-webkit-scrollbar { width: 8px; }
+.modal-list .modal-buttons::-webkit-scrollbar-track { background: transparent; }
+.modal-list .modal-buttons::-webkit-scrollbar-thumb { background: rgba(217,176,102,.7); border-radius: 4px; }
 .modal-list .modal-box { top: 50%; }
 
 /* Langes Tippen soll keinen Text markieren */
