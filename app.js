@@ -2291,7 +2291,9 @@
                 Data.channels.forEach(function (c) {
                     var n = c.name || '';
                     if (/#{2,}|^\s*[-=*#]|[-=*]{3,}/.test(n)) return;
-                    me._names.push({ c: c, f: me.fold(n) });
+                    var f = me.fold(n);
+                    if (/(^|\|)\s*(ended|ende|beendet|finished|vorbei)([^a-z]|$)/.test(f)) return;   // beendete Events
+                    me._names.push({ c: c, f: f });
                 });
                 this._namesOf = Data.channels;
             }
@@ -2343,6 +2345,25 @@
             }
             return out.filter(function (o) { return o.chans.length; });
         },
+        /** Live-Senderliste beim Anbieter neu laden (für neue Event-Sender).
+         *  Schonend: per Knopf höchstens alle 2 Minuten, automatisch höchstens alle 10 Minuten.
+         *  Antwort: Anzahl der Sender, oder false = zu früh (nichts geladen). */
+        lastReload: Date.now(),
+        reloading: null,
+        reloadChannels: function (manual) {
+            var me = this;
+            if (!Api.acc || Api.acc.demo) return Promise.resolve(false);
+            if (this.reloading) return this.reloading;
+            if (Date.now() - this.lastReload < (manual ? 120000 : 600000)) return Promise.resolve(false);
+            this.lastReload = Date.now();
+            this.reloading = Api.list('get_live_streams', 'live', Api.call('get_live_categories')).then(function (list) {
+                me.reloading = null;
+                if (list && list.length) { Data.channels = list; me._namesOf = null; Epg.nowCache = null; }
+                return list ? list.length : 0;
+            }, function () { me.reloading = null; return false; });
+            return this.reloading;
+        },
+
         /** Auswahl beim Spiel. sure: Sender, die das Spiel nachweislich zeigen (Sendername oder Programm).
          *  guess: alle Sender des Rechteinhabers – nur auf Wunsch, ohne Gewähr. */
         options: function (m, found) {
@@ -5378,7 +5399,9 @@
     function FootballScreen() { this.league = ''; this.found = {}; this.events = {}; this.timer = null; }
     FootballScreen.prototype.render = function (root) {
         var self = this;
-        root.appendChild(topbar('Fußball', 'OK: Sender einschalten'));
+        root.appendChild(topbar('Fußball', ''));
+        var rb = h('div', 'button fb-refresh', '⟳  Sender neu suchen');
+        root.appendChild(focusable(rb, 'fb-refresh', function () { self.refreshChannels(true); }, 'fbtop'));
         var wrap = h('div', 'fb');
         var chips = h('div', 'fb-chips hscroll');
         Football.LEAGUES.forEach(function (l) {
@@ -5397,7 +5420,28 @@
             this.reload();
         } else this.fill(list, d);
         if (!this.focusKey) this.focusKey = 'fbl-' + (this.league || 'all');
-        if (!this.timer) this.timer = setInterval(function () { if (Nav.top() === self && !Modal.node) self.reload(); }, 10000);
+        if (!this.timer) this.timer = setInterval(function () {
+            if (Nav.top() !== self || Modal.node) return;
+            if (Date.now() - Football.lastReload >= 600000) self.refreshChannels(false); else self.reload();
+        }, 10000);
+    };
+    /** Senderliste neu laden und Event-Sender neu suchen. manual: per Knopf (mit Meldung) */
+    FootballScreen.prototype.refreshChannels = function (manual) {
+        var self = this, before = Object.keys(this.events || {}).length;
+        if (manual) toast('Senderliste wird geladen …', 2500);
+        Football.reloadChannels(manual).then(function (n) {
+            if (Nav.top() !== self) return;
+            var key = Focus.cur ? Focus.cur.getAttribute('data-key') : null;
+            if (key) self.focusKey = key;
+            Nav.show(self, true);
+            if (!manual) return;
+            var after = Object.keys(self.events || {}).length, more = after - before;
+            if (n === false) {
+                var min = Math.max(1, Math.round((Date.now() - Football.lastReload) / 60000));
+                toast('Senderliste ist aktuell (vor ' + min + ' Min. geladen). Suche wurde erneuert.', 4000);
+            } else toast(more > 0 ? 'Senderliste neu geladen – ' + more + (more === 1 ? ' neues Spiel' : ' neue Spiele') + ' mit Event-Sender gefunden.'
+                : 'Senderliste neu geladen – keine neuen Event-Sender.', 4500);
+        });
     };
     FootballScreen.prototype.hide = function () { clearInterval(this.timer); this.timer = null; };
     FootballScreen.prototype.reload = function () {
@@ -7670,7 +7714,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { VodPlayer: VodPlayer, OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { Football: Football, VodPlayer: VodPlayer, OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
