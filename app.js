@@ -6774,7 +6774,9 @@
         var empty = audio ? 'Dieser Film hat nur eine Tonspur.' : 'Dieser Film hat keine Untertitel.';
         if (this.kind === 'live') empty = audio ? 'Dieser Sender hat nur eine Tonspur.' : 'Dieser Sender sendet keine Untertitel.';
         buttons.push({ label: 'Schließen', action: function () { self.showOverlay(); } });
-        Modal.open(audio ? '♪ Sprache' : 'CC Untertitel', (audio ? list.length < 2 : !list.length) ? empty : 'Die Auswahl merkt sich die App für den nächsten Film.', buttons);
+        var hint = audio && this.kind !== 'live' ? 'Filme und Serien starten automatisch auf Deutsch, sonst auf Englisch. Deine Wahl gilt für diesen Film.'
+            : (audio ? 'Die Auswahl merkt sich die App für den nächsten Sender.' : 'Die Auswahl merkt sich die App für den nächsten Film.');
+        Modal.open(audio ? '♪ Sprache' : 'CC Untertitel', (audio ? list.length < 2 : !list.length) ? empty : hint, buttons);
         if (Modal.node) Modal.node.classList.add('modal-list');
         // Fokus auf die gewählte Spur
         var sel = Modal.node && Modal.node.querySelector('.button.primary');
@@ -7255,7 +7257,7 @@
     }
 
     // Nur für automatische Tests im Browser
-    window.ImperumTV = { OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
+    window.ImperumTV = { VodPlayer: VodPlayer, OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
