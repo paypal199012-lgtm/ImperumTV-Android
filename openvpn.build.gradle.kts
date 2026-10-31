@@ -16,8 +16,8 @@ android {
                 arguments += listOf("-DANDROID_TOOLCHAIN=clang", "-DANDROID_STL=c++_static")
             }
         }
-        // Fire TV & Handys: nur ARM (spart viel Bauzeit)
-        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
+        // Fire TV & Handys (ARM) und PC-Emulatoren wie BlueStacks (x86)
+        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
     }
 
     sourceSets {

@@ -12,6 +12,7 @@ object ImperumOVpn {
         private set
     var listener: ((String, String) -> Unit)? = null
     fun available(): Boolean = false
+    fun log(): String = ""
     fun initLibrary(c: Context) { }
     fun config(c: Context): String = ""
     fun user(c: Context): String = ""

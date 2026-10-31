@@ -1519,7 +1519,13 @@
     };
     window.__androidOvpn = function (state, err) {
         if (state === 'an') toast('VPN (OpenVPN) verbunden');
-        else if (state === 'fehler') toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 6000);
+        else if (state === 'fehler') {
+            toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 8000);
+            // Protokoll (ohne Passwort) an den Admin-Bereich „Fehlerberichte“
+            var log = '';
+            try { log = AB && AB.ovpnLog ? AB.ovpnLog() : ''; } catch (e) { log = ''; }
+            Report.send('fehler', 'OpenVPN: ' + (err || 'Verbindung fehlgeschlagen') + (log ? '\n\nProtokoll:\n' + log : ''));
+        }
         var top = Nav.top();
         if (top && top instanceof SettingsScreen && !Modal.node) { top.focusKey = Focus.cur ? Focus.cur.getAttribute('data-key') : top.focusKey; Nav.show(top); }
     };

@@ -1158,6 +1158,9 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun ovpnAvailable(): Boolean = ImperumOVpn.available()
 
+        @JavascriptInterface
+        fun ovpnLog(): String = try { ImperumOVpn.log() } catch (e: Throwable) { "" }
+
         /** OpenVPN-Stand: {"state":"an|aus|verbindet|fehler","error":"…","has":true,"user":"…","auto":false} */
         @JavascriptInterface
         fun ovpnInfo(): String = try {

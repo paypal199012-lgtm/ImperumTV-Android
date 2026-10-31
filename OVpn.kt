@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.VpnService
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.privateinternetaccess.android.PIACallbacks
 import com.privateinternetaccess.android.PIAOpenVPNTunnelLibrary
@@ -12,6 +14,7 @@ import de.blinkt.openvpn.VpnProfile
 import de.blinkt.openvpn.core.ConfigParser
 import de.blinkt.openvpn.core.ConnectionStatus
 import de.blinkt.openvpn.core.DeviceStateReceiver
+import de.blinkt.openvpn.core.LogItem
 import de.blinkt.openvpn.core.OpenVPNService
 import de.blinkt.openvpn.core.ProfileManager
 import de.blinkt.openvpn.core.VPNLaunchHelper
@@ -34,6 +37,42 @@ object ImperumOVpn {
         private set
     var listener: ((String, String) -> Unit)? = null
     private var inited = false
+    private var appCtx: Context? = null
+    private val logLines = ArrayDeque<String>()
+    private val main = Handler(Looper.getMainLooper())
+    private var attempt = 0
+    @Volatile private var startedAt = 0L
+    private const val TIMEOUT_MS = 45_000L
+
+    /** Letzte Meldungen der OpenVPN-Bibliothek (für Fehlerberichte, ohne Passwort) */
+    fun log(): String = synchronized(logLines) { logLines.joinToString("\n") }
+
+    private val logListener = object : VpnStatus.LogListener {
+        override fun newLog(logItem: LogItem) {
+            val c = appCtx ?: return
+            val text = try { logItem.getString(c) } catch (e: Throwable) { return } ?: return
+            if (text.isBlank()) return
+            val error = try { logItem.logLevel == VpnStatus.LogLevel.ERROR } catch (e: Throwable) { false }
+            synchronized(logLines) {
+                logLines.addLast((if (error) "FEHLER: " else "") + text.take(300))
+                while (logLines.size > 40) logLines.removeFirst()
+            }
+        }
+    }
+
+    /** Verständlicher Grund aus dem Protokoll */
+    private fun reason(): String {
+        val l = log()
+        return when {
+            Regex("execut|execul|minivpn|Cannot run program|error=8|error=13|No such file", RegexOption.IGNORE_CASE).containsMatchIn(l) ->
+                "Das OpenVPN-Programm startet auf diesem Gerät nicht"
+            Regex("AUTH_FAILED|auth.?fail", RegexOption.IGNORE_CASE).containsMatchIn(l) -> "Benutzername oder Passwort falsch"
+            Regex("TLS key negotiation failed|TLS handshake failed|Connection timed out|Network is unreachable", RegexOption.IGNORE_CASE).containsMatchIn(l) ->
+                "Der VPN-Server antwortet nicht – andere .ovpn-Datei probieren (UDP statt TCP oder anderer Standort)"
+            Regex("Options error|Unrecognized option|parse", RegexOption.IGNORE_CASE).containsMatchIn(l) -> "Die .ovpn-Datei passt nicht"
+            else -> "Keine Verbindung nach 45 Sekunden"
+        }
+    }
 
     fun available(): Boolean = true
 
@@ -55,8 +94,11 @@ object ImperumOVpn {
     private val stateListener = object : VpnStatus.StateListener {
         override fun updateState(st: String?, logmessage: String?, localizedResId: Int, level: ConnectionStatus?) {
             when (level) {
-                ConnectionStatus.LEVEL_CONNECTED -> update("an", "")
-                ConnectionStatus.LEVEL_NOTCONNECTED -> update("aus", "")
+                ConnectionStatus.LEVEL_CONNECTED -> { attempt++; update("an", "") }
+                ConnectionStatus.LEVEL_NOTCONNECTED -> {
+                    // Prozess ist während des Verbindens beendet worden: Fehler statt still „aus“
+                    if (state == "verbindet" && st == "NOPROCESS" && System.currentTimeMillis() - startedAt > 4000) { attempt++; update("fehler", reason()) } else update("aus", "")
+                }
                 ConnectionStatus.LEVEL_AUTH_FAILED -> update("fehler", "Benutzername oder Passwort falsch")
                 ConnectionStatus.LEVEL_NONETWORK -> update("verbindet", "Kein Netz")
                 null, ConnectionStatus.UNKNOWN_LEVEL -> { }
@@ -70,8 +112,10 @@ object ImperumOVpn {
     fun initLibrary(c: Context) {
         if (inited) return
         inited = true
+        appCtx = c.applicationContext
         PIAOpenVPNTunnelLibrary.init(c.applicationContext, notifications, callbacks)
         VpnStatus.addStateListener(stateListener)
+        try { VpnStatus.addLogListener(logListener) } catch (e: Throwable) { }
     }
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -108,7 +152,18 @@ object ImperumOVpn {
     }
 
     private fun start(c: Context) {
+        synchronized(logLines) { logLines.clear() }
         update("verbindet", "")
+        val myAttempt = ++attempt
+        startedAt = System.currentTimeMillis()
+        // Hängt es (z. B. „Konfiguration wird erstellt …“ ohne Ende): abbrechen und den Grund zeigen
+        main.postDelayed({
+            if (myAttempt == attempt && state == "verbindet") {
+                val why = reason()
+                try { c.startService(Intent(c, OpenVPNService::class.java).setAction(OpenVPNService.DISCONNECT_VPN)) } catch (e: Throwable) { }
+                update("fehler", why)
+            }
+        }, TIMEOUT_MS)
         try {
             val cp = ConfigParser()
             cp.parseConfig(StringReader(config(c)))
@@ -136,6 +191,7 @@ object ImperumOVpn {
     }
 
     fun disconnect(c: Context) {
+        attempt++
         try {
             val i = Intent(c, OpenVPNService::class.java).setAction(OpenVPNService.DISCONNECT_VPN)
             c.startService(i)
