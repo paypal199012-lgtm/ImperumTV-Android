@@ -1190,3 +1190,5 @@ body.touch .similar-strip { overflow-x: auto; }
 .fb-ch { color: #f4dc9e; font-weight: bold; }
 .fb-more { margin-left: 10px; color: #a7a39a; }
 .fb-note { font-size: 30px; color: #d8d4cb; padding: 30px 4px; }
+
+.fb-src { font-size: 20px; color: rgba(255,255,255,.5); text-align: center; padding: 18px 0 8px; }
