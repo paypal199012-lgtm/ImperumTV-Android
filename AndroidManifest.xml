@@ -70,6 +70,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Unsichtbarer Eintrag: wird nach einem Update kurz aus- und eingeschaltet, damit Fire TV die Kachel neu lädt -->
+        <activity-alias
+            android:name=".TileRefresh"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="false" />
+
         <service
             android:name=".RecordingService"
             android:exported="false"

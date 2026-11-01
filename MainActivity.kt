@@ -168,11 +168,37 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        refreshLauncherTileAfterUpdate()
         // Absturz-Bericht: Fehler merken und beim nächsten Start anzeigen (zum Abfotografieren)
         installCrashReporter()
         val report = takeCrashReport()
         // Gab es beim letzten Start einen Absturz: erst den Bericht zeigen, dann die App aufbauen
         if (report != null) showCrashReport(report) { buildUi() } else buildUi()
+    }
+
+    /**
+     * Fire TV merkt sich das Bild der App-Kachel. Nach einem Update zeigt es oft nur eine graue Kachel,
+     * weil der Startbildschirm noch auf die alte Installation zeigt. Nach einem Update deshalb einen
+     * unsichtbaren Eintrag kurz aus- und wieder einschalten: Das meldet dem Startbildschirm „App geändert“,
+     * und er lädt Symbol und Kachel neu.
+     */
+    private fun refreshLauncherTileAfterUpdate() {
+        try {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            @Suppress("DEPRECATION")
+            val code = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+            val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
+            if (prefs.getLong("tileVersion", 0L) == code) return
+            prefs.edit().putLong("tileVersion", code).apply()
+            val alias = android.content.ComponentName(this, "$packageName.TileRefresh")
+            val pm = packageManager
+            pm.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+            handler.postDelayed({
+                try {
+                    pm.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, PackageManager.DONT_KILL_APP)
+                } catch (e: Throwable) { }
+            }, 1500)
+        } catch (e: Throwable) { }
     }
 
     private fun buildUi() {
