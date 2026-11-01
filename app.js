@@ -8345,6 +8345,7 @@
             },
             ready: function () {
                 Player.applyPreferences();
+                self.r407 = 0;                             // läuft wieder: nächste Ablehnung zählt neu
                 if (self.seekPending) {
                     var target = self.seekPending;
                     Player.seekTo(target);
@@ -8496,6 +8497,29 @@
             this.altUrl = Demo.altMovieUrl(it.id); this.altFor = this.index;
             toast('Andere Quelle wird versucht …', 3000);
             this.start();
+            return;
+        }
+        // Anbieter lehnt die Verbindung ab (HTTP 407): meist zu viele gleichzeitige Verbindungen auf dem Zugang
+        // oder die VPN-Adresse ist gesperrt. Nicht gleich aufgeben: mit wachsender Pause mehrmals neu verbinden.
+        if (this.kind === 'live' && /407|PROXY_AUTH/i.test(msg || '')) {
+            var waits = [3, 5, 8, 12, 15, 20];
+            this.r407 = this.r407 || 0;
+            if (this.r407 < waits.length) {
+                var sec = waits[this.r407++], me407 = this, at407 = this.index;
+                if (this.r407 === 1) Report.player(it, msg);
+                toast('Der Anbieter lässt gerade keine Verbindung zu – neuer Versuch in ' + sec + ' s (' + this.r407 + '/' + waits.length + ') …', (sec - 0.5) * 1000);
+                clearTimeout(this.t407);
+                this.t407 = setTimeout(function () { if (Nav.top() === me407 && me407.index === at407) me407.start(); }, sec * 1000);
+                return;
+            }
+            this.r407 = 0;
+            Modal.open('Anbieter lehnt ab', 'Der Anbieter lässt für diesen Sender gerade keine Verbindung zu.\n\n' +
+                'Meist laufen zu viele Geräte gleichzeitig auf dem Zugang – dann ein anderes Gerät beenden. ' +
+                'Oder der Anbieter sperrt die VPN-Adresse – dann das VPN kurz trennen oder ein anderes Land wählen.', [
+                { label: 'Noch einmal versuchen', primary: true, action: function () { self.start(); } },
+                { label: 'Schließen' }
+            ]);
+            this.showOverlay();
             return;
         }
         // Bild lässt sich auf diesem Gerät nicht dekodieren: einmal als HLS (M3U8) statt TS versuchen
@@ -8872,7 +8896,7 @@
     PlayerScreen.prototype.step = function (delta) {
         if (this.items.length < 2) return;
         this.index = (this.index + delta + this.items.length) % this.items.length;
-        this.retries = 0; this.altUrl = '';
+        this.retries = 0; this.altUrl = ''; this.r407 = 0; clearTimeout(this.t407);
         this.start();
         this.showOverlay(2000);                       // Kanal gewechselt: nur kurz einblenden
     };
@@ -9006,6 +9030,7 @@
     };
     PlayerScreen.prototype.hide = function () {
         Quiet.set(false);
+        clearTimeout(this.t407);
         this.saveProgress(false);
         this.showPop(null);
         this.popFor = null;
