@@ -3573,6 +3573,7 @@
         /** Nächster scrollbarer Kasten unter dem Mauszeiger */
         box: function (node, horizontal) {
             while (node && node !== document.body && node !== document.documentElement) {
+                if (node.nodeType === 1 && node.classList && node.classList.contains('eg')) return null;   // EPG-Raster: Bildschirm blättert selbst
                 if (node.nodeType === 1 && node.id !== 'stage' && node.id !== 'app') {
                     var big = horizontal ? node.clientWidth > 200 : node.clientHeight > 150;
                     var more = horizontal ? node.scrollWidth > node.clientWidth + 2 : node.scrollHeight > node.clientHeight + 2;
@@ -3617,20 +3618,33 @@
         if (Wheel.apply(ev.target, dx / scale, dy / scale, true, true) && ev.cancelable) ev.preventDefault();
     }, { passive: false });
     // Wischen auf Bildschirmen ohne echte Liste (z. B. EPG-Raster)
+    // Der Bildschirm wird beim Wischen neu gezeichnet: das berührte Element verschwindet dann aus der Seite und
+    // seine Wisch-Meldungen kämen nicht mehr bis zum Dokument. Deshalb direkt am berührten Element mithören.
     (function () {
-        var lx = null, ly = null;
+        var lx = null, ly = null, el = null;
+        function move(ev) {
+            var top = Nav.top(), t = ev.touches && ev.touches[0];
+            if (!t || ly === null || !top || !(top.onSwipe || top.onWheel) || Modal.node) return;
+            if (document.documentElement.contains(ev.target)) {
+                var bv = Wheel.box(ev.target, false), bh = Wheel.box(ev.target, true);
+                if ((bv && bv.native) || (bh && bh.native)) return;   // echte Liste: Browser wischt selbst
+            }
+            var dx = (lx - t.clientX) / scale, dy = (ly - t.clientY) / scale;
+            if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+            lx = t.clientX; ly = t.clientY;
+            if (top.onSwipe) top.onSwipe(dx, dy); else top.onWheel(dx, dy);
+        }
+        function end() { if (el) { el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); el.removeEventListener('touchcancel', end); el = null; } }
         document.addEventListener('touchstart', function (ev) {
             var t = ev.touches && ev.touches[0];
             lx = t ? t.clientX : null; ly = t ? t.clientY : null;
-        }, { passive: true });
-        document.addEventListener('touchmove', function (ev) {
-            var top = Nav.top(), t = ev.touches && ev.touches[0];
-            if (!t || ly === null || !top || !top.onWheel || Modal.node) return;
-            if (Wheel.box(ev.target, false) || Wheel.box(ev.target, true)) return;   // echte Liste: Browser wischt selbst
-            var dx = (lx - t.clientX) / scale, dy = (ly - t.clientY) / scale;
-            if (Math.abs(dx) < 25 && Math.abs(dy) < 25) return;
-            lx = t.clientX; ly = t.clientY;
-            top.onWheel(dx, dy);
+            end();
+            el = ev.target;
+            if (el && el.addEventListener) {
+                el.addEventListener('touchmove', move, { passive: true });
+                el.addEventListener('touchend', end);
+                el.addEventListener('touchcancel', end);
+            }
         }, { passive: true });
     })();
 
@@ -6825,6 +6839,35 @@
     };
 
     /** Mausrad / Wischen: senkrecht = Sender, waagerecht = Zeit */
+    /** Finger: Liste folgt dem Finger (eine Zeile pro Zeilenhöhe), waagerecht verschiebt sich die Zeitleiste */
+    EpgGridScreen.prototype.onSwipe = function (dx, dy) {
+        if (!this.list.length) return;
+        if (Math.abs(dy) >= Math.abs(dx)) { this.swX = 0; this.swY = (this.swY || 0) + dy; }
+        else { this.swY = 0; this.swX = (this.swX || 0) + dx; }
+        var moved = false, step;
+        while (Math.abs(this.swY || 0) >= this.ROW_H * 0.6) {
+            step = this.swY > 0 ? 1 : -1;
+            this.swY -= step * this.ROW_H * 0.6;
+            var next = Math.max(0, Math.min(this.list.length - 1, this.chIndex + step));
+            if (next !== this.chIndex) {
+                this.chIndex = next; moved = true;
+                // Ganze Liste mitschieben, damit es sich wie Scrollen anfühlt
+                var maxTop = Math.max(0, this.list.length - this.ROWS);
+                this.rowTop = Math.max(0, Math.min(maxTop, this.rowTop + step));
+            }
+        }
+        var pxHalf = this.WIDTH / (this.SPAN / HALF_HOUR);
+        while (Math.abs(this.swX || 0) >= pxHalf * 0.5) {
+            step = this.swX > 0 ? 1 : -1;
+            this.swX -= step * pxHalf * 0.5;
+            var earliest = floorHalfHour(Date.now()) - HALF_HOUR;
+            var ws = Math.max(earliest, this.winStart + step * HALF_HOUR);
+            if (ws !== this.winStart) { this.winStart = ws; this.cursor = Math.max(this.cursor + step * HALF_HOUR, ws); moved = true; }
+        }
+        if (this.col === 'cats') this.col = 'prog';
+        if (moved) this.draw();
+    };
+
     EpgGridScreen.prototype.onWheel = function (dx, dy) {
         if (!this.list.length) return;
         this.wheelY = (this.wheelY || 0) + dy;

@@ -1499,8 +1499,6 @@ body.wide .live-b .col-list { left: 420px; right: 940px; width: auto; }
 /* Breite Handys: Senderliste mit fester Breite, Vorschau rechts daneben größer */
 body.wide .live-b .col-list { left: 420px; right: auto; width: 720px; }
 body.wide .live-b .col-info { left: auto; right: 40px; }
-/* Einstellungen: untere Kacheln in Gold wie der Kasten oben */
-.set6-act { background: linear-gradient(100deg, rgba(217,176,102,.38), rgba(217,176,102,.10) 70%, rgba(255,255,255,.04)); border: 2px solid rgba(232,201,138,.55); }
-.set6-act .set-tile-ic { background: rgba(244,220,158,.22); color: #f4dc9e; }
-.set6-act .set-tile-v { color: #efe4cb; }
-.set6-act.focused { background: linear-gradient(100deg, rgba(244,220,158,.7), rgba(217,176,102,.4)); border-color: #f4dc9e; }
+/* Einstellungen: untere Kacheln mit goldenem Rahmen */
+.set6-act { border: 2px solid rgba(232,201,138,.6); }
+.set6-act.focused { border-color: #f4dc9e; }
