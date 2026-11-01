@@ -1461,3 +1461,4 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 .eg3 .eg-prog.empty.focus { border: 2px solid #f4dc9e; }
 .eg3 .eg-acts { top: 244px; }
 .eg3 .eg-act { border-radius: 30px; padding: 11px 24px; }
+.cat-group { font-size: 17px; letter-spacing: 3px; font-weight: 800; color: #f4dc9e; margin: 18px 18px 6px; }

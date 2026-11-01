@@ -3671,12 +3671,14 @@
             focusable(so, 'cat-sort', search.sort.onClick, 'cats');
             scroll.appendChild(so);
         }
-        scroll.appendChild(h('div', 'col-head', 'Kategorien'));
+        var groups = search && search.groups;
+        if (!groups) scroll.appendChild(h('div', 'col-head', 'Kategorien'));
         var kind = search && search.kind;
         var counts = search && search.counts;               // Anzahl je Kategorie (gleiche Reihenfolge wie cats)
         var kidsHide = kind && Profiles.isKids();
         cats.forEach(function (name, i) {
             if (kidsHide && Parental.catProtected(kind, name)) return;     // Kinder-Profil: nicht freigegebene Kategorien gar nicht zeigen
+            if (groups) groups.forEach(function (g) { if (g.at === i && i < cats.length) scroll.appendChild(h('div', 'cat-group', g.label)); });
             var item = h('div', 'cat' + (i === activeIndex ? ' active' : ''));
             if (kind && Parental.catProtected(kind, name)) {
                 item.classList.add('locked');
@@ -5084,11 +5086,15 @@
     MoviesScreen.prototype.categories = function () {
         var seen = {}, cats = [];
         this.allItems().forEach(function (m) { if (m.cat && !seen[m.cat]) { seen[m.cat] = true; cats.push(m.cat); } });
+        // A1b: Für dich · Neu & Stöbern · Kategorien vom Anbieter
         var base = ['Alle', '★ Favoriten', RESUME_CAT];
-        if (this.kind === 'series') base.push(NEWEP_CAT);
-        base.push(NEW_CAT);
-        if (this.kind === 'movies') base.push(this.yearLabel(), SEEN_CAT, UNSEEN_CAT);
-        return base.concat(cats);
+        if (this.kind === 'movies') base.push(SEEN_CAT);
+        var browse = [];
+        if (this.kind === 'series') browse.push(NEWEP_CAT);
+        browse.push(NEW_CAT);
+        if (this.kind === 'movies') browse.push(this.yearLabel(), UNSEEN_CAT);
+        this.groupAt = [{ at: 0, label: 'FÜR DICH' }, { at: base.length, label: 'NEU & STÖBERN' }, { at: base.length + browse.length, label: 'KATEGORIEN' }];
+        return base.concat(browse, cats);
     };
     /** Wie viele Filme/Serien in jeder Kategorie stecken (ein Durchlauf über alle Einträge) */
     MoviesScreen.prototype.catCounts = function () {
@@ -5237,7 +5243,7 @@
             Nav.show(self);
             var first = $('.poster');
             if (first) Focus.set(first);
-        }, { query: this.query, kind: this.favType(), dots: true, onClick: function () { self.openSearch(); }, counts: this.catCounts(),
+        }, { query: this.query, kind: this.favType(), dots: true, groups: this.groupAt, onClick: function () { self.openSearch(); }, counts: this.catCounts(),
              sort: { label: 'Sortieren: ' + this.sortName(), onClick: function () { self.sortMenu(); } } }));
 
         var gridCol = h('div', 'col col-grid');
