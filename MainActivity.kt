@@ -322,7 +322,13 @@ class MainActivity : Activity() {
         }
         if (fps > 1f) { afrDone = true; handler.post { afrApply(fps) } }
     }
-    private fun afrApply(fps: Float) {
+    /** Beim App-Start (während der Start-Animation) schon auf die zuletzt passende Bildrate stellen:
+     *  das kurze Schwarzbild des Fernsehers kommt dann nicht erst beim Einschalten eines Senders */
+    private fun afrPreset() {
+        val last = getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getFloat("afrLast", 0f)
+        if (last > 1f) afrApply(last, false)
+    }
+    private fun afrApply(fps: Float, tell: Boolean = true) {
         if (Build.VERSION.SDK_INT < 23 || !afrOn()) return
         try {
             @Suppress("DEPRECATION")
@@ -334,6 +340,7 @@ class MainActivity : Activity() {
                 fps in 29f..30.5f || fps in 59f..61f -> 60f
                 else -> return
             }
+            if (tell) getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putFloat("afrLast", want).apply()
             if (Math.abs(cur.refreshRate - want) < 0.6f) return
             var best: android.view.Display.Mode? = null
             for (m in disp.supportedModes) {
@@ -341,7 +348,7 @@ class MainActivity : Activity() {
                 if (Math.abs(m.refreshRate - want) < 0.6f) { best = m; break }
             }
             val b = best
-            if (b == null) { afrTell(want, cur.refreshRate, "nomode"); return }
+            if (b == null) { if (tell) afrTell(want, cur.refreshRate, "nomode"); return }
             val lp = window.attributes
             if (lp.preferredDisplayModeId != b.modeId) { lp.preferredDisplayModeId = b.modeId; window.attributes = lp }
             // Nach ein paar Sekunden nachsehen, ob der Fernseher wirklich umgestellt hat
@@ -349,7 +356,7 @@ class MainActivity : Activity() {
                 try {
                     @Suppress("DEPRECATION")
                     val now = windowManager.defaultDisplay.mode.refreshRate
-                    if (Math.abs(now - want) >= 0.6f) afrTell(want, now, "blocked")
+                    if (tell && Math.abs(now - want) >= 0.6f) afrTell(want, now, "blocked")
                 } catch (e: Throwable) { }
             }, 5_000)
         } catch (e: Throwable) { }
@@ -649,6 +656,7 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         hideSystemBars()
+        afrPreset()
         if (!uiReady) return
         webView.onResume()
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('visible')", null)
