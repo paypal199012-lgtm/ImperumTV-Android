@@ -1516,9 +1516,6 @@ body.lite .kbd-key.focused, body.lite .pin-key.focused { transform: none !import
 body.lite .epc.focused .epc-img, body.lite .lv-act.focused, body.lite .eg-chip.focus, body.lite .eg3 .eg-prog.focus { box-shadow: 0 0 0 3px #f4dc9e !important; }
 body.lite .poster .img, body.lite .p, body.lite .epc-img { box-shadow: none !important; }
 body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
-/* Sparmodus: Hintergründe als eigene Ebene, damit beim Blättern nur die Liste neu gezeichnet wird */
-body.lite .live-bg, body.lite #stage-bg, body.lite .detail-bg { -webkit-transform: translateZ(0); transform: translateZ(0); will-change: transform; }
-body.lite .scroll { will-change: scroll-position; }
 
 /* Android/Fire TV: deckende Farben statt halbdurchsichtiger Flächen.
    Manche Grafikchips zeichnen halbdurchsichtige Kästen als zwei Dreiecke – an der Naht entsteht ein schräger heller Strich. */
