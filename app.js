@@ -8969,11 +8969,6 @@
 
     function boot() {
         if (AB) document.body.classList.add('android');
-        // Fire TV / Android-TV-Boxen: sparsame Darstellung (kein Leuchten, kein Vergrößern) – spürbar flüssiger
-        try {
-            var ua = navigator.userAgent || '';
-            if (AB && (/AFT|AFTM|AFTT|AFTS|AFTK|BRAVIA|Android TV|; TV/i.test(ua) || !('ontouchstart' in window))) document.body.classList.add('lite');
-        } catch (e) { /* egal */ }
         applyScale();
         Clock.start();
         window.addEventListener('resize', applyScale);
