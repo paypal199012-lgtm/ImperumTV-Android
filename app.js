@@ -7433,13 +7433,23 @@
                 ]);
             });
         }
+        if (AB && AB.setAfr && AB.getAfr) {
+            var afrOn = function () { try { return !!AB.getAfr(); } catch (e) { return false; } };
+            row('afr', 'tv', 'Bildrate anpassen', afrOn() ? 'An' : 'Aus', function (v) {
+                var on = !afrOn();
+                try { AB.setAfr(on); } catch (e) { /* egal */ }
+                v.textContent = on ? 'An' : 'Aus';
+                toast(on ? 'Der Fernseher stellt sich auf die Bildrate des Senders ein (z. B. 50 Hz) – flüssiger bei schnellen Bewegungen. Beim ersten Umschalten kann das Bild kurz schwarz werden.'
+                    : 'Bildrate anpassen: aus', 6000);
+            });
+        }
         if (AB && AB.setCatchup && AB.getCatchup) {
             var cuOn = function () { try { return !!AB.getCatchup(); } catch (e) { return false; } };
             row('catchup', 'next', 'Näher am Live-Geschehen', cuOn() ? 'An' : 'Aus', function (v) {
                 var on = !cuOn();
                 try { AB.setCatchup(on); } catch (e) { /* egal */ }
                 v.textContent = on ? 'An' : 'Aus';
-                toast(on ? 'Nach einem Hänger holt Live TV den Rückstand unauffällig wieder auf (1,05-fach)' : 'Näher am Live-Geschehen: aus');
+                toast(on ? 'Nach einem Hänger holt Live TV den Rückstand langsam wieder auf' : 'Näher am Live-Geschehen: aus');
             });
         }
         if (VodPlayer.available()) {

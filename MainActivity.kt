@@ -242,6 +242,7 @@ class MainActivity : Activity() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors))
             .setLoadControl(loadControl)
             .build()
+        p.setVideoFrameMetadataListener { presentationTimeUs, _, format, _ -> afrFrame(presentationTimeUs, format) }
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
@@ -292,6 +293,61 @@ class MainActivity : Activity() {
             }
         })
         return p
+    }
+
+    // ---------- Bildrate anpassen: Fernseher auf 50 Hz stellen, wenn der Sender 50 Bilder/s sendet (sonst Ruckeln bei 60 Hz) ----------
+    private val afrTimes = ArrayList<Long>()
+    @Volatile private var afrDone = false
+    private fun afrOn(): Boolean {
+        val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
+        // Standard: an auf Fernsehern/Boxen (kein Touchscreen), aus auf Handys
+        val tvDefault = !packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
+        return prefs.getBoolean("afr", tvDefault)
+    }
+    private fun afrReset() { synchronized(afrTimes) { afrTimes.clear() }; afrDone = false }
+    /** Wird für jedes Bild aufgerufen: aus den Zeitstempeln die Bildrate des Senders bestimmen */
+    private fun afrFrame(ptsUs: Long, format: Format) {
+        if (afrDone) return
+        if (format.frameRate > 1f) { afrDone = true; val f = format.frameRate; handler.post { afrApply(f) }; return }
+        var fps = 0f
+        synchronized(afrTimes) {
+            afrTimes.add(ptsUs)
+            if (afrTimes.size >= 40) {
+                val d = ArrayList<Long>()
+                for (i in 1 until afrTimes.size) { val x = afrTimes[i] - afrTimes[i - 1]; if (x in 5_000..100_000) d.add(x) }
+                d.sort()
+                if (d.size >= 10) fps = 1_000_000f / d[d.size / 2]
+                afrTimes.clear()
+            }
+        }
+        if (fps > 1f) { afrDone = true; handler.post { afrApply(fps) } }
+    }
+    private fun afrApply(fps: Float) {
+        if (Build.VERSION.SDK_INT < 23 || !afrOn()) return
+        try {
+            @Suppress("DEPRECATION")
+            val disp = windowManager.defaultDisplay
+            val cur = disp.mode
+            val want = when {
+                fps in 23.5f..24.5f -> 24f
+                fps in 24.5f..25.5f || fps in 49f..51f -> 50f
+                fps in 29f..30.5f || fps in 59f..61f -> 60f
+                else -> return
+            }
+            if (Math.abs(cur.refreshRate - want) < 0.6f) return
+            var best: android.view.Display.Mode? = null
+            for (m in disp.supportedModes) {
+                if (m.physicalWidth != cur.physicalWidth || m.physicalHeight != cur.physicalHeight) continue
+                if (Math.abs(m.refreshRate - want) < 0.6f) { best = m; break }
+            }
+            val b = best ?: return
+            val lp = window.attributes
+            if (lp.preferredDisplayModeId != b.modeId) { lp.preferredDisplayModeId = b.modeId; window.attributes = lp }
+        } catch (e: Throwable) { }
+    }
+    private fun afrRestore() {
+        if (Build.VERSION.SDK_INT < 23) return
+        try { val lp = window.attributes; if (lp.preferredDisplayModeId != 0) { lp.preferredDisplayModeId = 0; window.attributes = lp } } catch (e: Throwable) { }
     }
 
     /** Läuft gerade ein Live-Sender? (für „Näher am Live-Geschehen“) */
@@ -586,6 +642,7 @@ class MainActivity : Activity() {
         if (!uiReady) { super.onStop(); return }
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('hidden')", null)
         player.pause()
+        afrRestore()
         webView.onPause()
         super.onStop()
     }
@@ -1542,6 +1599,16 @@ class MainActivity : Activity() {
             }
         }
 
+        /** Bildrate anpassen an/aus */
+        @JavascriptInterface
+        fun setAfr(on: Boolean) {
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putBoolean("afr", on).apply()
+            if (!on) handler.post { afrRestore() }
+        }
+
+        @JavascriptInterface
+        fun getAfr(): Boolean = afrOn()
+
         /** Näher am Live-Geschehen an/aus */
         @JavascriptInterface
         fun setCatchup(on: Boolean) {
@@ -1609,6 +1676,7 @@ class MainActivity : Activity() {
         fun open(url: String, x: Double, y: Double, w: Double, h: Double) {
             handler.post {
                 readySent = false
+                afrReset()
                 subtitleIndex = -1
                 // Untertitel zunächst aus, Tonspur automatisch (Ton bei jedem Sender wieder an)
                 audioOffRetry = false
