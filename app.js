@@ -4710,9 +4710,32 @@
                 Nav.push(new WhoScreen(function () { Nav.stack.length = 0; Nav.push(new HomeScreen()); }, true));
             }, 'topbtns'));
         }
-        var vpn = OVpn.badge();
-        if (vpn) { if (me) vpn.classList.add('below'); head.appendChild(vpn); }
         root.appendChild(head);
+        // H6: Infoleiste oben – VPN, Abo, laufende Spiele, Favoriten
+        var bar = h('div', 'home-info');
+        function item(cls, html) { var n = h('span', 'hi-it ' + (cls || '')); n.innerHTML = html; bar.appendChild(n); return n; }
+        if (OVpn.native() && OVpn.info().has) {
+            var vi = OVpn.info(), pl = OVpn.place(vi.server);
+            var vt = vi.state === 'an' ? 'VPN ' + (pl || 'verbunden') : vi.state === 'verbindet' ? 'VPN verbindet …' : vi.state === 'fehler' ? 'VPN-Fehler' : 'VPN aus';
+            item('vpn ' + (vi.state === 'an' ? 'on' : vi.state === 'verbindet' ? 'wait' : 'off'), icon('shield', 26) + '<span></span>').lastChild.textContent = vt;
+        }
+        if (Data.expiry) {
+            var ex = Data.expiry, dd = function (n) { return (n < 10 ? '0' : '') + n; };
+            item('', 'Abo bis <b>' + dd(ex.getDate()) + '.' + dd(ex.getMonth() + 1) + '.' + ex.getFullYear() + '</b>');
+        }
+        var liveIt = item('live hidden', '● <span>0</span> Spiele live');
+        function setLive() {
+            var c = Football.counts ? Football.counts().__live || 0 : 0;
+            liveIt.lastChild.previousSibling.textContent = String(c);
+            liveIt.querySelector('span').textContent = String(c);
+            liveIt.classList.toggle('hidden', !c);
+            liveIt.lastChild.textContent = c === 1 ? ' Spiel live' : ' Spiele live';
+        }
+        setLive();
+        Football.load(false).then(function () { if (Nav.top() instanceof HomeScreen) setLive(); }, function () { });
+        var favN = 0; for (var fk in Favs.set) if (Favs.set.hasOwnProperty(fk)) favN++;
+        item('', '★ <b>' + favN + '</b> Favoriten');
+        root.appendChild(bar);
 
         var circles = h('div', 'home-circles');
         [
@@ -4750,8 +4773,7 @@
         });
         root.appendChild(tiles);
 
-        var exp = Data.expiryText();
-        if (exp) root.appendChild(h('div', 'expiry', 'Läuft ab: ' + exp));
+        // Ablaufdatum steht jetzt oben in der Infoleiste
         if (License.known() && !License.activated() && !License.free()) {
             root.appendChild(h('div', 'trial-note', License.text() + ' · danach ' + REMOTE.price + ' einmalig unter Einstellungen → Wiedergabelisten aktivieren'));
         }

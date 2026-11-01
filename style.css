@@ -1577,3 +1577,18 @@ body.android .set-row:not(.focused), body.android .set6-card .set-row:not(.focus
 /* Live TV: alle drei Knöpfe gleich aussehen lassen (Favorit hatte auf manchen Geräten keine Fläche) */
 .lv-acts .lv-act:not(.primary) { background: #2a2723 !important; color: #fff !important; font-weight: bold; }
 .lv-acts .lv-act:not(.primary).focused { background: #645238 !important; }
+
+/* Startseite H6: Infoleiste oben, Logo darunter */
+.home-info { position: absolute; left: 50%; top: 26px; transform: translateX(-50%); height: 66px; padding: 0 16px; border-radius: 33px;
+    display: flex; align-items: center; white-space: nowrap; background: #141210; border: 1px solid rgba(217,176,102,.45); font-size: 22px; color: #e6dccb; }
+.hi-it { display: inline-flex; align-items: center; padding: 0 22px; }
+.hi-it + .hi-it { border-left: 1px solid rgba(217,176,102,.3); }
+.hi-it b { color: #f4dc9e; margin: 0 6px; }
+.hi-it svg { margin-right: 8px; }
+.hi-it.vpn.on { color: #7ee08a; } .hi-it.vpn.wait { color: #f4dc9e; } .hi-it.vpn.off { color: #b8bcc6; }
+.hi-it.live { color: #ff8a7a; font-weight: 700; } .hi-it.live span { margin: 0 6px; }
+.hi-it.hidden { display: none; }
+.home-head { top: 120px; }
+.home-head-btns { top: -94px; right: 250px; }
+.home-circles { top: 330px; }
+.home-tiles { top: 720px; }
