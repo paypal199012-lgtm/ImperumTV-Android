@@ -864,6 +864,26 @@
     // =====================================================================
     // Uhr oben rechts (auf allen Bildschirmen; im Player nur mit eingeblendeter Leiste)
     // =====================================================================
+    /**
+     * Ruhe im Vollbild: Läuft ein Sender/Film im Vollbild ohne eingeblendete Leiste, arbeitet die App im Hintergrund
+     * weniger (Uhr ohne Sekunden, Programm-Laden wartet, weniger Meldungen vom Player) – mehr Leistung fürs Bild.
+     * Jede Taste bzw. die eingeblendete Leiste weckt alles wieder auf.
+     */
+    var Quiet = {
+        on: false, pendingEpg: false,
+        set: function (on) {
+            on = !!on;
+            if (on === this.on) return;
+            this.on = on;
+            try { if (AB && AB.setQuiet) AB.setQuiet(on); } catch (e) { /* egal */ }
+            try { Clock.apply(); } catch (e2) { /* egal */ }
+            if (!on && this.pendingEpg) {
+                this.pendingEpg = false;
+                setTimeout(function () { if (!Quiet.on) Epg.sync(false); }, 3000);
+            }
+        }
+    };
+
     var Clock = {
         node: null, timer: null,
         DAYS: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
@@ -899,7 +919,7 @@
             if (on) this.tick();
         },
         tick: function () {
-            var self = this, n = new Date(), sec = this.mode() === 'sec';
+            var self = this, n = new Date(), sec = this.mode() === 'sec' && !Quiet.on;
             this.t.innerHTML = pad2(n.getHours()) + ':' + pad2(n.getMinutes()) + (sec ? '<span>:' + pad2(n.getSeconds()) + '</span>' : '');
             this.d.textContent = this.DAYS[n.getDay()] + ', ' + n.getDate() + '. ' + this.MONTHS[n.getMonth()];
             // genau zum nächsten Sekunden- bzw. Minutenwechsel weiterstellen
@@ -2422,6 +2442,7 @@
         /** Nach dem Laden der Sender: gespeichertes Programm passt zum Konto? Sonst (oder älter als 20 h) neu laden */
         sync: function (force) {
             if (!this.native() || !Api.acc || Api.acc.demo || !Data.channels.length || safeMode()) return;
+            if (Quiet.on && !force) { Quiet.pendingEpg = true; return; }      // Vollbild läuft: später laden
             var info = this.info(), key = this.accountKey();
             this.valid = info.account === key && info.loaded > 0;
             this.cache = {}; this.nowCache = null;
@@ -8651,6 +8672,7 @@
     /** Jede Sekunde: Abzeichen oben links, Kasten in der Info-Leiste, Hinweis beim Hängen */
     PlayerScreen.prototype.netTick = function () {
         if (Nav.top() !== this) { if (this.nqBadge) this.nqBadge.classList.add('hidden'); return; }
+        if (Quiet.on && ((this.nqSkip = (this.nqSkip || 0) + 1) % 3)) return;    // Ruhe: nur alle 3 s nachsehen
         var lv = NetQ.level(), nqm = NetQ.mode();
         if (!this.nqBadge) {
             this.nqBadge = h('div', 'hidden'); this.nqBadge.id = 'netq';
@@ -8782,6 +8804,7 @@
         // Player schon geschlossen (z. B. mit „Zurück“) oder Senderliste offen: Leiste nicht einblenden
         if (Nav.top() !== this || this.zapOpen || Modal.node) return;   // Fenster (z. B. „Mehr“) offen: Fokus dort lassen
         this.overlay = true;
+        Quiet.set(false);
         this.ui.classList.remove('hidden');
         this.ui.classList.add('player-ui-visible');
         document.body.classList.add('osd');
@@ -8805,6 +8828,7 @@
         this.nqBox = null;
         this.netTick();                                 // Verbindungsanzeige gleichzeitig mit der Leiste ausblenden
         Focus.cur = null;
+        if (!this.zapOpen && !Modal.node) Quiet.set(true);   // Vollbild ohne Leiste: App im Hintergrund ruhiger
     };
     PlayerScreen.prototype.step = function (delta) {
         if (this.items.length < 2) return;
@@ -8911,6 +8935,7 @@
     };
     PlayerScreen.prototype.onKey = function (k) {
         var live = this.kind === 'live';
+        Quiet.set(false);
         if (this.zapOpen) return this.zapKey(k);
         if (k === KEY.CH_UP || (live && k === KEY.UP && !this.overlay)) { this.step(-1); return true; }
         if (k === KEY.CH_DOWN || (live && k === KEY.DOWN && !this.overlay)) { this.step(1); return true; }
@@ -8941,6 +8966,7 @@
         return false;
     };
     PlayerScreen.prototype.hide = function () {
+        Quiet.set(false);
         this.saveProgress(false);
         this.showPop(null);
         this.popFor = null;

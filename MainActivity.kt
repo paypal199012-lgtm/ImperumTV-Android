@@ -174,11 +174,20 @@ class MainActivity : Activity() {
         Class.forName("androidx.media3.decoder.ffmpeg.FfmpegLibrary").getMethod("isAvailable").invoke(null) as Boolean
     } catch (e: Throwable) { false }
 
+    /** Ruhe im Vollbild (von der Oberfläche gesetzt): weniger Meldungen an die Oberfläche, Programm-Laden gebremst */
+    @Volatile private var quiet = false
+    private var tickCount = 0
+
     private val ticker = object : Runnable {
         override fun run() {
+            tickCount++
+            // Ruhe: Laufzeit nur alle 5 s an die Oberfläche (sonst 2× pro Sekunde); Hänger-Erkennung läuft unverändert
+            val sendTime = !quiet || tickCount % 10 == 0
             if (!useVlc) { try { checkFrozen() } catch (e: Throwable) { } }
             updateCache()
-            if (useVlc) {
+            if (!sendTime) {
+                // nichts melden
+            } else if (useVlc) {
                 if (vlc.playingNow()) emit("time", cachedPosition)
                 try { lastBitrate = vlc.bitrate() } catch (e: Throwable) { }
             } else if (player.playbackState == Player.STATE_READY && player.isPlaying) {
@@ -740,6 +749,8 @@ class MainActivity : Activity() {
                     var bytes = 0L
                     var lastMb = 0L
                     override fun read(b: ByteArray, off: Int, len: Int): Int {
+                        // Ruhe im Vollbild: Programm nur gebremst laden (Verbindung bleibt offen), damit das Bild Vorrang hat
+                        if (quiet) try { Thread.sleep(40) } catch (e: InterruptedException) { }
                         val n = super.read(b, off, len)
                         if (n > 0) {
                             bytes += n
@@ -1630,6 +1641,10 @@ class MainActivity : Activity() {
         /** Nur für den nächsten open(): "vlc" = diesen Sender mit VLC versuchen */
         @JavascriptInterface
         fun setNextEngine(mode: String) { forceVlcNext = mode == "vlc" }
+
+        /** Ruhe im Vollbild an/aus (siehe Quiet in app.js) */
+        @JavascriptInterface
+        fun setQuiet(on: Boolean) { quiet = on }
 
         /** Ist VLC in dieser Version eingebaut? */
         @JavascriptInterface
