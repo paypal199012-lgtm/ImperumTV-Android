@@ -4411,6 +4411,7 @@
             var self = this;
             if (!this.available() || !Device.validMac(Device.mac) || !Device.validKey(Device.key)) return;
             Remote.rpc('device_flags', { p_mac: Device.mac, p_key: Device.key, p_version: Report.version() }).then(function (r) {
+                if (r && r.cmd) RemoteCmd.run(r.cmd);
                 if (!r || !r.force || self.forced) return;
                 self.forced = true;
                 self.dismissed = 0;
@@ -4867,19 +4868,59 @@
         Modal.open('Cache leeren?', 'Gespeicherte Cover, das Programm (EPG) und der Zwischenspeicher werden gelöscht und danach neu geladen. ' +
             'Favoriten, Weiterschauen, gesehene Folgen und Einstellungen bleiben erhalten.', [
             { label: 'Cache leeren', primary: true, action: function () {
-                var freed = 0;
-                try { if (AB && AB.clearCache) freed = parseInt(AB.clearCache(), 10) || 0; } catch (e) { /* egal */ }
-                ThumbStat.ok = 0; ThumbStat.fail = 0; ThumbStat.off = false; ThumbStat.directOk = 0; ThumbStat.directFail = 0;
-                Epg.cache = {}; Epg.valid = false; Epg.nowCache = null;
-                Data.epgCache = {};
-                ListCache.clear();
-                if (Data.epgFullCache) Data.epgFullCache = {};
+                var freed = clearCacheNow();
                 toast('Cache geleert' + (freed > 0 ? ' (' + Math.max(1, Math.round(freed / 1048576)) + ' MB frei)' : '') + ' – Listen werden neu geladen …', 4000);
                 reloadAll();
             } },
             { label: 'Abbrechen' }
         ]);
     }
+
+    /** Cover, Programm und gespeicherte Listen löschen. Rückgabe: frei gewordene Bytes (Android) */
+    function clearCacheNow() {
+        var freed = 0;
+        try { if (AB && AB.clearCache) freed = parseInt(AB.clearCache(), 10) || 0; } catch (e) { /* egal */ }
+        ThumbStat.ok = 0; ThumbStat.fail = 0; ThumbStat.off = false; ThumbStat.directOk = 0; ThumbStat.directFail = 0;
+        Epg.cache = {}; Epg.valid = false; Epg.nowCache = null;
+        Data.epgCache = {};
+        ListCache.clear();
+        if (Data.epgFullCache) Data.epgFullCache = {};
+        return freed;
+    }
+
+    /**
+     * Fernwartung vom Admin (Admin-Seite → Gerät): kommt beim Start bzw. alle 10 Minuten mit device_flags.
+     * Neu laden / Cache leeren erst, wenn gerade nichts abgespielt wird.
+     */
+    var RemoteCmd = {
+        run: function (cmd) {
+            var self = this;
+            if (cmd === 'engine:vlc' || cmd === 'engine:exo') {
+                try { if (AB && AB.setLiveEngine) { AB.setLiveEngine(cmd === 'engine:vlc' ? 'vlc' : 'exo'); toast('Player Live TV: ' + (cmd === 'engine:vlc' ? 'VLC' : 'ImperumTV') + ' (vom Support eingestellt)', 5000); } } catch (e) { /* egal */ }
+                return;
+            }
+            if (cmd === 'tunnel:auto' || cmd === 'tunnel:off') {
+                try { if (AB && AB.setTunnel) { AB.setTunnel(cmd === 'tunnel:off' ? 'off' : 'auto'); toast('Direkte Bildausgabe: ' + (cmd === 'tunnel:off' ? 'aus' : 'an') + ' (vom Support eingestellt)', 5000); } } catch (e) { /* egal */ }
+                return;
+            }
+            if (cmd !== 'reload' && cmd !== 'clearcache') return;
+            // Nicht mitten im Film/Sender: warten, bis der Player zu ist
+            var tries = 0, t = setInterval(function () {
+                tries++;
+                var busy = Nav.top() instanceof PlayerScreen || Modal.node;
+                if (busy && tries < 720) return;
+                clearInterval(t);
+                if (cmd === 'clearcache') { try { clearCacheNow(); } catch (e) { /* egal */ } }
+                toast(cmd === 'clearcache' ? 'Cache geleert – App lädt neu …' : 'Wiedergabelisten werden neu geladen …', 3000);
+                setTimeout(function () { self.restart(); }, 1500);
+            }, 5000);
+        },
+        /** Oberfläche komplett neu starten: lädt Wiedergabelisten (auch geänderte Zugangsdaten) und Listen neu */
+        restart: function () {
+            try { Player.stop(); } catch (e0) { /* egal */ }
+            try { window.location.reload(); } catch (e) { /* egal */ }
+        }
+    };
 
     function reloadAll() {
         var acc = Api.acc || Storage.get('account', null);
