@@ -5031,8 +5031,13 @@
             for (var i = 0; i < n.length; i++) { c = n.charAt(i); out += this.SUP[c] || c; }
             return out;
         },
-        /** Kategorie ohne Länderkürzel und mit normaler Schrift: „DE| PRIME ᴿᴬᵂ“ → „PRIME RAW“ */
-        cat: function (c) { return this.plain(c || '').replace(/^\s*\|?[A-Z]{2,3}\s*[|:]\s*/, '').replace(/\s+/g, ' ').trim() || c; },
+        /** Kategorie mit normaler Schrift, Land vorn: „DE| PRIME ᴿᴬᵂ“ → „DE · PRIME RAW“ */
+        cat: function (c) {
+            var t = this.plain(c || ''), m = /^\s*\|?([A-Za-z]{2,3})\s*[|:]\s*/.exec(t);
+            var rest = (m ? t.slice(m[0].length) : t).replace(/\s+/g, ' ').trim();
+            if (!rest) return c;
+            return m ? m[1].toUpperCase() + ' · ' + rest : rest;            // Land bleibt sichtbar: „DE · PRIME RAW 60fps“
+        },
         sepTitle: function (n) { return this.plain(n || '').replace(/[#=*\-|]+/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase(); },
         split: function (name, cat) {
             var src = String(name || ''), tags = [], rest = '', run = '', self = this, c, i;
