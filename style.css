@@ -1581,3 +1581,8 @@ body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 .home-head-btns { top: -94px; right: 250px; }
 .home-circles { top: 330px; }
 .home-tiles { top: 770px; }
+/* Fußball: Sender-Knopf und „+N“ immer in einer Reihe, sauber rechts ausgerichtet */
+.fb-f1 .fb-tv { display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; overflow: hidden; text-overflow: clip; min-width: 0; }
+.fb-f1 .fb-ch { display: block; flex: 0 1 auto; min-width: 0; max-width: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
+.fb-f1 .fb-more { flex: none; margin-left: 8px; background: #2a2723; color: #f4dc9e; font-weight: 800; font-size: 16px; padding: 6px 10px; border-radius: 14px; }
+.fb-f1 .fb-guess { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
