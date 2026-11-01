@@ -5002,7 +5002,10 @@
         var r = stageRect(box), W = SW, H = 1080;          // Handy: Oberfläche kann breiter als 1920 sein
         var x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), hh = Math.round(r.h);
         // Vier Stücke rund um das Vorschaubild (funktioniert auch auf älteren Geräten)
-        var parts = [[0, 0, W, y], [0, y + hh, W, H - y - hh], [0, y, x, hh], [x + w, y, W - x - w, hh]];
+        // Teile überlappen sich um 2 px (unter dem Goldrahmen der Vorschau), damit beim Verkleinern
+        // auf Handy/Fire TV kein haarfeiner schwarzer Spalt zwischen ihnen entsteht
+        var o = 2;
+        var parts = [[0, 0, W, y + o], [0, y + hh - o, W, H - y - hh + o], [0, y - o, x + o, hh + 2 * o], [x + w - o, y - o, W - x - w + o, hh + 2 * o]];
         bg.innerHTML = '';
         for (var i = 0; i < parts.length; i++) {
             var p = parts[i], d = h('div', 'live-bg-p');
