@@ -1465,6 +1465,31 @@ class MainActivity : Activity() {
             return out.toString()
         }
 
+        /** Wie epgNow, aber mit Beginn und Ende: {"epgId":["Titel",Start-ms,Ende-ms],…} (für den Fortschrittsbalken) */
+        @JavascriptInterface
+        fun epgNowFull(ids: String): String {
+            val out = JSONObject()
+            try {
+                val now = System.currentTimeMillis()
+                val a = JSONArray(ids)
+                val map = epgMap
+                for (i in 0 until a.length()) {
+                    val id = a.getString(i)
+                    val raw = map[id] ?: continue
+                    val list = JSONArray(raw)
+                    for (j in 0 until list.length()) {
+                        val e = list.getJSONArray(j)
+                        if (e.getLong(0) <= now && e.getLong(1) > now) {
+                            out.put(id, JSONArray().put(e.getString(2)).put(e.getLong(0)).put(e.getLong(1)))
+                            break
+                        }
+                        if (e.getLong(0) > now) break
+                    }
+                }
+            } catch (e: Throwable) { }
+            return out.toString()
+        }
+
         /** Fußball: Spiele im gespeicherten Programm suchen. query = [{"k":"Spiel-ID","w":["bayern","dortmund"],"t":Anstoß-ms},…]
          *  Läuft im Hintergrund; Antwort kommt über window.__androidEpgSearch(cb, {"Spiel-ID":[[epgId,Punkte,Start,Ende,"Titel"],…]}) */
         @JavascriptInterface

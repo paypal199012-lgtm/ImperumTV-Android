@@ -2371,6 +2371,22 @@
             return n ? r.slice(0, n) : r;
         },
         /** „Jetzt läuft“ für viele Sender auf einmal (ein Aufruf statt tausend). Rückgabe {epg-id: Titel} */
+        /** Wie nowMap, aber { epgId: [Titel, Beginn, Ende] } (für den Fortschrittsbalken) */
+        nowFull: function (channels) {
+            if (!this.valid || !this.native()) return {};
+            if (!AB.epgNowFull) {
+                var t = this.nowMap(channels), o = {};
+                for (var k in t) if (t.hasOwnProperty(k)) o[k] = [t[k], 0, 0];
+                return o;
+            }
+            var nc = this.nowFullCache, minute = Math.floor(Date.now() / 60000);
+            if (nc && nc.minute === minute && nc.list === channels) return nc.map;
+            var ids = {}, map = {};
+            for (var i = 0; i < channels.length; i++) if (channels[i].epg) ids[channels[i].epg] = 1;
+            try { map = JSON.parse(AB.epgNowFull(JSON.stringify(Object.keys(ids))) || '{}') || {}; } catch (e) { map = {}; }
+            this.nowFullCache = { minute: minute, list: channels, map: map };
+            return map;
+        },
         nowMap: function (channels) {
             if (!this.valid || !this.native() || !AB.epgNow) return {};
             var nc = this.nowCache, minute = Math.floor(Date.now() / 60000);
@@ -4690,6 +4706,48 @@
     // Live-TV: Kategorien | Sender | Vorschau mit Programm
     // =====================================================================
 
+    /**
+     * Sendernamen aufräumen: Länderkürzel („DE|“), Anbieter-Vorsilbe („PRIME:“, wenn die Kategorie so heißt)
+     * und Zusätze wie RAW/HD/4K/60fps (auch hochgestellt ᴿᴬᵂ) → kurzer Name + kleine Schilder.
+     */
+    var NameTidy = {
+        SUP: (function () {
+            var m = {}, from = 'ᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁⱽᵂᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ⁰¹²³⁴⁵⁶⁷⁸⁹', to = 'ABDEGHIJKLMNOPRTUVWabcdefghijklmnoprstuvwxyz0123456789';
+            for (var i = 0; i < from.length; i++) m[from.charAt(i)] = to.charAt(i);
+            return m;
+        })(),
+        TAG: /(^|[^A-Za-z0-9])(RAW|UHD|FHD|HD|SD|4K|8K|HEVC|H265|60FPS|50FPS|VIP|DOLBY|HDR|GOLD)(?=$|[^A-Za-z0-9])/gi,
+        isSep: function (n) { return /#{2,}|^\s*[-=*#]|[-=*]{3,}/.test(n || ''); },
+        plain: function (n) {
+            var out = '', c;
+            for (var i = 0; i < n.length; i++) { c = n.charAt(i); out += this.SUP[c] || c; }
+            return out;
+        },
+        /** Kategorie ohne Länderkürzel und mit normaler Schrift: „DE| PRIME ᴿᴬᵂ“ → „PRIME RAW“ */
+        cat: function (c) { return this.plain(c || '').replace(/^\s*\|?[A-Z]{2,3}\s*[|:]\s*/, '').replace(/\s+/g, ' ').trim() || c; },
+        sepTitle: function (n) { return this.plain(n || '').replace(/[#=*\-|]+/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase(); },
+        split: function (name, cat) {
+            var src = String(name || ''), tags = [], rest = '', run = '', self = this, c, i;
+            // hochgestellte Zusätze (ᴿᴬᵂ ⁶⁰ᶠᵖˢ) sammeln
+            for (i = 0; i <= src.length; i++) {
+                c = i < src.length ? src.charAt(i) : '';
+                if (c && this.SUP[c]) { run += this.SUP[c]; continue; }
+                if (c === ' ' && run) { run += ' '; continue; }
+                if (run.trim()) run.trim().split(/\s+/).forEach(function (t) { if (t) tags.push(t.toUpperCase()); });
+                run = '';
+                rest += c;
+            }
+            rest = rest.replace(this.TAG, function (m, pre, t) { tags.push(t.toUpperCase()); return pre + ' '; });
+            rest = rest.replace(/^\s*\|?[A-Z]{2,3}\s*[|:]\s*/, '');               // DE| / DE: / |DE|
+            var pm = /^\s*([A-Za-z0-9+][A-Za-z0-9+ ]{1,14}):\s*/.exec(rest);
+            if (pm && cat && self.plain(cat).toUpperCase().indexOf(pm[1].trim().toUpperCase()) >= 0) rest = rest.slice(pm[0].length);
+            rest = rest.replace(/[\s|:\-]+$/, '').replace(/\s+/g, ' ').trim();
+            var seen = {}, uniq = [];
+            tags.forEach(function (t) { t = t === 'H265' ? 'HEVC' : t; if (!seen[t] && uniq.length < 3) { seen[t] = 1; uniq.push(t); } });
+            return { name: rest || src, tags: uniq };
+        }
+    };
+
     function LiveScreen(catIndex) {
         this.catIndex = catIndex || 0;
         this.selected = null;
@@ -4727,43 +4785,73 @@
 
         var columns = h('div', 'columns');
         var cats = this.categories();
-        columns.appendChild(categoryColumn(cats, this.catIndex, function (i) {
+        // Anzahl Sender je Kategorie (ohne Trennzeilen)
+        var vis = Parental.visible('live', Data.channels), cnt = {}, favN = 0, allN = 0;
+        for (var ci = 0; ci < vis.length; ci++) {
+            if (NameTidy.isSep(vis[ci].name)) continue;
+            allN++;
+            cnt[vis[ci].cat] = (cnt[vis[ci].cat] || 0) + 1;
+            if (Favs.has('live', vis[ci].id)) favN++;
+        }
+        var counts = cats.map(function (c, i) { return i === 0 ? allN : i === 1 ? favN : (cnt[c] || 0); });
+        var catLabels = cats.map(function (c, i) { return i < 2 ? c : NameTidy.cat(c); });
+        columns.appendChild(categoryColumn(catLabels, this.catIndex, function (i) {
             self.catIndex = i;
             self.query = '';
             self.focusKey = null;
             Nav.show(self);
             var first = $('.col-list .row');
             if (first) Focus.set(first);
-        }, { query: this.query, kind: 'live', onClick: function () { self.openSearch(); } }));
+        }, { query: this.query, kind: 'live', counts: counts, onClick: function () { self.openSearch(); } }));
 
         var listCol = h('div', 'col col-list');
         var scroll = h('div', 'scroll');
         listCol.appendChild(scroll);
         columns.appendChild(listCol);
 
-        this.list = this.filter();
-        var nowMap = Epg.nowMap(this.list);              // „Jetzt läuft“ für alle Sender auf einmal (gespeichertes Programm)
+        // Trennzeilen der Anbieter („#### PRIME RAW ####“) werden zu Überschriften und sind keine Sender mehr
+        var raw = this.filter(), list = [], heads = {}, curHead = '';
+        for (var ri = 0; ri < raw.length; ri++) {
+            if (NameTidy.isSep(raw[ri].name)) { curHead = NameTidy.sepTitle(raw[ri].name); continue; }
+            if (curHead) { heads[list.length] = curHead; curHead = ''; }
+            list.push(raw[ri]);
+        }
+        this.list = list;
+        var nowMap = Epg.nowFull(this.list);             // „Jetzt läuft“ mit Beginn/Ende für alle Sender auf einmal
         if (!this.list.length) {
             scroll.appendChild(h('div', 'empty-note', this.query ? 'Kein Sender gefunden für „' + this.query + '“.' : this.catIndex === 1 ? 'Noch keine Favoriten. Drücke bei einem Sender die gelbe Taste.' : 'Keine Sender in dieser Kategorie.'));
         }
         var batch = batchRender(scroll, this.list, function (ch, i) {
-            var row = h('div', 'row' + (self.selected && self.selected.id === ch.id ? ' active' : ''));
+            var row = h('div', 'row lv' + (self.selected && self.selected.id === ch.id ? ' active' : ''));
             row.appendChild(h('div', 'num', String(ch.num)));
             var logo = h('img', 'logo');
             if (ch.logo) LazyImg.set(logo, ch.logo);
             logo.onerror = function () { logo.style.visibility = 'hidden'; };
             row.appendChild(logo);
-            var nowT = ch.epg ? nowMap[ch.epg] : '';
-            if (nowT) {
-                var nm = h('div', 'name rname');
-                nm.appendChild(h('div', 'rn', ch.name));
-                nm.appendChild(h('div', 'rnow', nowT));
-                row.appendChild(nm);
-            } else row.appendChild(h('div', 'name', ch.name));
+            var nt = NameTidy.split(ch.name, ch.cat);
+            var now = ch.epg ? nowMap[ch.epg] : null;
+            var nm = h('div', 'name rname');
+            nm.appendChild(h('div', 'rn', nt.name));
+            if (now) {
+                nm.appendChild(h('div', 'rnow', now[0] + (now[1] && now[2] ? ' · ' + fmtClock(new Date(now[1])) + '–' + fmtClock(new Date(now[2])) : '')));
+                if (now[1] && now[2] > now[1]) {
+                    var pr = h('div', 'rpr'), pi = h('i');
+                    pi.style.width = Math.max(2, Math.min(100, (Date.now() - now[1]) / (now[2] - now[1]) * 100)) + '%';
+                    pr.appendChild(pi); nm.appendChild(pr);
+                }
+            }
+            row.appendChild(nm);
+            nt.tags.forEach(function (t) { row.appendChild(h('div', 'ch-tag' + (/^(HD|FHD|UHD|4K|8K|HDR)$/.test(t) ? ' q' : ''), t)); });
             if (Favs.has('live', ch.id)) row.appendChild(h('div', 'star', '★'));
             row._channel = ch;
             row._onLong = function () { favToggleNode(row, 'live', ch); };
-            return focusable(row, 'ch-' + ch.id, function () { self.choose(ch, i); }, 'list');
+            row._onFocus = function () { self.focusInfo(ch); };
+            focusable(row, 'ch-' + ch.id, function () { self.choose(ch, i); }, 'list');
+            if (!heads[i]) return row;
+            var wrap = h('div', 'row-wrap');
+            wrap.appendChild(h('div', 'sec-head', heads[i]));
+            wrap.appendChild(row);
+            return wrap;
         }, 120);
 
         // Gemerkten Sender wieder sichtbar machen
@@ -4773,7 +4861,7 @@
 
         var info = h('div', 'col col-info');
         this.previewBox = h('div', 'preview-box' + (this.selected ? '' : ' empty'));
-        if (!this.selected) this.previewBox.appendChild(h('div', 'preview-placeholder', 'Sender auswählen'));
+        if (!this.selected) this.previewBox.appendChild(h('div', 'preview-placeholder', 'OK drücken für die Vorschau'));
         info.appendChild(this.previewBox);
         this.infoPanel = h('div', 'info-panel');
         info.appendChild(this.infoPanel);
@@ -4818,19 +4906,50 @@
             if (self.selected && self.selected.id === ch.id) self.renderInfo(ch, list);
         });
     };
+    /** Beim Durchblättern (ohne laufende Vorschau): Infos zum markierten Sender zeigen */
+    LiveScreen.prototype.focusInfo = function (ch) {
+        var self = this;
+        if (this.selected) return;
+        clearTimeout(this.infoTimer);
+        this.infoTimer = setTimeout(function () {
+            if (Nav.top() !== self || self.selected) return;
+            var local = Epg.list(ch);
+            if (local) self.renderInfo(ch, local.filter(function (e) { return e.end > Date.now(); }));
+            else {
+                self.renderInfo(ch, []);
+                Data.shortEpg(ch.id).then(function (list) {
+                    var cur = Focus.cur && Focus.cur._channel;
+                    if (!self.selected && cur && cur.id === ch.id) self.renderInfo(ch, list);
+                });
+            }
+        }, 350);
+    };
     LiveScreen.prototype.renderInfo = function (ch, epg) {
         var p = this.infoPanel;
         if (!p) return;
         p.innerHTML = '';
-        p.appendChild(h('div', 'info-title', ch.name));
+        var nt = NameTidy.split(ch.name, ch.cat);
+        var head = h('div', 'info-head');
+        var lg = h('img', 'info-logo');
+        if (ch.logo) lg.src = ch.logo;
+        lg.onerror = function () { lg.style.visibility = 'hidden'; };
+        head.appendChild(lg);
+        var ht = h('div', 'info-ht');
+        var tl = h('div', 'info-title', nt.name);
+        nt.tags.forEach(function (t) { tl.appendChild(h('span', 'ch-tag' + (/^(HD|FHD|UHD|4K|8K|HDR)$/.test(t) ? ' q' : ''), t)); });
+        ht.appendChild(tl);
+        ht.appendChild(h('div', 'info-sub', 'Kanal ' + ch.num + (ch.cat ? ' · ' + NameTidy.cat(ch.cat) : '')));
+        head.appendChild(ht);
+        p.appendChild(head);
         if (!epg.length) { p.appendChild(h('div', 'epg-row later', 'Kein Programm verfügbar')); return; }
         epg.slice(0, 4).forEach(function (e, i) {
             var row = h('div', 'epg-row' + (i > 0 ? ' later' : ''));
-            var t = e.start ? fmtClock(new Date(e.start)) + (e.end ? '–' + fmtClock(new Date(e.end)) : '') : '';
-            row.appendChild(h('span', 'time', t));
-            row.appendChild(document.createTextNode(e.title));
+            var running = e.start && e.end && e.start <= Date.now() && e.end > Date.now();
+            row.appendChild(h('span', 'time', running ? 'Jetzt' : e.start ? fmtClock(new Date(e.start)) : ''));
+            row.appendChild(h('span', 'et', e.title));
+            if (e.start && e.end) row.appendChild(h('span', 'dur', running ? fmtClock(new Date(e.start)) + '–' + fmtClock(new Date(e.end)) : Math.round((e.end - e.start) / 60000) + ' Min'));
             p.appendChild(row);
-            if (i === 0 && e.start && e.end) {
+            if (running) {
                 var prog = h('div', 'progress'), bar = h('div', 'bar');
                 bar.style.width = Math.max(0, Math.min(100, (Date.now() - e.start) / (e.end - e.start) * 100)) + '%';
                 prog.appendChild(bar);

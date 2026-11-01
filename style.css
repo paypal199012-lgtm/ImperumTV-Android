@@ -1297,3 +1297,22 @@ body.sleep-on.clock-on .hint { right: 380px; }
 body.sleep-on.clock-on .fb-refresh { right: 380px; }
 body.sleep-on.clock-on .home-head-btns { right: 380px; }
 body:not(.clock-on) #sleepbadge { right: 40px; }
+
+/* ---------- Live TV: aufgeräumte Liste ---------- */
+.row.lv { min-height: 92px; }
+.row .rpr { height: 4px; border-radius: 2px; background: rgba(255,255,255,.14); margin-top: 6px; width: 92%; }
+.row .rpr i { display: block; height: 4px; border-radius: 2px; background: #d9b066; }
+.ch-tag { flex: none; font-size: 15px; font-weight: bold; line-height: 1; padding: 5px 8px; border-radius: 6px; margin-left: 8px;
+    border: 1px solid rgba(255,255,255,.35); color: #ddd; }
+.ch-tag.q { border-color: rgba(232,201,138,.7); color: #f4dc9e; }
+.sec-head { display: flex; align-items: center; font-size: 19px; font-weight: bold; letter-spacing: 3px; color: #d9b066; margin: 16px 8px 8px 14px; }
+.sec-head:after { content: ""; flex: 1; height: 1px; margin-left: 14px; background: rgba(217,176,102,.3); }
+.info-head { display: flex; align-items: center; margin-bottom: 12px; }
+.info-logo { width: 96px; height: 64px; object-fit: contain; margin-right: 18px; flex: none; background: rgba(0,0,0,.35); border-radius: 10px; }
+.info-ht { min-width: 0; flex: 1; }
+.info-head .info-title { margin-bottom: 2px; display: flex; align-items: center; }
+.info-sub { font-size: 21px; color: #a7a39a; }
+.epg-row { display: flex; align-items: baseline; }
+.epg-row .time { flex: none; width: 90px; }
+.epg-row .et { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.epg-row .dur { flex: none; margin-left: 14px; font-size: 21px; color: #a7a39a; }
