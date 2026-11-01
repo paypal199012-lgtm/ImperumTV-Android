@@ -477,8 +477,8 @@
     function askExit() {
         if (Modal.node) return;
         Modal.open('ImperumTV beenden?', 'Möchtest du die App wirklich verlassen?', [
-            { label: 'Abbrechen', primary: true },
-            { label: 'Beenden', action: function () { exitApp(); } }
+            { label: 'Ja', primary: true, action: function () { exitApp(); } },
+            { label: 'Nein' }
         ]);
     }
     function exitApp() {
@@ -8818,6 +8818,7 @@
     // =====================================================================
 
     function boot() {
+        if (AB) document.body.classList.add('android');
         // Fire TV / Android-TV-Boxen: sparsame Darstellung (kein Leuchten, kein Vergrößern) – spürbar flüssiger
         try {
             var ua = navigator.userAgent || '';
