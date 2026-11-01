@@ -9079,6 +9079,19 @@
                 }
             }
         };
+        // Bildrate anpassen hat nicht geklappt (Geräte-Einstellung aus): einmal fragen, ob die Einstellung geöffnet werden soll
+        window.__androidAfr = function (want, now, why, fire) {
+            if (Storage.get('afrAsk', '') === 'never' || window.__afrAsked) return;
+            window.__afrAsked = true;                       // pro App-Start höchstens einmal
+            var where = fire ? 'Einstellungen → Display & Sounds → Display → „Bildwiederholrate anpassen“ (Match Original Frame Rate)'
+                : 'Bildschirm-Einstellungen → „Bildwiederholrate anpassen“ bzw. „Auto-Bildrate“';
+            Modal.open('Flüssigeres Bild einschalten?', 'Dieser Sender läuft mit ' + want + ' Bildern pro Sekunde, dein Fernseher mit ' + now + ' Hz – schnelle Bewegungen ruckeln dadurch leicht. ' +
+                'Damit ImperumTV den Fernseher passend umstellen darf, schalte einmal ein: ' + where + '.', [
+                { label: 'Einstellung öffnen', primary: true, action: function () { try { AB.openDisplaySettings(); } catch (e) { /* egal */ } } },
+                { label: 'Später' },
+                { label: 'Nicht mehr fragen', action: function () { Storage.set('afrAsk', 'never'); } }
+            ]);
+        };
         window.__androidKeyUp = function (code) { if (code === KEY.ENTER) LongPress.up(); };
 
         // Bedienung per Finger (Handy/Tablet): Listen dürfen wischen

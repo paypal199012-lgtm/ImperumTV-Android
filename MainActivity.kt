@@ -340,9 +340,25 @@ class MainActivity : Activity() {
                 if (m.physicalWidth != cur.physicalWidth || m.physicalHeight != cur.physicalHeight) continue
                 if (Math.abs(m.refreshRate - want) < 0.6f) { best = m; break }
             }
-            val b = best ?: return
+            val b = best
+            if (b == null) { afrTell(want, cur.refreshRate, "nomode"); return }
             val lp = window.attributes
             if (lp.preferredDisplayModeId != b.modeId) { lp.preferredDisplayModeId = b.modeId; window.attributes = lp }
+            // Nach ein paar Sekunden nachsehen, ob der Fernseher wirklich umgestellt hat
+            handler.postDelayed({
+                try {
+                    @Suppress("DEPRECATION")
+                    val now = windowManager.defaultDisplay.mode.refreshRate
+                    if (Math.abs(now - want) >= 0.6f) afrTell(want, now, "blocked")
+                } catch (e: Throwable) { }
+            }, 5_000)
+        } catch (e: Throwable) { }
+    }
+    /** Oberfläche fragt dann, ob die Einstellung des Geräts geöffnet werden soll */
+    private fun afrTell(want: Float, now: Float, why: String) {
+        try {
+            val fire = Build.MANUFACTURER.equals("Amazon", ignoreCase = true)
+            webView.evaluateJavascript("window.__androidAfr && window.__androidAfr(" + want.toInt() + "," + Math.round(now) + ",'" + why + "'," + fire + ")", null)
         } catch (e: Throwable) { }
     }
     private fun afrRestore() {
@@ -1608,6 +1624,21 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun getAfr(): Boolean = afrOn()
+
+        /** Bildschirm-Einstellungen des Geräts öffnen (dort „Bildwiederholrate anpassen“ einschalten) */
+        @JavascriptInterface
+        fun openDisplaySettings() {
+            handler.post {
+                val tries = listOf(
+                    Intent("com.amazon.tv.settings.v2.DISPLAY_SOUNDS"),
+                    Intent().setClassName("com.amazon.tv.settings.v2", "com.amazon.tv.settings.v2.tv.display_sounds.DisplaySoundsActivity"),
+                    Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS),
+                    Intent(android.provider.Settings.ACTION_SETTINGS))
+                for (i in tries) {
+                    try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return@post } catch (e: Throwable) { }
+                }
+            }
+        }
 
         /** Näher am Live-Geschehen an/aus */
         @JavascriptInterface
