@@ -4778,8 +4778,39 @@
         Data.channels.forEach(function (c) { if (c.cat && !seen[c.cat]) { seen[c.cat] = true; cats.push(c.cat); } });
         return ['Alle', '★ Favoriten'].concat(cats);
     };
+    /** Ausgeblendete Sender (der Anbieter liefert sie weiter, die App zeigt sie nur nicht) */
+    var Hidden = {
+        ids: function () { return Storage.get('hiddenLive', {}) || {}; },
+        has: function (id) { return !!this.ids()[id]; },
+        count: function () { return Object.keys(this.ids()).length; },
+        toggle: function (ch) {
+            var m = this.ids(), on = !m[ch.id];
+            if (on) m[ch.id] = NameTidy.split(ch.name, ch.cat).name; else delete m[ch.id];
+            Storage.set('hiddenLive', m);
+            return on;
+        },
+        clear: function () { Storage.set('hiddenLive', {}); },
+        apply: function (list) {
+            var m = this.ids();
+            for (var k in m) if (m.hasOwnProperty(k)) return list.filter(function (c) { return !m[c.id]; });
+            return list;
+        },
+        /** Einstellungen: ausgeblendete Sender wieder zeigen */
+        menu: function (done) {
+            var self = this, m = this.ids(), keys = Object.keys(m);
+            if (!keys.length) { toast('Keine Sender ausgeblendet'); return; }
+            var buttons = keys.slice(0, 10).map(function (id) {
+                return { label: '↩  ' + m[id] + ' wieder zeigen', action: function () { var x = self.ids(); delete x[id]; Storage.set('hiddenLive', x); toast(m[id] + ' wird wieder gezeigt'); if (done) done(); } };
+            });
+            buttons.unshift({ label: 'Alle ' + keys.length + ' wieder zeigen', primary: true, action: function () { self.clear(); toast('Alle Sender werden wieder gezeigt'); if (done) done(); } });
+            buttons.push({ label: 'Schließen' });
+            Modal.open('Ausgeblendete Sender', keys.length > 10 ? 'Die ersten 10 von ' + keys.length : '', buttons);
+            if (Modal.node) Modal.node.classList.add('modal-list');
+        }
+    };
+
     LiveScreen.prototype.filter = function () {
-        var all = Parental.visible('live', Data.channels);
+        var all = Hidden.apply(Parental.visible('live', Data.channels));
         if (this.query) return all.filter(searchMatcher(this.query));
         var cats = this.categories(), cat = cats[this.catIndex];
         if (this.catIndex === 0) return all.slice();
@@ -4797,7 +4828,7 @@
         var columns = h('div', 'columns live-b');
         var cats = this.categories();
         // Anzahl Sender je Kategorie (ohne Trennzeilen)
-        var vis = Parental.visible('live', Data.channels), cnt = {}, favN = 0, allN = 0;
+        var vis = Hidden.apply(Parental.visible('live', Data.channels)), cnt = {}, favN = 0, allN = 0;
         for (var ci = 0; ci < vis.length; ci++) {
             if (NameTidy.isSep(vis[ci].name)) continue;
             allN++;
@@ -4813,7 +4844,7 @@
             Nav.show(self);
             var first = $('.col-list .row');
             if (first) Focus.set(first);
-        }, { query: this.query, kind: 'live', onClick: function () { self.openSearch(); } }));
+        }, { query: this.query, kind: 'live', counts: counts, onClick: function () { self.openSearch(); } }));
 
         var listCol = h('div', 'col col-list');
         var scroll = h('div', 'scroll');
@@ -6420,8 +6451,8 @@
         this.main = h('div', 'eg-main');
         wrap.appendChild(this.main);
         var hint = h('div', 'eg-hint');
-        hint.innerHTML = '<span><b>◀ ▶</b> Zeit</span><span><b>▲ ▼</b> Sender</span><span><b>OK</b> Ansehen' +
-            (Rec.available() ? ' / Aufnehmen' : '') + ' / Erinnern</span><span><i class="k red"></i>−2 Std.</span><span><i class="k green"></i>+2 Std.</span>' +
+        hint.innerHTML = '<span><b>◀ ▶</b> Zeit</span><span><b>▲ ▼</b> Sender</span><span><b>OK</b> Menü: Ansehen · Favorit · Ausblenden</span><span>' +
+            '<i class="k red"></i>−2 Std.</span><span><i class="k green"></i>+2 Std.</span>' +
             '<span><i class="k yellow"></i>Favorit</span><span><i class="k blue"></i>Jetzt</span><span><b>▲</b> ganz oben: Kategorien</span>';
         wrap.appendChild(hint);
         root.appendChild(wrap);
@@ -6804,10 +6835,10 @@
     };
 
     EpgGridScreen.prototype.choose = function (ch, p) {
-        var self = this;
-        var now = Date.now();
-        if (!p.placeholder && p.end <= now) { toast('Diese Sendung ist schon vorbei.'); return; }
-        var running = p.placeholder || (p.start <= now && p.end > now);
+        var self = this, now = Date.now(), name = NameTidy.split(ch.name, ch.cat).name;
+        var real = p && !p.placeholder;
+        var running = !real || (p.start <= now && p.end > now);
+        var over = real && p.end <= now;
         var watch = function () {
             Player.on({});
             var keepIt = self.previewId === ch.id;    // Vorschau zeigt schon diesen Sender: nur groß machen
@@ -6818,33 +6849,16 @@
             screen.handoff = keepIt;
             Nav.push(screen);
         };
-        if (p.placeholder) { watch(); return; }
-        var remindBtn = function () {
-            var on = Remind.has(ch.id, p.start);
-            return { label: on ? '🔔  Erinnerung löschen' : '🔔  Erinnern', primary: !running && !Rec.available(), action: function () {
-                var now2 = Remind.toggle(ch, p);
-                toast(now2 ? 'Ich erinnere dich um ' + fmtClock(new Date(p.start - 60000)) + ' an „' + p.title + '“' : 'Erinnerung gelöscht', 4500);
-                self.draw();
-            } };
-        };
-        if (!Rec.available()) {
-            if (running) { watch(); return; }
-            Modal.open(p.title, dateText(p.start) + ' – ' + fmtClock(new Date(p.end)) + ' · ' + NameTidy.split(ch.name, ch.cat).name, [remindBtn(), { label: 'Abbrechen' }]);
-            return;
-        }
-
-        var mark = this.marks[ch.id + ':' + p.start];
-        var when = dateText(p.start) + ' – ' + fmtClock(new Date(p.end)) + ' · ' + ch.name;
         var buttons = [];
-        if (running) buttons.push({ label: 'Ansehen', primary: true, action: watch });
-        if (mark) {
-            buttons.push({ label: mark.status === 'recording' ? 'Aufnahme stoppen' : 'Aufnahme löschen', primary: !running, action: function () {
+        if (running) buttons.push({ label: '▶  Ansehen', primary: true, action: watch });
+        if (real && !over && Rec.available()) {
+            var mark = this.marks[ch.id + ':' + p.start];
+            if (mark) buttons.push({ label: mark.status === 'recording' ? '■  Aufnahme stoppen' : '✕  Aufnahme löschen', action: function () {
                 AB.recCancel(mark.id);
                 toast(mark.status === 'recording' ? 'Aufnahme gestoppt' : 'Geplante Aufnahme gelöscht');
                 self.marks = Rec.marks(); self.draw();
             } });
-        } else {
-            buttons.push({ label: running ? 'Bis zum Ende aufnehmen' : 'Aufnahme planen', primary: !running, action: function () {
+            else buttons.push({ label: running ? '●  Bis zum Ende aufnehmen' : '●  Aufnahme planen', primary: !running && !buttons.length, action: function () {
                 // 2 Minuten Puffer vorher, 5 Minuten nachher
                 var res = Rec.schedule(ch, p.title, p.start - 2 * 60000, p.end + 5 * 60000, p.start, p.end);
                 if (res === true) toast(running ? 'Aufnahme läuft: ' + p.title : 'Aufnahme geplant: ' + p.title + ' (' + dateText(p.start) + ')', 4500);
@@ -6852,9 +6866,31 @@
                 self.marks = Rec.marks(); self.draw();
             } });
         }
-        if (!running) buttons.push(remindBtn());
+        if (real && p.start > now) {
+            var bell = Remind.has(ch.id, p.start);
+            buttons.push({ label: bell ? '🔔  Erinnerung löschen' : '🔔  Erinnern', primary: !buttons.length, action: function () {
+                var on = Remind.toggle(ch, p);
+                toast(on ? 'Ich erinnere dich um ' + fmtClock(new Date(p.start - 60000)) + ' an „' + p.title + '“' : 'Erinnerung gelöscht', 4500);
+                self.draw();
+            } });
+        }
+        var fav = Favs.has('live', ch.id);
+        buttons.push({ label: fav ? '☆  Aus Favoriten entfernen' : '★  Zu Favoriten hinzufügen', action: function () {
+            var on = Favs.toggle('live', ch.id);
+            toast(on ? name + ' zu Favoriten hinzugefügt' : name + ' aus Favoriten entfernt');
+            self.draw();
+        } });
+        buttons.push({ label: '🚫  Sender ausblenden', action: function () {
+            Hidden.toggle(ch);
+            toast(name + ' ausgeblendet · zurückholen unter Einstellungen → Ausgeblendete Sender', 5000);
+            if (self.previewId === ch.id) { Player.stop(); self.previewId = null; }
+            self.chIndex = Math.max(0, Math.min(self.chIndex, self.list.length - 2));
+            Nav.show(self);
+        } });
         buttons.push({ label: 'Abbrechen' });
-        Modal.open(p.title, when, buttons);
+        var when = real ? dateText(p.start) + ' – ' + fmtClock(new Date(p.end)) + ' · ' + name + (over ? ' · schon vorbei' : '') : name + ' · Kanal ' + ch.num;
+        Modal.open(real ? p.title : name, when, buttons);
+        if (Modal.node) Modal.node.classList.add('modal-list');
     };
 
     EpgGridScreen.prototype.chooseCategory = function () {
@@ -7186,6 +7222,9 @@
             Sleep.menu(0, '', function () { v.textContent = Sleep.active() ? 'An · noch ' + Sleep.minutesLeft() + ' Min' : 'Aus'; });
         });
         row('parental', 'lock', 'Kinderschutz', Parental.hasPin() ? 'An · PIN' : 'Aus', parentalOpen);
+        row('hidden', 'list', 'Ausgeblendete Sender', Hidden.count() ? String(Hidden.count()) : 'Keine', function (v) {
+            Hidden.menu(function () { v.textContent = Hidden.count() ? String(Hidden.count()) : 'Keine'; });
+        });
         row('profiles', 'users', 'Profile', Profiles.count() ? Profiles.count() + ' · ' + Profiles.cur().name : 'Aus', function () {
             if (Profiles.count() >= 2) Nav.push(new WhoScreen(function () { Nav.stack.length = 0; Nav.push(new HomeScreen()); }, true));
             else Nav.push(new ProfilesScreen());

@@ -1467,3 +1467,7 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 body.wide .live-b .col-list { width: auto; right: 940px; }
 body.wide .live-b .col-info { left: auto; right: 40px; width: 880px; }
 .eg3 .eg-chan, .eg3 .eg-prog, .eg-chip, .eg-acts { cursor: pointer; }
+.live-b .cat.with-n { display: flex; align-items: center; }
+.live-b .cat.with-n .cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-b .cat .cat-n { font-size: 19px; font-weight: 400; color: #a7a39a; margin-left: 10px; flex: none; }
+.live-b .cat.active .cat-n, .live-b .cat.focused .cat-n { color: #f4dc9e; }
