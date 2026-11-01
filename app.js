@@ -7427,7 +7427,7 @@
                 Modal.open('Puffer', 'Wie viel Vorrat die App lädt, bevor das Bild startet.\nKlein: Sender starten schneller, bei schwachem WLAN eher Ruckler.\n' +
                     'Groß: Start dauert etwas länger, dafür flüssiger bei schwachem Internet.', [
                     { label: 'Klein · 1 s (schneller Start)', primary: Buffer.get() === 'small', action: function () { Buffer.set('small'); v.textContent = Buffer.label('small'); } },
-                    { label: 'Normal · 2,5 s (wie XCIPTV, empfohlen)', primary: Buffer.get() === 'normal', action: function () { Buffer.set('normal'); v.textContent = Buffer.label('normal'); } },
+                    { label: 'Normal · 2,5 s (empfohlen)', primary: Buffer.get() === 'normal', action: function () { Buffer.set('normal'); v.textContent = Buffer.label('normal'); } },
                     { label: 'Groß · 5 s (bei schwachem Internet)', primary: Buffer.get() === 'large', action: function () { Buffer.set('large'); v.textContent = Buffer.label('large'); } },
                     { label: 'Abbrechen' }
                 ]);
