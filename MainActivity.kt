@@ -425,32 +425,8 @@ class MainActivity : Activity() {
         return p
     }
 
-    /** Läuft gerade ein Live-Sender? (für „Näher am Live-Geschehen“) */
+    /** Läuft gerade ein Live-Sender? */
     @Volatile private var currentIsLive = false
-
-    /**
-     * Näher am Live-Geschehen: Hat sich nach einem Hänger Vorrat angesammelt (Bild läuft hinter dem Live-Signal),
-     * minimal schneller abspielen (1,05-fach, Ton bleibt gleich hoch), bis der Rückstand aufgeholt ist.
-     */
-    private val catchupTick = object : Runnable {
-        override fun run() {
-            try {
-                val on = getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getBoolean("catchup", false)
-                val p = player
-                if (on && currentIsLive && p.isPlaying) {
-                    val ahead = p.totalBufferedDuration
-                    val speed = p.playbackParameters.speed
-                    // Nur bei deutlichem Rückstand (über 15 s Vorrat) und sanft (1,03-fach); schon bei 8 s wieder normal,
-                    // damit nie der ganze Vorrat aufgebraucht wird (sonst Ruckler)
-                    if (ahead > 15_000 && speed < 1.02f) p.setPlaybackSpeed(1.03f)
-                    else if (ahead < 8_000 && speed > 1.01f) p.setPlaybackSpeed(1f)
-                } else if (p.playbackParameters.speed > 1.01f && (!on || !currentIsLive)) {
-                    p.setPlaybackSpeed(1f)
-                }
-            } catch (e: Throwable) { }
-            handler.postDelayed(this, 1_000)
-        }
-    }
 
     /** Zuletzt gemessene Datenrate (Bit/s) */
     @Volatile private var lastBitrate = 0L
@@ -477,7 +453,6 @@ class MainActivity : Activity() {
             .setReadTimeoutMs(20_000)
         httpFactory = http
         player = createPlayer(http)
-        handler.postDelayed(catchupTick, 2_000)
 
         playerView = PlayerView(this).apply {
             useController = false
@@ -1683,16 +1658,6 @@ class MainActivity : Activity() {
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
         }
-
-        /** Näher am Live-Geschehen an/aus */
-        @JavascriptInterface
-        fun setCatchup(on: Boolean) {
-            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putBoolean("catchup", on).apply()
-        }
-
-        @JavascriptInterface
-        fun getCatchup(): Boolean =
-            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getBoolean("catchup", false)
 
         /** Verbindungsanzeige: gemessene Datenrate in kbit/s */
         @JavascriptInterface
