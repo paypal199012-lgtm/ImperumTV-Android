@@ -1574,3 +1574,6 @@ body.android .set-row:not(.focused), body.android .set6-card .set-row:not(.focus
 .fb-f1 .fb-ch { display: inline-block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; background: #f4dc9e; color: #1a1408; font-weight: 800; padding: 8px 16px; border-radius: 20px; }
 .fb-f1 .fb-more { font-size: 18px; }
 .fb-f1 .fb-guess { font-size: 18px; }
+/* Live TV: alle drei Knöpfe gleich aussehen lassen (Favorit hatte auf manchen Geräten keine Fläche) */
+.lv-acts .lv-act:not(.primary) { background: #2a2723 !important; color: #fff !important; font-weight: bold; }
+.lv-acts .lv-act:not(.primary).focused { background: #645238 !important; }
