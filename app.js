@@ -8389,7 +8389,8 @@
             return;
         }
         // Bild lässt sich auf diesem Gerät nicht dekodieren: einmal als HLS (M3U8) statt TS versuchen
-        if (this.kind === 'live' && /DECOD/i.test(msg || '') && !(this.altUrl && this.altFor === this.index) && Api.acc && !Api.acc.demo && Settings.liveExt === 'ts') {
+        // Auch wenn der Anbieter kein TS liefert (PARSING_CONTAINER_UNSUPPORTED, oft bei Event-/PPV-Sendern): als HLS versuchen
+        if (this.kind === 'live' && /DECOD|PARSING|CONTAINER|extractor/i.test(msg || '') && !(this.altUrl && this.altFor === this.index) && Api.acc && !Api.acc.demo && Settings.liveExt === 'ts') {
             this.altUrl = Api.acc.server + '/live/' + Api.creds() + '/' + it.id + '.m3u8'; this.altFor = this.index;
             toast('Bild ließ sich nicht abspielen – anderes Format wird versucht …', 3500);
             this.start();
