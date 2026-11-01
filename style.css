@@ -1385,3 +1385,6 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 .epc.focused .epc-img { border-color: #f4dc9e; transform: scale(1.04); box-shadow: 0 0 0 2px #f4dc9e, 0 10px 30px rgba(0,0,0,.6); }
 .epc.focused .epc-t { color: #f4dc9e; font-weight: bold; }
 .epc.focused { box-shadow: none !important; }
+
+/* ---------- Filme/Serien R1: goldener Hintergrund durchgehend, keine schwarzen Flächen ---------- */
+.vod-r1 .col-cats, .vod-r1 .col-grid, .vod-r1 .col-grid .scroll, .vod-r1 .col-cats .scroll { background: transparent; border: none; }

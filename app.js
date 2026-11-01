@@ -5225,7 +5225,7 @@
             return;
         }
 
-        var columns = h('div', 'columns');
+        var columns = h('div', 'columns vod-r1');
         columns.appendChild(categoryColumn(this.categories(), this.catIndex, function (i) {
             self.catIndex = i;
             self.query = '';
