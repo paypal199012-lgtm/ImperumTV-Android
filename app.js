@@ -8397,7 +8397,7 @@
             return;
         }
         if (/DECOD/i.test(msg || '')) {
-            toast('Dieses Bild kann der eingebaute Player auf diesem Gerät nicht abspielen. Tipp: im Player mit ⇄ einen anderen Player wie VLC wählen oder einen anderen Sender.', 8000);
+            toast(this.kind === 'live' ? 'Dieses Bild kann der Player auf diesem Gerät nicht abspielen. Tipp: einen anderen Sender wählen oder unter Einstellungen das Live-Format wechseln.' : 'Dieses Bild kann der eingebaute Player auf diesem Gerät nicht abspielen. Tipp: im Player mit ⇄ einen anderen Player wie VLC wählen.', 8000);
             Report.player(it, msg);
             this.showOverlay();
             return;
