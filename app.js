@@ -6356,14 +6356,24 @@
             list.appendChild(focusable(row, 'fbm-' + m.id, function () { self.open(m); }, 'fblist'));
         });
         list.appendChild(h('div', 'fb-src', 'Daten: OpenLigaDB · Football data provided by the Football-Data.org API · API-Football'));
-        // Event-Sender mit beiden Vereinen im Namen gleich eintragen (braucht kein Programm)
+        // Event-Sender mit beiden Vereinen im Namen eintragen (braucht kein Programm).
+        // Die Suche geht durch die ganze Senderliste: in kleinen Häppchen, damit die Fernbedienung nicht hängt
+        // (beim ersten Mal sonst mehrere Sekunden auf dem Fire TV Stick). Schon gesuchte Spiele kommen sofort.
         this.events = {};
-        shown.forEach(function (m) {
-            if (m.s === 'FINISHED' || m.s === 'AWARDED') return;
-            var ev = Football.eventChannels(m).filter(function (x) { return x.sc >= 20; });
-            if (ev.length) self.events[String(m.id)] = ev.map(function (x) { return x.c; });
-        });
-        this.markChannels();
+        var todo = shown.filter(function (m) { return m.s !== 'FINISHED' && m.s !== 'AWARDED'; });
+        var at = 0, seq = this.evSeq = (this.evSeq || 0) + 1;
+        function step(first) {
+            if (self.evSeq !== seq || (!first && Nav.top() !== self)) return;
+            var t0 = Date.now();
+            while (at < todo.length && Date.now() - t0 < 30) {
+                var m = todo[at++];
+                var ev = Football.eventChannels(m).filter(function (x) { return x.sc >= 20; });
+                if (ev.length) self.events[String(m.id)] = ev.map(function (x) { return x.c; });
+            }
+            self.markChannels();
+            if (at < todo.length) setTimeout(step, 15);
+        }
+        step(true);
     };
     /** Gefundene Sender aus deiner Liste eintragen */
     FootballScreen.prototype.markChannels = function () {
