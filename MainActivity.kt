@@ -87,6 +87,8 @@ class MainActivity : Activity() {
     private lateinit var vlc: VlcEngine
     /** Läuft der aktuelle Sender gerade in VLC? */
     @Volatile private var useVlc = false
+    /** Nur der nächste Sender mit VLC (eingebauter Player konnte ihn nicht lesen) */
+    @Volatile private var forceVlcNext = false
     private lateinit var httpFactory: DefaultHttpDataSource.Factory
     /** Oberfläche schon aufgebaut? (Während der Fehlerbericht offen ist, noch nicht) */
     private val uiReady: Boolean get() = ::webView.isInitialized && ::player.isInitialized
@@ -1618,6 +1620,10 @@ class MainActivity : Activity() {
         fun getLiveEngine(): String =
             getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("liveEngine", "exo") ?: "exo"
 
+        /** Nur für den nächsten open(): "vlc" = diesen Sender mit VLC versuchen */
+        @JavascriptInterface
+        fun setNextEngine(mode: String) { forceVlcNext = mode == "vlc" }
+
         /** Ist VLC in dieser Version eingebaut? */
         @JavascriptInterface
         fun hasVlc(): Boolean = ::vlc.isInitialized && vlc.available
@@ -1676,7 +1682,8 @@ class MainActivity : Activity() {
                 currentUrl = url
                 // Live TV mit VLC? (Einstellungen → Player Live TV)
                 val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
-                useVlc = currentIsLive && vlc.available && prefs.getString("liveEngine", "exo") == "vlc"
+                useVlc = currentIsLive && vlc.available && (forceVlcNext || prefs.getString("liveEngine", "exo") == "vlc")
+                forceVlcNext = false
                 if (useVlc) {
                     player.stop()
                     player.clearMediaItems()

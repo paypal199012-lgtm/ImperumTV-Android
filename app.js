@@ -8409,9 +8409,19 @@
         }
         // Bild lässt sich auf diesem Gerät nicht dekodieren: einmal als HLS (M3U8) statt TS versuchen
         // Auch wenn der Anbieter kein TS liefert (PARSING_CONTAINER_UNSUPPORTED, oft bei Event-/PPV-Sendern): als HLS versuchen
-        if (this.kind === 'live' && /DECOD|PARSING|CONTAINER|extractor/i.test(msg || '') && !(this.altUrl && this.altFor === this.index) && Api.acc && !Api.acc.demo && Settings.liveExt === 'ts') {
+        if (this.kind === 'live' && /DECOD|PARSING|CONTAINER|extractor/i.test(msg || '') && !(this.altUrl && this.altFor === this.index) && this.vlcFor !== this.index && Api.acc && !Api.acc.demo && Settings.liveExt === 'ts') {
             this.altUrl = Api.acc.server + '/live/' + Api.creds() + '/' + it.id + '.m3u8'; this.altFor = this.index;
             toast('Bild ließ sich nicht abspielen – anderes Format wird versucht …', 3500);
+            this.start();
+            return;
+        }
+        // Auch HLS ging nicht (oder Format unbekannt): diesen Sender einmal mit VLC versuchen – VLC liest mehr Formate
+        if (this.kind === 'live' && /DECOD|PARSING|CONTAINER|extractor/i.test(msg || '') && this.vlcFor !== this.index &&
+            AB && AB.setNextEngine && AB.hasVlc && (function () { try { return AB.hasVlc(); } catch (e) { return false; } })()) {
+            this.vlcFor = this.index;
+            this.altUrl = '';                                  // VLC bekommt wieder die normale Adresse
+            try { AB.setNextEngine('vlc'); } catch (e) { /* egal */ }
+            toast('Sender wird mit VLC versucht …', 3500);
             this.start();
             return;
         }
