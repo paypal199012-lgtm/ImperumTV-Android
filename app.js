@@ -4186,6 +4186,7 @@
         /** buttons: [{ label, action, primary }] */
         open: function (title, text, buttons) {
             this.close();
+            this.openedAt = Date.now();
             this.returnFocus = Focus.cur;
             var wrap = h('div', null);
             wrap.id = 'modal';
@@ -4992,7 +4993,11 @@
             var ch = target(); if (!ch) return;
             var on = Favs.toggle('live', ch.id);
             toast(on ? ch.name + ' zu Favoriten hinzugefügt' : ch.name + ' aus Favoriten entfernt');
+            self.favLabel(ch);
+            var row = Focus.byKey('ch-' + ch.id);
+            if (row) { var st = $('.star', row); if (on && !st) row.appendChild(h('div', 'star', '★')); if (!on && st) st.parentNode.removeChild(st); }
         });
+        this.favBtn = acts.querySelector('[data-key="lv-fav"]');
         act('lv-epg', '☰  Ganzes Programm', false, function () { var ch = target(); if (ch) self.fullProgram(ch); });
         info.appendChild(acts);
         columns.appendChild(info);
@@ -5100,7 +5105,12 @@
             }
         }, 350);
     };
+    /** Knopf zeigt, was er tut: „Favorit“ oder „Aus Favoriten“ */
+    LiveScreen.prototype.favLabel = function (ch) {
+        if (this.favBtn && ch) this.favBtn.textContent = Favs.has('live', ch.id) ? '☆  Aus Favoriten' : '★  Favorit';
+    };
     LiveScreen.prototype.renderInfo = function (ch, epg) {
+        this.favLabel(ch);
         var box = this.previewBox;
         if (!box) return;
         var old = box.querySelector('.pv-info');
@@ -8869,7 +8879,8 @@
             if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { Modal.pinInput = null; Modal.close(); e.preventDefault(); return; }
             if (k === KEY.LEFT || k === KEY.UP) { Focus.move(k === KEY.LEFT ? 'left' : 'up'); e.preventDefault(); return; }
             if (k === KEY.RIGHT || k === KEY.DOWN) { Focus.move(k === KEY.RIGHT ? 'right' : 'down'); e.preventDefault(); return; }
-            if (k === KEY.ENTER) { Focus.activate(); e.preventDefault(); return; }
+            // OK noch gedrückt vom „lange drücken“, das dieses Fenster geöffnet hat: nicht gleich den ersten Knopf auslösen
+            if (k === KEY.ENTER) { if (!e.repeat && Date.now() - (Modal.openedAt || 0) > 450) Focus.activate(); e.preventDefault(); return; }
             e.preventDefault();
             return;
         }
