@@ -304,6 +304,7 @@ class MainActivity : Activity() {
 
             override fun onPlayerError(error: PlaybackException) {
                 if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    emit("stall", "Zu weit hinter dem Live-Bild – neu gestartet")
                     player.seekToDefaultPosition()
                     player.prepare()
                     return

@@ -1867,6 +1867,28 @@
             this.send('wiedergabe', (item.type === 'live' ? 'Sender: ' : 'Titel: ') + (item.name || '?') + '\nFehler: ' + (msg || 'unbekannt') +
                 '\nFormat: ' + (item.type === 'live' ? Settings.liveExt : (item.ext || '?')));
         },
+        /** Sender hing (Bild stand, Verbindung weg …): je Sender höchstens einmal pro Minute, max. 20 pro Start */
+        stallAt: {}, stalls: 0,
+        stall: function (item, what, since) {
+            if (!item) return;
+            var k = item.type + ':' + item.id, now = Date.now();
+            if (this.stallAt[k] && now - this.stallAt[k] < 60000) return;
+            if (this.stalls >= 20) return;
+            this.stallAt[k] = now; this.stalls++;
+            var eng = 'ImperumTV', buf = '', kbps = '';
+            try { if (AB && AB.getLiveEngine && AB.getLiveEngine() === 'vlc') eng = 'VLC'; } catch (e) { /* egal */ }
+            if (/^VLC/.test(what || '')) eng = 'VLC';
+            try { if (AB && AB.getBuffer) buf = AB.getBuffer(); } catch (e2) { /* egal */ }
+            try { if (AB && AB.netInfo) kbps = (JSON.parse(AB.netInfo()).kbps || 0); } catch (e3) { /* egal */ }
+            var mins = since ? Math.round((now - since) / 60000) : -1;
+            this.send('haenger', (item.type === 'live' ? 'Sender: ' : 'Titel: ') + (item.name || '?') +
+                '\nWas: ' + (what || 'Bild hing') +
+                '\nPlayer: ' + eng + (buf ? ' · Puffer: ' + buf : '') +
+                '\nFormat: ' + (item.type === 'live' ? Settings.liveExt : (item.ext || '?')) +
+                (kbps ? '\nDatenrate: ' + (kbps / 1000).toFixed(1) + ' Mbit/s' : '') +
+                (mins >= 0 ? '\nLief seit: ' + (mins < 1 ? 'unter 1 Minute' : mins + ' Min.') : '') +
+                (this.stalls > 1 ? '\nHänger seit App-Start: ' + this.stalls : ''));
+        },
         /** Programmfehler der Oberfläche (je Meldung nur einmal, höchstens 5 pro Start) */
         jsError: function (msg, where, stack) {
             msg = String(msg || '');
@@ -5079,7 +5101,9 @@
         var self = this;
         Player.on({
             error: function () { toast('Vorschau nicht verfügbar: ' + ch.name); },
-            ready: function () { Player.applyPreferences(); }
+            ready: function () { Player.applyPreferences(); },
+            notice: function (msg) { if (/^Bild hing/.test(msg || '')) Report.stall(ch, 'Vorschau: Bild stand still – Sender automatisch neu geöffnet'); },
+            stall: function (msg) { Report.stall(ch, 'Vorschau: ' + msg); }
         });
         var url = Api.liveUrl(ch.id), rect = stageRect(this.previewBox);
         if (!Player.keep(url, rect)) Player.open(url, rect);     // läuft schon (z. B. aus dem Vollbild zurück): nur verkleinern
@@ -8271,13 +8295,19 @@
             },
             end: function () { self.saveProgress(true); self.onEnd(); },
             error: function (msg) { self.onError(msg); },
-            notice: function (msg) { toast(msg, 6000); Report.player(self.item(), 'Hinweis: ' + msg); },
+            notice: function (msg) {
+                toast(msg, 6000);
+                if (/^Bild hing/.test(msg || '')) Report.stall(self.item(), 'Bild stand still – Sender automatisch neu geöffnet', self.openedAt);
+                else Report.player(self.item(), 'Hinweis: ' + msg);
+            },
+            stall: function (msg) { Report.stall(self.item(), msg, self.openedAt); },
             subtitle: function (text, ms) { self.showSubtitle(text, ms); }
         });
         Player.aspectKey = this.aspectKey();               // Bildformat dieses Senders/Films/dieser Serie
         Player.nextLangs = this.kind === 'live' ? '' : 'de,en';    // Filme/Serien: Deutsch, sonst Englisch
         var reuse = this.handoff && this.kind === 'live';
         this.handoff = false;
+        if (!this.openedAt || this.openedFor !== this.index) { this.openedAt = Date.now(); this.openedFor = this.index; }
         if (reuse && Player.keep(this.url(), null)) {
             self.buffering = false;                    // Bild läuft schon: nur auf Vollbild vergrößert
         } else {
@@ -8305,6 +8335,7 @@
         if (Date.now() - this.lastProgress > 15000 && this.retries < 3) {
             this.retries++;
             this.retryAt = Date.now();
+            Report.stall(this.item(), 'Kein Bild-Fortschritt seit 15 s – Sender neu geladen', this.openedAt);
             toast('Sender hängt – wird neu geladen …');
             this.start();
         }
@@ -8436,6 +8467,7 @@
             this.retries++;
             this.retryAt = Date.now();
             var me = this, at = this.index;
+            Report.stall(it, 'Verbindung abgebrochen (' + (msg || 'unbekannt') + ') – neu verbunden', this.openedAt);
             if (this.retries > 1) toast('Verbindung zum Sender unterbrochen – neuer Versuch …', 3000);
             setTimeout(function () { if (Nav.top() === me && me.index === at) me.start(); }, this.retries > 1 ? 2500 : 300);
             return;

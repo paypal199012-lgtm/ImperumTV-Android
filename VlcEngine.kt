@@ -104,6 +104,7 @@ class VlcEngine(private val ctx: Context, private val emit: (String, Any?) -> Un
         if (System.currentTimeMillis() - playingSince > 60_000) reconnects = 0
         if (reconnects >= 3) { emit("error", "VLC: Verbindung zum Sender abgebrochen"); return }
         reconnects++
+        emit("stall", "VLC: Verbindung abgebrochen – neu verbunden")
         setBuffering(true)
         handler.postDelayed({ if (active) play(url) }, 800)
     }
