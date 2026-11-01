@@ -1525,3 +1525,10 @@ body.lite .scroll { will-change: scroll-position; }
 body.android .circle.focused, body.android .tile.focused, body.android .cat.focused, body.android .row.focused, body.android .poster.focused, body.android .episode.focused, body.android .pl-card.focused, body.android .erow.focused, body.android .set-row.focused, body.android .rec-row.focused, body.android .actor.focused, body.android .set-tile.focused, body.android .fb-row.focused, body.android .set6-stat.focused, body.android .set6-act.focused, body.android .live-b .row.lv.focused, body.android .eg3 .eg-chan.cur, body.android .eg3 .eg-prog.focus, body.android .eg-chan.focus { background: #645238 !important; }
 body.android .cat.active, body.android .row.active, body.android .fb-chip.active, body.android .live-b .row.lv.active, body.android .eg-chan.sel, body.android .eg3 .eg-chan.sel, body.android .zap-row.sel, body.android .eg3 .eg-prog.now { background: #3f352a !important; }
 body.android .season.active, body.android .live-b .cat.active, body.android .live-b .cat.focused, body.android .eg-chip.active { background: #7a6340 !important; }
+
+/* Favoriten verschieben */
+.row.moving { background: #8a6f3e !important; box-shadow: 0 0 0 4px #f4dc9e !important; }
+.row.moving::after { content: "⇅"; position: absolute; right: 16px; top: 50%; margin-top: -18px; font-size: 30px; color: #f4dc9e; }
+.row.moving .ch-tag { visibility: hidden; }
+.row.moving { position: relative; }
+.row.moving .star { visibility: hidden; }

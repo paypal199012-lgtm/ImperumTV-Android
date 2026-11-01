@@ -1035,7 +1035,39 @@
             var k = type + ':' + id;
             if (this.set[k]) delete this.set[k]; else this.set[k] = true;
             Storage.set('favs', Object.keys(this.set));
+            this._rank = null;
             return !!this.set[k];
+        },
+        /** Eigene Reihenfolge: Position jedes Favoriten (Reihenfolge der Liste im Speicher) */
+        rank: function () {
+            if (!this._rank) { var r = {}, keys = Object.keys(this.set); for (var i = 0; i < keys.length; i++) r[keys[i]] = i; this._rank = r; }
+            return this._rank;
+        },
+        /** Liste nach der eigenen Favoriten-Reihenfolge sortieren */
+        sort: function (type, list) {
+            var r = this.rank();
+            return list.slice().sort(function (a, b) { return (r[type + ':' + a.id] || 0) - (r[type + ':' + b.id] || 0); });
+        },
+        /** Favoriten verschieben: dir -1 = hoch, +1 = runter, 'top' = ganz nach oben. shown = die sichtbare, sortierte Liste */
+        move: function (type, id, dir, shown) {
+            var keys = Object.keys(this.set), me = type + ':' + id, at = keys.indexOf(me);
+            if (at < 0) return false;
+            var vis = shown.map(function (x) { return type + ':' + x.id; }), vi = vis.indexOf(me);
+            if (dir === 'top') {
+                if (vi <= 0) return false;
+                keys.splice(at, 1);
+                keys.splice(keys.indexOf(vis[0]), 0, me);
+            } else {
+                var other = vis[vi + dir];
+                if (!other) return false;
+                var ot = keys.indexOf(other);
+                keys[at] = other; keys[ot] = me;
+            }
+            this.set = {};
+            for (var i = 0; i < keys.length; i++) this.set[keys[i]] = true;
+            Storage.set('favs', keys);
+            this._rank = null;
+            return true;
         }
     };
 
@@ -4847,7 +4879,7 @@
         if (this.query) return all.filter(searchMatcher(this.query));
         var cats = this.categories(), cat = cats[this.catIndex];
         if (this.catIndex === 0) return all.slice();
-        if (this.catIndex === 1) return all.filter(function (c) { return Favs.has('live', c.id); });
+        if (this.catIndex === 1) return Favs.sort('live', all.filter(function (c) { return Favs.has('live', c.id); }));
         return all.filter(function (c) { return c.cat === cat; });
     };
     LiveScreen.prototype.render = function (root) {
@@ -4919,7 +4951,10 @@
             nt.tags.forEach(function (t) { row.appendChild(h('div', 'ch-tag' + (/^(HD|FHD|UHD|4K|8K|HDR)$/.test(t) ? ' q' : ''), t)); });
             if (Favs.has('live', ch.id)) row.appendChild(h('div', 'star', '★'));
             row._channel = ch;
-            row._onLong = function () { favToggleNode(row, 'live', ch); };
+            row._onLong = function () {
+                if (self.catIndex === 1 && !self.query) self.favMenu(ch);       // in den Favoriten: Verschieben / Entfernen
+                else favToggleNode(row, 'live', ch);
+            };
             row._onFocus = function () { self.focusInfo(ch); };
             focusable(row, 'ch-' + ch.id, function () { self.choose(ch, i); }, 'list');
             if (!heads[i]) return row;
@@ -5105,7 +5140,54 @@
         screen.handoff = true;
         Nav.push(screen);
     };
+    /** Favoriten: Menü bei OK lang */
+    LiveScreen.prototype.favMenu = function (ch) {
+        var self = this, name = NameTidy.split(ch.name, ch.cat).name;
+        Modal.open(name, 'Favorit', [
+            { label: '⇅  Verschieben', primary: true, action: function () { self.startMove(ch); } },
+            { label: '⤒  Ganz nach oben', action: function () {
+                if (Favs.move('live', ch.id, 'top', self.list)) { self.focusKey = 'ch-' + ch.id; Nav.show(self); toast(name + ' steht jetzt ganz oben'); }
+            } },
+            { label: '☆  Aus Favoriten entfernen', action: function () {
+                Favs.toggle('live', ch.id); toast(name + ' aus Favoriten entfernt'); self.focusKey = null; Nav.show(self);
+            } },
+            { label: 'Abbrechen' }
+        ]);
+        if (Modal.node) Modal.node.classList.add('modal-list');
+    };
+    LiveScreen.prototype.startMove = function (ch) {
+        this.moving = ch.id;
+        var row = Focus.byKey('ch-' + ch.id);
+        if (row) { Focus.set(row); row.classList.add('moving'); }
+        document.body.classList.add('fav-moving');
+        toast('▲ ▼ verschieben · OK: fertig', 5000);
+    };
+    LiveScreen.prototype.endMove = function () {
+        var row = Focus.byKey('ch-' + this.moving);
+        if (row) row.classList.remove('moving');
+        this.moving = null;
+        document.body.classList.remove('fav-moving');
+        toast('Reihenfolge gespeichert');
+    };
+    /** Markierten Favoriten eine Zeile hoch/runter schieben (ohne die ganze Liste neu aufzubauen) */
+    LiveScreen.prototype.stepMove = function (dir) {
+        var id = this.moving, ch = null;
+        for (var i = 0; i < this.list.length; i++) if (this.list[i].id === id) { ch = this.list[i]; break; }
+        if (!ch || !Favs.move('live', id, dir, this.list)) return;
+        this.list = this.filter();
+        var row = Focus.byKey('ch-' + id);
+        if (!row) return;
+        var el = row.parentNode && row.parentNode.classList.contains('row-wrap') ? row.parentNode : row;
+        var sib = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
+        if (sib) el.parentNode.insertBefore(el, dir < 0 ? sib : sib.nextSibling);
+        Focus.set(row);
+    };
     LiveScreen.prototype.onKey = function (k) {
+        if (this.moving) {
+            if (k === KEY.UP || k === KEY.DOWN) { this.stepMove(k === KEY.UP ? -1 : 1); return true; }
+            if (k === KEY.ENTER || k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { this.endMove(); return true; }
+            return true;
+        }
         if (k === KEY.YELLOW && Focus.cur && Focus.cur._channel) {
             var ch = Focus.cur._channel;
             var on = Favs.toggle('live', ch.id);
@@ -5118,6 +5200,7 @@
         return false;
     };
     LiveScreen.prototype.hide = function () {
+        if (this.moving) { this.moving = null; document.body.classList.remove('fav-moving'); }
         Player.on({});
         if (this.handoff) this.handoff = false;        // Vollbild übernimmt den laufenden Sender
         else Player.stop();
@@ -5282,7 +5365,7 @@
         var items = this.items(), fav = this.favType();
         var cats = this.categories(), cat = cats[this.catIndex];
         if (this.catIndex === 0) return items.slice();
-        if (this.catIndex === 1) return items.filter(function (m) { return Favs.has(fav, m.id); });
+        if (this.catIndex === 1) return Favs.sort(fav, items.filter(function (m) { return Favs.has(fav, m.id); }));
         if (cat === RESUME_CAT) return this.resumeItems();
         if (cat === NEW_CAT) return this.newItems();
         if (cat === NEWEP_CAT) return Parental.visible('series', NewEps.series());
@@ -5414,9 +5497,9 @@
         col.appendChild(scroll);
         root.appendChild(col);
 
-        var live = Parental.visible('live', Data.channels).filter(function (c) { return Favs.has('live', c.id); });
-        var movies = Parental.visible('movie', Data.movies).filter(function (m) { return Favs.has('movie', m.id); });
-        var series = Parental.visible('series', Data.series).filter(function (s) { return Favs.has('series', s.id); });
+        var live = Favs.sort('live', Parental.visible('live', Data.channels).filter(function (c) { return Favs.has('live', c.id); }));
+        var movies = Favs.sort('movie', Parental.visible('movie', Data.movies).filter(function (m) { return Favs.has('movie', m.id); }));
+        var series = Favs.sort('series', Parental.visible('series', Data.series).filter(function (s) { return Favs.has('series', s.id); }));
         var all = live.concat(movies, series);
 
         if (!all.length) {
@@ -8792,7 +8875,7 @@
         }
 
         // OK auf einem Sender/Film/Serie: kurz = öffnen, lang = Favorit
-        if (k === KEY.ENTER && Focus.cur && Focus.cur._onLong && !(Nav.top() instanceof PlayerScreen)) {
+        if (k === KEY.ENTER && Focus.cur && Focus.cur._onLong && !(Nav.top() instanceof PlayerScreen) && !(Nav.top() && Nav.top().moving)) {
             e.preventDefault();
             if (e.repeat) return;                       // Taste wird gehalten
             if (LongPress.upSeen) { LongPress.start(Focus.cur); return; }
@@ -8891,9 +8974,20 @@
             clearTimeout(window.__volTimer);
             window.__volTimer = setTimeout(function () { box.classList.add('hidden'); }, 2200);
         };
-        window.__androidKey = function (code, repeat) {
-            Nav.userAt = Date.now();
+        window.__androidKey = function (code, repeat, sentAt, idleMs) {
+            var t0 = Date.now();
+            Nav.userAt = t0;
             onKeyDown({ keyCode: code, repeat: !!repeat, preventDefault: function () { } });
+            // Messung: kam die Taste verspätet in der Oberfläche an? (einmal pro Start melden)
+            if (sentAt && !window.__lagReported) {
+                var wait = t0 - sentAt, work = Date.now() - t0;
+                if (wait + work > 1200) {
+                    window.__lagReported = true;
+                    try { Report.send('verzögerung', 'Taste verspätet: ' + (wait + work) + ' ms (Warten ' + wait + ' ms, Verarbeiten ' + work + ' ms)\n' +
+                        'Vorher keine Eingabe: ' + Math.round((idleMs || 0) / 1000) + ' s\nBildschirm: ' + ((Nav.top() && Nav.top().constructor && Nav.top().constructor.name) || '?') +
+                        '\nElemente: ' + document.getElementsByTagName('*').length); } catch (e) { /* egal */ }
+                }
+            }
         };
         window.__androidKeyUp = function (code) { if (code === KEY.ENTER) LongPress.up(); };
 

@@ -383,6 +383,10 @@ class MainActivity : Activity() {
             settings.builtInZoomControls = false
             isFocusable = true
             isFocusableInTouchMode = true
+            // Oberfläche nie „schlafen legen“: sonst braucht sie nach längerer Pause Sekunden, bis sie wieder reagiert
+            if (Build.VERSION.SDK_INT >= 26) {
+                try { setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false) } catch (e: Throwable) { }
+            }
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
                     fitToScreen()
@@ -557,9 +561,13 @@ class MainActivity : Activity() {
         } catch (e: Throwable) { false }
     }
 
+    private var lastKeyAt = 0L
     private fun sendKey(code: Int, repeat: Boolean = false) {
         if (!uiReady) return
-        webView.evaluateJavascript("window.__androidKey && window.__androidKey($code, $repeat)", null)
+        val now = System.currentTimeMillis()
+        val idle = if (lastKeyAt == 0L) 0L else now - lastKeyAt
+        lastKeyAt = now
+        webView.evaluateJavascript("window.__androidKey && window.__androidKey($code, $repeat, $now, $idle)", null)
     }
 
     // ---------- Lebenszyklus ----------
