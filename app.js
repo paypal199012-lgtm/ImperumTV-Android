@@ -4943,7 +4943,7 @@
     /** Goldener Hintergrund überall, nur über dem Vorschaubild frei (dort liegt das Video) */
     function placeHoleBg(bg, box) {
         if (!bg || !box) return;
-        var r = stageRect(box), W = 1920, H = 1080;
+        var r = stageRect(box), W = SW, H = 1080;          // Handy: Oberfläche kann breiter als 1920 sein
         var x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), hh = Math.round(r.h);
         // Vier Stücke rund um das Vorschaubild (funktioniert auch auf älteren Geräten)
         var parts = [[0, 0, W, y], [0, y + hh, W, H - y - hh], [0, y, x, hh], [x + w, y, W - x - w, hh]];
@@ -4953,6 +4953,7 @@
             d.style.left = p[0] + 'px'; d.style.top = p[1] + 'px';
             d.style.width = Math.max(0, p[2]) + 'px'; d.style.height = Math.max(0, p[3]) + 'px';
             d.style.backgroundPosition = (-p[0]) + 'px ' + (-p[1]) + 'px';
+            d.style.backgroundSize = W + 'px ' + H + 'px';
             bg.appendChild(d);
         }
     }
@@ -6374,6 +6375,7 @@
         EpgQueue.clear();
         this.list = this.channels();
         if (this.chIndex >= this.list.length) this.chIndex = 0;
+        this.WIDTH = SW - this.X0 - 40;                     // breite Handys: Zeitachse länger
 
         var wrap = h('div', 'eg eg3');
         this.bg = h('div', 'live-bg');

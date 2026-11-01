@@ -1318,7 +1318,7 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 .epg-row .dur { flex: none; margin-left: 14px; font-size: 21px; color: #a7a39a; }
 
 /* ---------- Live TV: Hintergrund und Aufbau wie im Musterbild ---------- */
-.live-bg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+.live-bg { position: absolute; left: 0; top: 0; width: 100%; height: 1080px; }
 .live-bg-p { position: absolute; background-size: 1920px 1080px; background-repeat: no-repeat;
     background-image:
         linear-gradient(160deg, transparent 30%, rgba(217,176,102,.30) 31%, rgba(217,176,102,.08) 47%, transparent 48%),
@@ -1462,3 +1462,7 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 .eg3 .eg-acts { top: 244px; }
 .eg3 .eg-act { border-radius: 30px; padding: 11px 24px; }
 .cat-group { font-size: 17px; letter-spacing: 3px; font-weight: 800; color: #f4dc9e; margin: 18px 18px 6px; }
+
+/* Breite Handys (Oberfläche breiter als 1920): Live TV wie Musterbild B, Vorschau rechts */
+body.wide .live-b .col-list { width: auto; right: 940px; }
+body.wide .live-b .col-info { left: auto; right: 40px; width: 880px; }
