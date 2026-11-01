@@ -4931,6 +4931,15 @@
         info.appendChild(acts);
         columns.appendChild(info);
         root.appendChild(columns);
+        // Breite Handys: Senderliste nicht in die Länge ziehen, den Platz bekommt die Vorschau
+        if (SW > 1920) {
+            var iw = SW - 1180 - 40, ph = Math.min(Math.round(iw * 9 / 16), 600);
+            iw = Math.round(ph * 16 / 9);
+            info.style.width = iw + 'px';
+            this.previewBox.style.width = iw + 'px'; this.previewBox.style.height = ph + 'px';
+            this.nextBox.style.width = iw + 'px'; this.nextBox.style.top = (ph + 28) + 'px';
+            acts.style.top = (ph + 128) + 'px';
+        }
         setTimeout(function () { self.placeBg(); }, 0);
 
         if (!this.focusKey) this.focusKey = this.selected ? 'ch-' + this.selected.id : (this.list.length ? 'ch-' + this.list[0].id : 'cat-0');
