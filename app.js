@@ -1024,7 +1024,7 @@
         available: function () { return !!(AB && AB.setBuffer && AB.getBuffer); },
         get: function () { try { var m = AB.getBuffer(); return m === 'small' || m === 'large' ? m : 'normal'; } catch (e) { return 'normal'; } },
         set: function (m) { try { AB.setBuffer(m); } catch (e) { /* egal */ } toast('Puffer: ' + this.label(m)); },
-        label: function (m) { return m === 'small' ? 'Klein · 0,5 s' : m === 'large' ? 'Groß · 4 s' : 'Normal · 1 s'; }
+        label: function (m) { return m === 'small' ? 'Klein · 1 s' : m === 'large' ? 'Groß · 5 s' : 'Normal · 2,5 s'; }
     };
 
     var Favs = {
@@ -7426,9 +7426,9 @@
             row('buffer', 'up', 'Puffer', Buffer.label(Buffer.get()), function (v) {
                 Modal.open('Puffer', 'Wie viel Vorrat die App lädt, bevor das Bild startet.\nKlein: Sender starten schneller, bei schwachem WLAN eher Ruckler.\n' +
                     'Groß: Start dauert etwas länger, dafür flüssiger bei schwachem Internet.', [
-                    { label: 'Klein · 0,5 s (schnellster Start)', primary: Buffer.get() === 'small', action: function () { Buffer.set('small'); v.textContent = Buffer.label('small'); } },
-                    { label: 'Normal · 1 s (wie bisher)', primary: Buffer.get() === 'normal', action: function () { Buffer.set('normal'); v.textContent = Buffer.label('normal'); } },
-                    { label: 'Groß · 4 s (gegen Ruckler)', primary: Buffer.get() === 'large', action: function () { Buffer.set('large'); v.textContent = Buffer.label('large'); } },
+                    { label: 'Klein · 1 s (schneller Start)', primary: Buffer.get() === 'small', action: function () { Buffer.set('small'); v.textContent = Buffer.label('small'); } },
+                    { label: 'Normal · 2,5 s (wie XCIPTV, empfohlen)', primary: Buffer.get() === 'normal', action: function () { Buffer.set('normal'); v.textContent = Buffer.label('normal'); } },
+                    { label: 'Groß · 5 s (bei schwachem Internet)', primary: Buffer.get() === 'large', action: function () { Buffer.set('large'); v.textContent = Buffer.label('large'); } },
                     { label: 'Abbrechen' }
                 ]);
             });

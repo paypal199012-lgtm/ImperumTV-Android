@@ -226,10 +226,16 @@ class MainActivity : Activity() {
         // Schneller Start: schon nach 1 s Video loslegen (Standard 2,5 s), nach einem Hänger nach 2 s (Standard 5 s).
         // Der große Vorrat (bis 50 s) bleibt, damit es danach nicht öfter nachlädt.
         // Puffer aus den Einstellungen: klein = schnellster Start, groß = weniger Ruckler bei schwachem Internet
-        val (startMs, rebufferMs) = when (getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("buffer", "normal")) {
-            "small" -> Pair(500, 1_500)
-            "large" -> Pair(4_000, 8_000)
-            else -> Pair(1_000, 2_000)
+        // Einmalig auf die Werte wie bei XCIPTV umstellen (Standard-Puffer, kein Aufholen, keine Bildraten-Umstellung)
+        val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("xcDefaults1", false)) {
+            prefs.edit().putString("buffer", "normal").putBoolean("catchup", false).remove("afr").putBoolean("xcDefaults1", true).apply()
+        }
+        // Normal = Standardwerte des Players (wie XCIPTV): 2,5 s vor dem Start, 5 s nach einem Hänger
+        val (startMs, rebufferMs) = when (prefs.getString("buffer", "normal")) {
+            "small" -> Pair(1_000, 2_000)
+            "large" -> Pair(5_000, 10_000)
+            else -> Pair(2_500, 5_000)
         }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -300,9 +306,8 @@ class MainActivity : Activity() {
     @Volatile private var afrDone = false
     private fun afrOn(): Boolean {
         val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
-        // Standard: an auf Fernsehern/Boxen (kein Touchscreen), aus auf Handys
-        val tvDefault = !packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
-        return prefs.getBoolean("afr", tvDefault)
+        // Standard aus (wie XCIPTV: kein Umschalten, kein Schwarzbild); in den Einstellungen einschaltbar
+        return prefs.getBoolean("afr", false)
     }
     private fun afrReset() { synchronized(afrTimes) { afrTimes.clear() }; afrDone = false }
     /** Wird für jedes Bild aufgerufen: aus den Zeitstempeln die Bildrate des Senders bestimmen */
