@@ -4405,6 +4405,18 @@
         lastCheck: 0,
         dismissed: 0,           // „Später“ für diese Version gewählt (gilt bis zum nächsten Start)
         waiter: null,
+        forced: false,          // Admin hat das Update für dieses Gerät erzwungen (dann kein „Später“)
+        /** Beim Start und alle 10 Minuten: Muss dieses Gerät aktualisieren? (Admin-Seite → „Update erzwingen“) */
+        flags: function () {
+            var self = this;
+            if (!this.available() || !Device.validMac(Device.mac) || !Device.validKey(Device.key)) return;
+            Remote.rpc('device_flags', { p_mac: Device.mac, p_key: Device.key, p_version: Report.version() }).then(function (r) {
+                if (!r || !r.force || self.forced) return;
+                self.forced = true;
+                self.dismissed = 0;
+                self.check(false);
+            }, function () { /* Datenbank ohne diese Funktion oder offline: egal */ });
+        },
         /** Gleich beim App-Start nachsehen (läuft parallel zum Laden der Listen) */
         autoCheck: function () {
             if (this.checked || !this.available()) return;
@@ -4434,6 +4446,14 @@
             var self = this, l = this.latest, cur = this.current();
             if (!l) return;
             var mb = l.size ? ' (' + Math.round(l.size / 1e6) + ' MB)' : '';
+            if (this.forced) {
+                // Vom Admin erzwungen: nur „Jetzt aktualisieren“; schließt jemand das Fenster, kommt es bald wieder
+                Modal.open('Update nötig', 'Für dieses Gerät ist ein Update nötig: Version ' + self.versionText(l.version) + mb + '. Du hast ' + self.versionText(cur) + '.', [
+                    { label: 'Jetzt aktualisieren', primary: true, action: function () { self.install(); } }
+                ]);
+                setTimeout(function () { if (self.forced && !Modal.node) self.offerWhenIdle(); }, 120000);
+                return;
+            }
             Modal.open('Update verfügbar', 'Version ' + self.versionText(l.version) + ' ist da' + mb + '. Du hast ' + self.versionText(cur) + '.', [
                 { label: 'Jetzt aktualisieren', primary: true, action: function () { self.install(); } },
                 { label: 'Später', action: function () { self.dismissed = l.version; } }
@@ -9154,6 +9174,7 @@
         Favs.load();
         Player.init();
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
+        setTimeout(function () { Updater.flags(); }, 8000);     // vom Admin erzwungenes Update?
         setTimeout(function () { Report.flushNative(); }, 8000);   // Absturzbericht vom letzten Mal an die Website
         setTimeout(function () {
             var had = OVpn.native() && OVpn.info().has;
@@ -9326,6 +9347,7 @@
         setInterval(function () {
             if (Nav.top() instanceof LockScreen) return;
             Hello.send(true);
+            Updater.flags();
             Remote.load().then(null, function () { /* offline: gespeicherter Stand */ }).then(function () {
                 if (Api.acc && Api.acc.demo) return;      // Demo braucht keine Freischaltung
                 if (!License.active() && !(Nav.top() instanceof LockScreen)) Nav.replace(new LockScreen());
