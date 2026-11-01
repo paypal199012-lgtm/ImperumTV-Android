@@ -854,6 +854,7 @@
 
     var Settings = {
         autoNext: Storage.get('autoNext', true),     // Serien: nächste Folge automatisch
+        altSwitch: Storage.get('altSwitch', true),   // Live: bei Problemen automatisch auf denselben Sender in anderer Variante
         introBtn: Storage.get('introBtn', true),     // Serien: Knopf „Intro überspringen“
         introSec: 20,
         setFlag: function (name, on) { this[name] = on; Storage.set(name, on); },
@@ -4971,6 +4972,50 @@
      * Sendernamen aufräumen: Länderkürzel („DE|“), Anbieter-Vorsilbe („PRIME:“, wenn die Kategorie so heißt)
      * und Zusätze wie RAW/HD/4K/60fps (auch hochgestellt ᴿᴬᵂ) → kurzer Name + kleine Schilder.
      */
+    /**
+     * Ersatzsender: derselbe Sender in einer anderen Variante der Liste („DAZN 1 HD“ ↔ „DAZN 1 FHD“ / „… (MOBILE)“ / „… BACKUP“).
+     * Gleich ist, was nach dem Entfernen von Länderkürzel, Qualitäts- und Varianten-Zusätzen übrig bleibt.
+     */
+    var AltCh = {
+        index: null, of: null,
+        VAR: /(^|[^a-z0-9])(backup|mobile|alt|ersatz|multi|low|hq|lq|uhd|fhd|hd|sd|4k|8k|hevc|h265|h264|raw|vip|gold|50fps|60fps|25fps|1080p?|720p?|2160p?)(?=$|[^a-z0-9])/g,
+        country: function (n) { var m = /^\s*\|?([A-Z]{2,3})\s*[|:]/.exec(NameTidy.plain(n || '')); return m ? m[1].toUpperCase() : ''; },
+        key: function (c) {
+            var t = NameTidy.plain(NameTidy.split(c.name, c.cat).name).toLowerCase();
+            t = t.replace(/^\s*[a-z0-9+]{2,8}\s*[:|]\s*/, '');          // Anbieter-Vorsatz wie „SKYGO:“
+            t = t.replace(/[()\[\]]/g, ' ').replace(this.VAR, ' ').replace(this.VAR, ' ');
+            return t.replace(/[^a-z0-9+]+/g, ' ').trim();
+        },
+        build: function () {
+            if (this.of === Data.channels && this.index) return;
+            var idx = {}, self = this;
+            Data.channels.forEach(function (c) {
+                if (NameTidy.isSep(c.name)) return;
+                var k = self.key(c);
+                if (!k || k.length < 3) return;
+                (idx[k] = idx[k] || []).push(c);
+            });
+            this.index = idx; this.of = Data.channels;
+        },
+        /** andere Varianten desselben Senders (gleiches Land oder ohne Länderkürzel), höchstens 8 */
+        find: function (ch) {
+            if (!ch) return [];
+            this.build();
+            var self = this, co = this.country(ch.name);
+            // Reihenfolge: gleiches Land, ohne Land, deutsch, sonst; schwache Varianten (MOBILE/LOW/SD) zuletzt
+            function rank(c) {
+                var cc = self.country(c.name), r = cc === co ? 0 : !cc ? 1 : cc === 'DE' ? 2 : 3;
+                if (/mobile|low|lq|(^|[^a-z])sd([^a-z]|$)/i.test(NameTidy.plain(c.name))) r += 10;
+                return r;
+            }
+            return (this.index[this.key(ch)] || []).filter(function (c) {
+                if (c.id === ch.id || Hidden.has(c.id)) return false;
+                var cc = self.country(c.name);
+                return !co || !cc || cc === co;
+            }).sort(function (a, b) { return rank(a) - rank(b); }).slice(0, 8);
+        }
+    };
+
     var NameTidy = {
         SUP: (function () {
             var m = {}, from = 'ᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁⱽᵂᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ⁰¹²³⁴⁵⁶⁷⁸⁹', to = 'ABDEGHIJKLMNOPRTUVWabcdefghijklmnoprstuvwxyz0123456789';
@@ -7623,6 +7668,11 @@
                 ]);
             });
         }
+        row('altsw', 'next', 'Ersatzsender', Settings.altSwitch ? 'An · automatisch' : 'Aus', function (v) {
+            Settings.setFlag('altSwitch', !Settings.altSwitch);
+            v.textContent = Settings.altSwitch ? 'An · automatisch' : 'Aus';
+            toast(Settings.altSwitch ? 'Hängt oder streikt ein Sender, schaltet Live TV automatisch auf denselben Sender in anderer Variante (z. B. FHD statt HD)' : 'Ersatzsender: aus', 6000);
+        });
         if (Buffer.available()) {
             row('buffer', 'up', 'Puffer', Buffer.label(Buffer.get()), function (v) {
                 Modal.open('Puffer', 'Wie viel Vorrat die App lädt, bevor das Bild startet.\nKlein: Sender starten schneller, bei schwachem WLAN eher Ruckler.\n' +
@@ -8451,10 +8501,10 @@
             error: function (msg) { self.onError(msg); },
             notice: function (msg) {
                 toast(msg, 6000);
-                if (/^Bild hing/.test(msg || '')) Report.stall(self.item(), 'Bild stand still – Sender automatisch neu geöffnet', self.openedAt);
+                if (/^Bild hing/.test(msg || '')) { Report.stall(self.item(), 'Bild stand still – Sender automatisch neu geöffnet', self.openedAt); self.noteStall(); }
                 else Report.player(self.item(), 'Hinweis: ' + msg);
             },
-            stall: function (msg) { Report.stall(self.item(), msg, self.openedAt); },
+            stall: function (msg) { Report.stall(self.item(), msg, self.openedAt); self.noteStall(); },
             subtitle: function (text, ms) { self.showSubtitle(text, ms); }
         });
         Player.aspectKey = this.aspectKey();               // Bildformat dieses Senders/Films/dieser Serie
@@ -8491,6 +8541,7 @@
             this.retries++;
             this.retryAt = Date.now();
             Report.stall(this.item(), 'Kein Bild-Fortschritt seit 15 s – Sender neu geladen', this.openedAt);
+            if (this.noteStall()) return;                      // schon auf einen Ersatzsender umgeschaltet
             toast('Sender hängt – wird neu geladen …');
             this.start();
         }
@@ -8584,6 +8635,32 @@
         this.showPop(null);
         toast('Automatische Wiedergabe abgebrochen');
     };
+    /** Hänger mitzählen: 3 in 5 Minuten → Ersatzsender versuchen */
+    PlayerScreen.prototype.noteStall = function () {
+        if (this.kind !== 'live') return false;
+        var now = Date.now();
+        this.stallLog = (this.stallLog || []).filter(function (t) { return now - t < 300000; });
+        this.stallLog.push(now);
+        return this.stallLog.length >= 3 && this.tryAlt('Sender hing mehrfach');
+    };
+    /** Auf denselben Sender in anderer Variante umschalten. true = umgeschaltet */
+    PlayerScreen.prototype.tryAlt = function (why) {
+        if (this.kind !== 'live' || !Settings.altSwitch || (Api.acc && Api.acc.demo)) return false;
+        var it = this.item();
+        if (!it) return false;
+        this.altTried = this.altTried || {};
+        var tried = this.altTried[it.id] = this.altTried[it.id] || [it.id];
+        var alt = AltCh.find(it).filter(function (c) { return tried.indexOf(c.id) < 0; })[0];
+        if (!alt) return false;
+        tried.push(alt.id);
+        this.altUrl = Api.liveUrl(alt.id); this.altFor = this.index; this.altName = alt.name;
+        this.stallLog = []; this.retries = 0; this.r407 = 0; clearTimeout(this.t407);
+        var nice = NameTidy.split(alt.name, alt.cat).name, tags = NameTidy.split(alt.name, alt.cat).tags;
+        toast(why + ' – automatisch auf „' + nice + (tags.length ? ' ' + tags.join(' ') : '') + '“ umgeschaltet', 6000);
+        Report.player(it, 'Ersatzsender (' + why + '): ' + alt.name);
+        this.start();
+        return true;
+    };
     PlayerScreen.prototype.onError = function (msg) {
         var it = this.item(), self = this;
         // Demo-Film lädt nicht (z. B. 403): einmal die zweite Quelle versuchen
@@ -8598,6 +8675,7 @@
         if (this.kind === 'live' && /407|PROXY_AUTH/i.test(msg || '')) {
             var waits = [3, 5, 8, 12, 15, 20];
             this.r407 = this.r407 || 0;
+            if (this.r407 >= 2 && this.tryAlt('Anbieter lehnt diesen Sender ab')) return;
             if (this.r407 < waits.length) {
                 var sec = waits[this.r407++], me407 = this, at407 = this.index;
                 if (this.r407 === 1) Report.player(it, msg);
@@ -8619,7 +8697,7 @@
         // Bild lässt sich auf diesem Gerät nicht dekodieren: einmal als HLS (M3U8) statt TS versuchen
         // Auch wenn der Anbieter kein TS liefert (PARSING_CONTAINER_UNSUPPORTED, oft bei Event-/PPV-Sendern): als HLS versuchen
         if (this.kind === 'live' && /DECOD|PARSING|CONTAINER|extractor/i.test(msg || '') && !(this.altUrl && this.altFor === this.index) && this.vlcFor !== this.index && Api.acc && !Api.acc.demo && Settings.liveExt === 'ts') {
-            this.altUrl = Api.acc.server + '/live/' + Api.creds() + '/' + it.id + '.m3u8'; this.altFor = this.index;
+            this.altUrl = Api.acc.server + '/live/' + Api.creds() + '/' + it.id + '.m3u8'; this.altFor = this.index; this.altName = '';
             toast('Bild ließ sich nicht abspielen – anderes Format wird versucht …', 3500);
             this.start();
             return;
@@ -8628,12 +8706,13 @@
         if (this.kind === 'live' && /DECOD|PARSING|CONTAINER|extractor/i.test(msg || '') && this.vlcFor !== this.index &&
             AB && AB.setNextEngine && AB.hasVlc && (function () { try { return AB.hasVlc(); } catch (e) { return false; } })()) {
             this.vlcFor = this.index;
-            this.altUrl = '';                                  // VLC bekommt wieder die normale Adresse
+            if (!this.altName) this.altUrl = '';               // VLC bekommt wieder die normale Adresse (Ersatzsender bleibt)
             try { AB.setNextEngine('vlc'); } catch (e) { /* egal */ }
             toast('Sender wird mit VLC versucht …', 3500);
             this.start();
             return;
         }
+        if (/DECOD|PARSING|CONTAINER|extractor/i.test(msg || '') && this.tryAlt('Sender ließ sich nicht abspielen')) return;
         if (/DECOD/i.test(msg || '')) {
             toast(this.kind === 'live' ? 'Dieses Bild kann der Player auf diesem Gerät nicht abspielen. Tipp: einen anderen Sender wählen oder unter Einstellungen das Live-Format wechseln.' : 'Dieses Bild kann der eingebaute Player auf diesem Gerät nicht abspielen. Tipp: im Player mit ⇄ einen anderen Player wie VLC wählen.', 8000);
             Report.player(it, msg);
@@ -8646,10 +8725,13 @@
             this.retryAt = Date.now();
             var me = this, at = this.index;
             Report.stall(it, 'Verbindung abgebrochen (' + (msg || 'unbekannt') + ') – neu verbunden', this.openedAt);
+            this.stallLog = (this.stallLog || []).concat([Date.now()]);
+            if (this.retries >= 2 && this.tryAlt('Verbindung zum Sender bricht ab')) return;
             if (this.retries > 1) toast('Verbindung zum Sender unterbrochen – neuer Versuch …', 3000);
             setTimeout(function () { if (Nav.top() === me && me.index === at) me.start(); }, this.retries > 1 ? 2500 : 300);
             return;
         }
+        if (this.tryAlt('Sender ließ sich nicht abspielen')) return;
         toast('Wiedergabe fehlgeschlagen' + (msg ? ' (' + msg + ')' : '') + '. Versuche es erneut oder wähle etwas anderes.', 7000);
         Report.player(this.item(), msg);                    // landet unter Admin → Fehlerberichte
         this.showOverlay();
@@ -8990,7 +9072,7 @@
     PlayerScreen.prototype.step = function (delta) {
         if (this.items.length < 2) return;
         this.index = (this.index + delta + this.items.length) % this.items.length;
-        this.retries = 0; this.altUrl = ''; this.r407 = 0; clearTimeout(this.t407);
+        this.retries = 0; this.altUrl = ''; this.altName = ''; this.r407 = 0; this.stallLog = []; clearTimeout(this.t407);
         this.start();
         this.showOverlay(2000);                       // Kanal gewechselt: nur kurz einblenden
     };
@@ -9072,7 +9154,7 @@
         this.closeZap();
         if (i !== this.index) {
             this.index = i;
-            this.retries = 0; this.altUrl = '';
+            this.retries = 0; this.altUrl = ''; this.altName = ''; this.r407 = 0; this.stallLog = []; clearTimeout(this.t407);
             this.start();
         }
         this.showOverlay(2000);                       // kurz Name und Programm des Senders zeigen
