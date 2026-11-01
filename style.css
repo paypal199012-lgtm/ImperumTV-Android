@@ -1517,11 +1517,6 @@ body.lite .epc.focused .epc-img, body.lite .lv-act.focused, body.lite .eg-chip.f
 body.lite .poster .img, body.lite .p, body.lite .epc-img { box-shadow: none !important; }
 body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 
-/* Android/Fire TV: deckende Farben statt halbdurchsichtiger Flächen.
-   Manche Grafikchips zeichnen halbdurchsichtige Kästen als zwei Dreiecke – an der Naht entsteht ein schräger heller Strich. */
-body.android .circle.focused, body.android .tile.focused, body.android .cat.focused, body.android .row.focused, body.android .poster.focused, body.android .episode.focused, body.android .pl-card.focused, body.android .erow.focused, body.android .set-row.focused, body.android .rec-row.focused, body.android .actor.focused, body.android .set-tile.focused, body.android .fb-row.focused, body.android .set6-stat.focused, body.android .set6-act.focused, body.android .live-b .row.lv.focused, body.android .eg3 .eg-chan.cur, body.android .eg3 .eg-prog.focus, body.android .eg-chan.focus { background: #645238 !important; }
-body.android .cat.active, body.android .row.active, body.android .fb-chip.active, body.android .live-b .row.lv.active, body.android .eg-chan.sel, body.android .eg3 .eg-chan.sel, body.android .zap-row.sel, body.android .eg3 .eg-prog.now { background: #3f352a !important; }
-body.android .season.active, body.android .live-b .cat.active, body.android .live-b .cat.focused, body.android .eg-chip.active { background: #7a6340 !important; }
 
 /* Favoriten verschieben */
 .row.moving { background: #8a6f3e !important; box-shadow: 0 0 0 4px #f4dc9e !important; }
@@ -1529,12 +1524,6 @@ body.android .season.active, body.android .live-b .cat.active, body.android .liv
 .row.moving .ch-tag { visibility: hidden; }
 .row.moving { position: relative; }
 .row.moving .star { visibility: hidden; }
-/* Android/Fire TV: auch die nicht markierten Flächen deckend (sonst schräger dunkler Strich durch Kreise/Kacheln) */
-body.android .circle:not(.focused), body.android .tile:not(.focused), body.android .round-btn:not(.focused), body.android .set6-stat:not(.focused) { background: #0e0d0c; }
-body.android .set6-card, body.android .lv-nx { background: #1d1b18; }
-body.android .lv-act:not(.primary):not(.focused), body.android .eg-chip:not(.active):not(.focus):not(.on) { background: #2a2723; }
-body.android .eg3 .eg-prog:not(.now):not(.focus):not(.empty), body.android .eg3 .eg-chan:not(.sel):not(.cur) { background: #1e1c19; }
-body.android .set-row:not(.focused), body.android .set6-card .set-row:not(.focused) { background: #1a1816; }
 .btn-svg { display: inline-block; vertical-align: -6px; margin-right: 12px; line-height: 0; }
 /* Verschieben: Knöpfe zum Antippen am Sender (Design V8) */
 .mv-ctl { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; z-index: 2;
