@@ -8496,12 +8496,12 @@
                 if (!self.rdy) return;
                 if (b) {
                     if (!self.bufAt) self.bufAt = Date.now();
-                    // Hängt es länger als 5 s: gleich beim ersten Mal auf den Ersatzsender
+                    // Hängt es länger als 3 s: gleich beim ersten Mal auf den Ersatzsender
                     clearTimeout(self.longT);
                     var at = self.index;
                     self.longT = setTimeout(function () {
                         if (Nav.top() === self && self.index === at && self.buffering && self.rdy) self.tryAlt('Sender hing');
-                    }, 5000);
+                    }, 3000);
                     return;
                 }
                 clearTimeout(self.longT);
