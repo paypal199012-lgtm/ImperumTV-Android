@@ -5155,7 +5155,7 @@
         var self = this, name = NameTidy.split(ch.name, ch.cat).name;
         Modal.open(name, 'Favorit', [
             { label: '⇅  Verschieben', primary: true, action: function () { self.startMove(ch); } },
-            { label: '⤒  Ganz nach oben', action: function () {
+            { label: '▲  Ganz nach oben', action: function () {
                 if (Favs.move('live', ch.id, 'top', self.list)) { self.focusKey = 'ch-' + ch.id; Nav.show(self); toast(name + ' steht jetzt ganz oben'); }
             } },
             { label: '☆  Aus Favoriten entfernen', action: function () {
