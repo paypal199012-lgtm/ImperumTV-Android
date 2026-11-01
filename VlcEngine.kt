@@ -2,6 +2,7 @@ package tv.imperum.app
 
 import android.content.Context
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -35,6 +36,15 @@ class VlcEngine(private val ctx: Context, private val emit: (String, Any?) -> Un
     private var reconnects = 0
     private var playingSince = 0L
     private var scale = "fit"
+
+    /** Während VLC spielt: WLAN nicht in den Stromsparmodus (sonst Aussetzer auf Fire TV/Boxen) */
+    private val wifiLock: WifiManager.WifiLock? by lazy {
+        try {
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "ImperumTV:vlc").apply { setReferenceCounted(false) }
+        } catch (e: Throwable) { null }
+    }
 
     /** Läuft (oder lädt) gerade etwas in VLC? */
     var active = false
@@ -134,6 +144,7 @@ class VlcEngine(private val ctx: Context, private val emit: (String, Any?) -> Un
         buffering = false
         reconnects = 0
         active = true
+        try { wifiLock?.acquire() } catch (e: Throwable) { }
         layout?.visibility = View.VISIBLE
         play(u)
     }
@@ -142,6 +153,7 @@ class VlcEngine(private val ctx: Context, private val emit: (String, Any?) -> Un
         handler.removeCallbacksAndMessages(null)
         if (!active && !attached) return
         active = false
+        try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (e: Throwable) { }
         try { mp?.stop() } catch (e: Throwable) { }
         try { if (attached) mp?.detachViews() } catch (e: Throwable) { }
         attached = false

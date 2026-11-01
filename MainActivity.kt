@@ -50,6 +50,7 @@ import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
@@ -265,9 +266,14 @@ class MainActivity : Activity() {
                 startMs,
                 rebufferMs)
             .build()
+        // Kurze Netz-Aussetzer (WLAN) nicht gleich als Fehler werten: öfter still neu versuchen
+        val sources = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors)
+            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(10))
         val p = ExoPlayer.Builder(this, renderers)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors))
+            .setMediaSourceFactory(sources)
             .setLoadControl(loadControl)
+            // Während der Wiedergabe WLAN-Stromsparen aus (Fire TV/Boxen drosseln sonst das WLAN → Hänger)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
