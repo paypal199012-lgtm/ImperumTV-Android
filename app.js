@@ -473,6 +473,14 @@
     /** LG-Fernseher (webOS) */
     var WEBOS = !!(window.PalmSystem || window.webOSSystem);
 
+    /** Zurück auf der Startseite: erst fragen, ob die App wirklich beendet werden soll */
+    function askExit() {
+        if (Modal.node) return;
+        Modal.open('ImperumTV beenden?', 'Möchtest du die App wirklich verlassen?', [
+            { label: 'Abbrechen', primary: true },
+            { label: 'Beenden', action: function () { exitApp(); } }
+        ]);
+    }
     function exitApp() {
         Player.stop();
         if (AB) { AB.exit(); return; }
@@ -4061,11 +4069,7 @@
         });
     };
     PlaylistsScreen.prototype.onRootBack = function () {
-        if (WEBOS) { exitApp(); return; }
-        var now = Date.now();
-        if (now - this.lastBack < 3000) { exitApp(); return; }
-        this.lastBack = now;
-        toast('Zum Beenden noch einmal Zurück drücken');
+        askExit();
     };
 
     // =====================================================================
@@ -4136,11 +4140,7 @@
         });
     };
     LockScreen.prototype.onRootBack = function () {
-        if (WEBOS) { exitApp(); return; }
-        var now = Date.now();
-        if (now - this.lastBack < 3000) { exitApp(); return; }
-        this.lastBack = now;
-        toast('Zum Beenden noch einmal Zurück drücken');
+        askExit();
     };
 
 
@@ -4710,11 +4710,7 @@
         if (!this.focusKey) this.focusKey = 'home-live';
     };
     HomeScreen.prototype.onRootBack = function () {
-        if (WEBOS) { exitApp(); return; }
-        var now = Date.now();
-        if (now - this.lastBack < 3000) { exitApp(); return; }
-        this.lastBack = now;
-        toast('Zum Beenden noch einmal Zurück drücken');
+        askExit();
     };
 
     /** Aktualisieren: Sender, Filme und Serien neu vom Anbieter holen und zeigen, was neu ist */
@@ -7814,11 +7810,7 @@
         if (!this.focusKey) this.focusKey = 'pf-' + (cur ? cur.id : 'p0');
     };
     WhoScreen.prototype.onRootBack = function () {
-        if (WEBOS) { exitApp(); return; }
-        var now = Date.now();
-        if (now - this.lastBack < 3000) { exitApp(); return; }
-        this.lastBack = now;
-        toast('Zum Beenden noch einmal Zurück drücken');
+        askExit();
     };
 
     /** Einstellungen → Profile */
