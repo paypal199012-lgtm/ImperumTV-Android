@@ -8661,7 +8661,15 @@
         this.altTried = this.altTried || {};
         var tried = this.altTried[it.id] = this.altTried[it.id] || [it.id];
         var alt = AltCh.find(it).filter(function (c) { return tried.indexOf(c.id) < 0; })[0];
-        if (!alt) return false;
+        if (!alt) {
+            // Für die Admin-Seite: warum nicht umgeschaltet wurde (einmal je Sender)
+            this.noAltFor = this.noAltFor || {};
+            if (!this.noAltFor[it.id]) {
+                this.noAltFor[it.id] = 1;
+                Report.player(it, 'Kein Ersatzsender (' + why + '): ' + (tried.length > 1 ? 'alle ' + (tried.length - 1) + ' Varianten schon versucht' : 'keine andere Variante dieses Senders in der Liste'));
+            }
+            return false;
+        }
         tried.push(alt.id);
         this.altUrl = Api.liveUrl(alt.id); this.altFor = this.index; this.altName = alt.name;
         this.stallLog = []; this.retries = 0; this.r407 = 0; clearTimeout(this.t407);

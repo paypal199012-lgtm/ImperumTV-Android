@@ -158,6 +158,8 @@ class MainActivity : Activity() {
     private var tunnelChecked = false
     /** Hänger mit direkter Bildausgabe seit App-Start */
     private var tunnelFreezes = 0
+    /** Zählen die Bild-Zähler auf diesem Gerät auch mit direkter Bildausgabe? */
+    private var tunnelCountersOk = false
 
     private fun tunnelPref(): String =
         getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("tunnel", "auto") ?: "auto"
@@ -226,8 +228,10 @@ class MainActivity : Activity() {
         val tunnelOn = tunnelWanted() && !tunnelOffNow
         val counters = player.videoDecoderCounters ?: return
         counters.ensureUpdated()
-        // Direkte Bildausgabe: Bild-Zähler laufen dort nicht überall mit – dann gilt die Laufzeit (in 1/4 s)
-        val n = if (tunnelOn) (player.currentPosition / 250).toInt() else counters.renderedOutputBufferCount
+        // Direkte Bildausgabe: Bild-Zähler laufen dort nicht auf jedem Gerät mit. Zählen sie hier (schon einmal > 0 gesehen),
+        // gelten sie auch dort – sonst würde ein stehendes Bild bei weiterlaufendem Ton nicht erkannt. Ohne Zähler: Laufzeit (1/4 s).
+        if (tunnelOn && counters.renderedOutputBufferCount > 0) tunnelCountersOk = true
+        val n = if (tunnelOn && !tunnelCountersOk) (player.currentPosition / 250).toInt() else counters.renderedOutputBufferCount
         val now = System.currentTimeMillis()
         if (n != lastFrames) {
             lastFrames = n; frozenSince = now
