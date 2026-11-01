@@ -4197,6 +4197,7 @@
             var self = this, first = null;
             buttons.forEach(function (b, i) {
                 var node = h('div', 'button' + (b.primary ? ' primary' : ''), b.label);
+                if (b.svg) { var ic = h('span', 'btn-svg'); ic.innerHTML = b.svg; node.insertBefore(ic, node.firstChild); }
                 focusable(node, 'modal-' + i, function () {
                     self.close();
                     if (b.action) b.action();
@@ -4957,7 +4958,7 @@
                 else favToggleNode(row, 'live', ch);
             };
             row._onFocus = function () { self.focusInfo(ch); };
-            focusable(row, 'ch-' + ch.id, function () { self.choose(ch, i); }, 'list');
+            focusable(row, 'ch-' + ch.id, function () { if (!self.moving) self.choose(ch, i); }, 'list');
             if (!heads[i]) return row;
             var wrap = h('div', 'row-wrap');
             wrap.appendChild(h('div', 'sec-head', heads[i]));
@@ -4991,6 +4992,7 @@
         });
         act('lv-fav', '★  Favorit', false, function () {
             var ch = target(); if (!ch) return;
+            if (self.catIndex === 1 && !self.query && Favs.has('live', ch.id)) { self.favMenu(ch); return; }   // in den Favoriten: Menü
             var on = Favs.toggle('live', ch.id);
             toast(on ? ch.name + ' zu Favoriten hinzugefügt' : ch.name + ' aus Favoriten entfernt');
             self.favLabel(ch);
@@ -5107,7 +5109,7 @@
     };
     /** Knopf zeigt, was er tut: „Favorit“ oder „Aus Favoriten“ */
     LiveScreen.prototype.favLabel = function (ch) {
-        if (this.favBtn && ch) this.favBtn.textContent = Favs.has('live', ch.id) ? '☆  Aus Favoriten' : '★  Favorit';
+        if (this.favBtn && ch) this.favBtn.textContent = !Favs.has('live', ch.id) ? '★  Favorit' : (this.catIndex === 1 && !this.query ? '⇅  Verschieben' : '☆  Aus Favoriten');
     };
     LiveScreen.prototype.renderInfo = function (ch, epg) {
         this.favLabel(ch);
@@ -5155,7 +5157,7 @@
         var self = this, name = NameTidy.split(ch.name, ch.cat).name;
         Modal.open(name, 'Favorit', [
             { label: '⇅  Verschieben', primary: true, action: function () { self.startMove(ch); } },
-            { label: '▲  Ganz nach oben', action: function () {
+            { label: 'Ganz nach oben', svg: '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14M12 20V8.5M7 13l5-5 5 5"/></svg>', action: function () {
                 if (Favs.move('live', ch.id, 'top', self.list)) { self.focusKey = 'ch-' + ch.id; Nav.show(self); toast(name + ' steht jetzt ganz oben'); }
             } },
             { label: '☆  Aus Favoriten entfernen', action: function () {
@@ -5167,14 +5169,24 @@
     };
     LiveScreen.prototype.startMove = function (ch) {
         this.moving = ch.id;
-        var row = Focus.byKey('ch-' + ch.id);
-        if (row) { Focus.set(row); row.classList.add('moving'); }
+        var row = Focus.byKey('ch-' + ch.id), self = this;
+        if (row) {
+            Focus.set(row); row.classList.add('moving');
+            // Knöpfe zum Antippen (Handy, BlueStacks mit Maus)
+            var ctl = h('div', 'mv-ctl');
+            [['▲', function () { self.stepMove(-1); }], ['▼', function () { self.stepMove(1); }], ['✓ Fertig', function () { self.endMove(); }]].forEach(function (b) {
+                var n = h('span', 'mv-b' + (b[0].length > 1 ? ' ok' : ''), b[0]);
+                n.addEventListener('click', function (ev) { ev.stopPropagation(); b[1](); });
+                ctl.appendChild(n);
+            });
+            row.appendChild(ctl);
+        }
         document.body.classList.add('fav-moving');
-        toast('▲ ▼ verschieben · OK: fertig', 5000);
+        toast(document.body.classList.contains('touch') ? '▲ ▼ antippen zum Verschieben · ✓ Fertig' : '▲ ▼ verschieben · OK: fertig', 5000);
     };
     LiveScreen.prototype.endMove = function () {
         var row = Focus.byKey('ch-' + this.moving);
-        if (row) row.classList.remove('moving');
+        if (row) { row.classList.remove('moving'); var c = $('.mv-ctl', row); if (c) row.removeChild(c); }
         this.moving = null;
         document.body.classList.remove('fav-moving');
         toast('Reihenfolge gespeichert');
