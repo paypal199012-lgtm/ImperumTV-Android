@@ -1477,3 +1477,19 @@ body.wide .live-b .col-info { left: auto; right: 40px; width: 880px; }
 
 /* Überall goldener Hintergrund statt dunkler Flächen (Favoriten, Weiter ansehen, Suche …) */
 .col-grid, .col-grid .scroll, .col-cats, .col-cats .scroll { background: transparent; border: none; }
+/* Lange Namen ganz lesbar: breitere Kategorien, Umbruch auf zwei Zeilen statt „…“ */
+.live-b .col-cats { width: 380px; }
+.live-b .col-list { left: 420px; width: 560px; }
+body.wide .live-b .col-list { left: 420px; right: 940px; width: auto; }
+.live-b .cat { font-size: 24px; line-height: 29px; padding: 10px 16px; white-space: normal; overflow: visible; }
+.live-b .cat.with-n .cat-name, .live-b .cat:not(.with-n) { white-space: normal; text-overflow: clip;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.live-b .cat.with-n { display: flex; }
+.live-b .row.lv { align-items: center; }
+.live-b .row.lv .name { flex: 1; min-width: 0; }
+.live-b .row.lv .rn { white-space: normal; text-overflow: clip; font-size: 24px; line-height: 28px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.live-b .row.lv .ch-tag { align-self: center; }
+/* EPG: Sendernamen ebenfalls zweizeilig */
+.eg3 .eg-chan .nm { white-space: normal; text-overflow: clip; font-size: 21px; line-height: 24px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
