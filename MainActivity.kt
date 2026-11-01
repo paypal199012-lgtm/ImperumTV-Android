@@ -51,6 +51,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
@@ -143,11 +144,88 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------- Direkte Bildausgabe (Tunneling) ----------
+    // Automatisch an. Kommt nach dem Start kein Ton, kein Bild oder läuft die Zeit nicht weiter, wird für diesen Sender
+    // auf normal umgeschaltet. Läuft es dann, kann das Gerät es nicht → dauerhaft aus (merkt sich die App).
+    private lateinit var trackSelector: DefaultTrackSelector
+    /** Dieser Sender läuft wegen eines Problems ohne Tunneling (Prüfung, ob es daran lag) */
+    private var tunnelOffNow = false
+    private var tunnelProbe = false
+    private var readyAt = 0L
+    private var posAtReady = 0L
+    private var audioAtReady = -1
+    private var firstFrame = false
+    private var tunnelChecked = false
+
+    private fun tunnelPref(): String =
+        getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("tunnel", "auto") ?: "auto"
+    private fun tunnelBroken(): Boolean =
+        getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getBoolean("tunnelBroken", false)
+    private fun tunnelWanted(): Boolean = tunnelPref() == "auto" && !tunnelBroken() && Build.VERSION.SDK_INT >= 23
+
+    private fun applyTunnel(on: Boolean) {
+        try {
+            trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(on))
+        } catch (e: Throwable) { }
+    }
+
+    private fun audioCount(): Int {
+        val c = player.audioDecoderCounters ?: return -1
+        c.ensureUpdated()
+        return c.renderedOutputBufferCount
+    }
+
+    private fun hasAudioTrack(): Boolean =
+        player.currentTracks.groups.any { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
+
+    /** Alle 500 ms: läuft der Sender seit 5 s ohne Hänger – stimmen Bild, Ton und Zeit? */
+    private fun checkTunnel() {
+        if (tunnelChecked || (!tunnelWanted() && !tunnelProbe)) return
+        val now = System.currentTimeMillis()
+        if (player.playbackState != Player.STATE_READY || !player.isPlaying) { readyAt = 0L; return }
+        if (readyAt == 0L) {
+            readyAt = now; posAtReady = player.currentPosition; audioAtReady = audioCount(); return
+        }
+        if (now - readyAt < 5_000) return
+        tunnelChecked = true
+        val noTime = Math.abs(player.currentPosition - posAtReady) < 1_500
+        val noPicture = player.videoFormat != null && !firstFrame
+        val ac = audioCount()
+        val noSound = hasAudioTrack() && (ac < 0 || ac <= audioAtReady)
+        val bad = noTime || noPicture || noSound
+        val what = if (noSound) "kein Ton" else if (noPicture) "kein Bild" else "Bild steht"
+        if (tunnelProbe) {
+            // Ohne Tunneling erneut geprüft
+            tunnelProbe = false
+            if (!bad) {
+                getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putBoolean("tunnelBroken", true).apply()
+                emit("notice", "Direkte Bildausgabe klappt auf diesem Gerät nicht – normaler Modus ist jetzt eingestellt.")
+            }
+            return
+        }
+        if (bad) {
+            // Mit Tunneling stimmt etwas nicht: diesen Sender ohne Tunneling neu starten und noch einmal prüfen
+            tunnelOffNow = true
+            tunnelProbe = true
+            tunnelChecked = false
+            readyAt = 0L
+            firstFrame = false
+            applyTunnel(false)
+            player.stop()
+            if (currentUrl.isNotEmpty()) player.setMediaItem(MediaItem.fromUri(currentUrl))
+            player.prepare()
+            player.playWhenReady = true
+            emit("notice", "Direkte Bildausgabe: $what – Sender läuft jetzt im normalen Modus …")
+        }
+    }
+
     private fun checkFrozen() {
         if (!player.isPlaying || player.videoFormat == null) { frozenSince = System.currentTimeMillis(); return }
+        val tunnelOn = tunnelWanted() && !tunnelOffNow
         val counters = player.videoDecoderCounters ?: return
         counters.ensureUpdated()
-        val n = counters.renderedOutputBufferCount
+        // Direkte Bildausgabe: Bild-Zähler laufen dort nicht überall mit – dann gilt die Laufzeit (in 1/4 s)
+        val n = if (tunnelOn) (player.currentPosition / 250).toInt() else counters.renderedOutputBufferCount
         val now = System.currentTimeMillis()
         if (n != lastFrames) {
             lastFrames = n; frozenSince = now
@@ -183,7 +261,10 @@ class MainActivity : Activity() {
             tickCount++
             // Ruhe: Laufzeit nur alle 5 s an die Oberfläche (sonst 2× pro Sekunde); Hänger-Erkennung läuft unverändert
             val sendTime = !quiet || tickCount % 10 == 0
-            if (!useVlc) { try { checkFrozen() } catch (e: Throwable) { } }
+            if (!useVlc) {
+                try { checkTunnel() } catch (e: Throwable) { }
+                try { checkFrozen() } catch (e: Throwable) { }
+            }
             updateCache()
             if (!sendTime) {
                 // nichts melden
@@ -278,7 +359,10 @@ class MainActivity : Activity() {
         // Kurze Netz-Aussetzer (WLAN) nicht gleich als Fehler werten: öfter still neu versuchen
         val sources = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors)
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(10))
+        trackSelector = DefaultTrackSelector(this)
+        trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(tunnelWanted()))
         val p = ExoPlayer.Builder(this, renderers)
+            .setTrackSelector(trackSelector)
             .setMediaSourceFactory(sources)
             .setLoadControl(loadControl)
             // Während der Wiedergabe WLAN-Stromsparen aus (Fire TV/Boxen drosseln sonst das WLAN → Hänger)
@@ -315,6 +399,10 @@ class MainActivity : Activity() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateCache()
+            }
+
+            override fun onRenderedFirstFrame() {
+                firstFrame = true
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -1642,6 +1730,17 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun setNextEngine(mode: String) { forceVlcNext = mode == "vlc" }
 
+        /** Direkte Bildausgabe: "auto" (an, schaltet bei Problemen selbst ab) oder "off". Rückgabe von getTunnel: auto | off | broken */
+        @JavascriptInterface
+        fun setTunnel(mode: String) {
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit()
+                .putString("tunnel", if (mode == "off") "off" else "auto")
+                .putBoolean("tunnelBroken", false).apply()
+        }
+
+        @JavascriptInterface
+        fun getTunnel(): String = if (tunnelPref() == "off") "off" else if (tunnelBroken() || Build.VERSION.SDK_INT < 23) "broken" else "auto"
+
         /** Ruhe im Vollbild an/aus (siehe Quiet in app.js) */
         @JavascriptInterface
         fun setQuiet(on: Boolean) { quiet = on }
@@ -1694,6 +1793,12 @@ class MainActivity : Activity() {
                 freezeFixes = 0
                 frozenSince = System.currentTimeMillis()
                 langPickPending = audioLangs.isNotEmpty()
+                tunnelOffNow = false
+                tunnelProbe = false
+                tunnelChecked = false
+                readyAt = 0L
+                firstFrame = false
+                applyTunnel(tunnelWanted())
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .clearOverrides()
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)

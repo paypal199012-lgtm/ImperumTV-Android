@@ -7483,6 +7483,26 @@
                 ]);
             });
         }
+        if (AB && AB.getTunnel && AB.setTunnel) {
+            var tnGet = function () { try { return AB.getTunnel(); } catch (e) { return 'auto'; } };
+            var tnName = function (m) { return m === 'off' ? 'Aus' : m === 'broken' ? 'Aus · Gerät kann es nicht' : 'An · automatisch'; };
+            row('tunnel', 'tv', 'Direkte Bildausgabe', tnName(tnGet()), function (v) {
+                var cur = tnGet();
+                Modal.open('Direkte Bildausgabe', 'Bild und Ton gehen direkt vom Chip zum Fernseher – oft gleichmäßiger bei schnellen Bewegungen (z. B. Fußball).\n' +
+                    'Kommt damit kein Ton oder kein Bild, schaltet die App von selbst auf normal um und merkt sich das.' +
+                    (cur === 'broken' ? '\n\nAuf diesem Gerät hat es nicht geklappt und wurde abgeschaltet.' : ''), [
+                    { label: cur === 'broken' ? 'Noch einmal versuchen' : 'An · automatisch', primary: cur !== 'off', action: function () {
+                        try { AB.setTunnel('auto'); } catch (e) { /* egal */ }
+                        v.textContent = tnName('auto'); toast('Direkte Bildausgabe an – gilt ab dem nächsten Sender', 4000);
+                    } },
+                    { label: 'Aus', primary: cur === 'off', action: function () {
+                        try { AB.setTunnel('off'); } catch (e) { /* egal */ }
+                        v.textContent = tnName('off'); toast('Direkte Bildausgabe aus – gilt ab dem nächsten Sender', 4000);
+                    } },
+                    { label: 'Abbrechen' }
+                ]);
+            });
+        }
         if (Buffer.available()) {
             row('buffer', 'up', 'Puffer', Buffer.label(Buffer.get()), function (v) {
                 Modal.open('Puffer', 'Wie viel Vorrat die App lädt, bevor das Bild startet.\nKlein: Sender starten schneller, bei schwachem WLAN eher Ruckler.\n' +
