@@ -3684,12 +3684,8 @@
                 item.lastChild.textContent = name;
             } else {
                 item.textContent = name;
-                // Wie bei Live TV: ☰ vor „Alle“, Punkt vor Kategorien ohne eigenes Zeichen
-                if (search && search.dots) {
-                    var im = /^([★▶✓☰⚑])\s*(.*)$/.exec(name);
-                    if (im && i !== 0) { item.textContent = im[2]; item.insertBefore(h('span', 'cat-dot all', im[1]), item.firstChild); }
-                    else item.insertBefore(h('span', 'cat-dot' + (i === 0 ? ' all' : ''), i === 0 ? '☰' : '•'), item.firstChild);
-                }
+                // Wie bei Live TV: ☰ vor „Alle“
+                if (search && search.dots && i === 0) item.insertBefore(h('span', 'cat-dot all', '☰'), item.firstChild);
             }
             if (counts && counts[i] !== undefined && counts[i] !== null) {
                 var label = h('span', 'cat-name');

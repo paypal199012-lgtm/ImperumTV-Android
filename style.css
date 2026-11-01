@@ -1327,7 +1327,6 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 .live-b .col-cats { left: 30px; width: 310px; background: transparent; border: none; }
 .live-b .col-cats .col-head { display: none; }
 .live-b .cat { margin: 4px 0; padding: 12px 18px; font-size: 26px; font-weight: 600; border-radius: 12px; }
-.live-b .cat[data-key^="cat-"]:not([data-key="cat-0"]):not([data-key="cat-1"]):not([data-key="cat-search"])::before { content: "•"; color: #6f6b64; margin-right: 18px; }
 .live-b .cat.active { background: rgba(217,176,102,.38); color: #fff; }
 .live-b .cat.focused { background: rgba(217,176,102,.5); color: #fff; box-shadow: 0 0 0 3px #f4dc9e; }
 .live-b .col-list { left: 350px; width: 630px; background: transparent; border: none; }
@@ -1388,5 +1387,5 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 
 /* ---------- Filme/Serien R1: goldener Hintergrund durchgehend, keine schwarzen Flächen ---------- */
 .vod-r1 .col-cats, .vod-r1 .col-grid, .vod-r1 .col-grid .scroll, .vod-r1 .col-cats .scroll { background: transparent; border: none; }
-.cat-dot { display: inline-block; width: 22px; margin-right: 14px; color: #6f6b64; text-align: center; }
+.cat-dot { display: inline-block; margin-right: 10px; color: #6f6b64; text-align: center; }
 .cat-dot.all { color: inherit; }
