@@ -1544,3 +1544,33 @@ body.android .set-row:not(.focused), body.android .set6-card .set-row:not(.focus
 .mv-b.ok { background: #f4dc9e; color: #1a1408; margin-left: 8px; font-size: 0; }
 .mv-b.ok::before { content: "✓"; font-size: 24px; }
 .row.moving::after { display: none; }
+
+/* Fußball F1: Ligen links, Spiele als Zeilen, Sender als goldener Knopf */
+.fb.fb-f1 { left: 30px; right: 40px; }
+.fb-f1 .fb-side { position: absolute; left: 0; top: 0; width: 330px; bottom: 0; overflow: hidden; padding: 4px 6px; }
+.fb-head { font-size: 17px; letter-spacing: 3px; font-weight: 800; color: #f4dc9e; margin: 8px 10px 8px; }
+.fb-f1 .fb-chip { display: flex; align-items: center; margin: 3px 0; padding: 11px 18px; border-radius: 12px; background: transparent; border: none; font-size: 24px; font-weight: 600; color: #fff; }
+.fb-f1 .fb-chip .fb-cn { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fb-f1 .fb-chip .fb-cc { margin-left: 10px; font-size: 19px; color: #a7a39a; font-weight: 400; }
+.fb-f1 .fb-chip.lv .fb-cn { color: #ff8a7a; }
+.fb-f1 .fb-chip.active { background: #645238; color: #fff; }
+.fb-f1 .fb-chip.active .fb-cc { color: #f4dc9e; }
+.fb-f1 .fb-chip.focused { background: #645238; color: #fff; box-shadow: 0 0 0 3px #f4dc9e !important; }
+.fb-f1 .fb-list { left: 360px; top: 0; }
+.fb-f1 .fb-day { font-size: 17px; letter-spacing: 3px; text-transform: uppercase; margin: 12px 0 8px 4px; }
+.fb-f1 .fb-row { background: #1d1b18; height: 82px; margin-bottom: 8px; padding: 0 20px; }
+.fb-f1 .fb-row.focused { background: #645238 !important; box-shadow: 0 0 0 3px #f4dc9e !important; }
+.fb-f1 .fb-time { font-size: 27px; flex-basis: 96px; width: 96px; }
+.fb-f1 .fb-teams { font-size: 27px; font-weight: 700; }
+.fb-f1 .fb-mid { flex: 0 0 110px; margin: 0 14px; font-size: 28px; font-weight: 900; }
+.fb-f1 .fb-mid.sc { background: #0e0d0c; color: #fff; border-radius: 10px; padding: 6px 0; }
+.fb-f1 .fb-mid.sc.live { color: #ff6b5b; }
+.fb-f1 .fb-state { flex: 0 0 150px; }
+.fb-pill { display: inline-block; font-size: 16px; font-weight: 900; padding: 4px 11px; border-radius: 14px; letter-spacing: 0; }
+.fb-pill.lv { background: #d63a3a; color: #fff; }
+.fb-pill.ht { background: #e0a23a; color: #1a1408; }
+.fb-pill.end { color: #a7a39a; font-size: 17px; padding: 0; }
+.fb-f1 .fb-tv { flex: 0 0 360px; font-size: 18px; }
+.fb-f1 .fb-ch { display: inline-block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; background: #f4dc9e; color: #1a1408; font-weight: 800; padding: 8px 16px; border-radius: 20px; }
+.fb-f1 .fb-more { font-size: 18px; }
+.fb-f1 .fb-guess { font-size: 18px; }

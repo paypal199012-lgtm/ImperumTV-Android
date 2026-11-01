@@ -523,7 +523,7 @@
         }
     }
 
-    var VERTICAL_LOCK = { cats: true, list: true, grid: true };
+    var VERTICAL_LOCK = { cats: true, list: true, grid: true, fbside: true, fblist: true };
     var HORIZONTAL_LOCK = { fbchips: true, plgrid: true, sethead: true, setquick: true, similar: true, cast: true, seasons: true, buttons: true, player: true, tiles: true, circles: true, acc: true, topbtns: true };
 
     var Focus = {
@@ -2465,6 +2465,20 @@
     // Fußball: Spielplan von der Website (football-data.org) + passender Sender aus dem Programm
     // =====================================================================
     var Football = {
+        isLive: function (m) { return /^(IN_PLAY|PAUSED|LIVE|EXTRA_TIME|PENALTY_SHOOTOUT|SUSPENDED)$/.test(m.s); },
+        /** Anzahl Spiele je Liga (wie in der Liste gezeigt) */
+        counts: function () {
+            var d = this.data, out = { all: 0, __live: 0 }, now = Date.now(), self = this;
+            if (!d || !d.matches) return {};
+            this.LEAGUES.forEach(function (l) { if (l[0]) out[l[0]] = 0; });
+            d.matches.forEach(function (m) {
+                if (m.s === 'CANCELLED' || (m.s === 'FINISHED' && m.t < now - 6 * 3600 * 1000)) return;
+                out.all++;
+                if (out[m.c] !== undefined) out[m.c]++;
+                if (self.isLive(m)) out.__live++;
+            });
+            return out;
+        },
         LEAGUES: [['', 'Alle'], ['BL1', 'Bundesliga'], ['BL2', '2. Liga'], ['DFB', 'DFB-Pokal'], ['CL', 'Champions League'], ['EL', 'Europa League'], ['ECL', 'Conference L.'], ['PL', 'Premier League'], ['SA', 'Serie A'], ['PD', 'LaLiga'], ['FL1', 'Ligue 1']],
         SHORT: { BL1: 'BL', BL2: '2.BL', DFB: 'POK', CL: 'CL', EL: 'EL', ECL: 'ECL', PL: 'PL', SA: 'SA', PD: 'LL', FL1: 'L1' },
         STOP: { 'club': 1, 'real': 1, 'borussia': 1, 'united': 1, 'city': 1, 'sporting': 1, 'athletic': 1, 'atletico': 1, 'olympique': 1, 'stade': 1, 'calcio': 1, 'football': 1, 'fussball': 1, 'hotspur': 1, 'albion': 1, 'wanderers': 1, 'deportivo': 1, 'racing': 1, 'union': 1, 'saint': 1, 'paris': 1, 'germain': 1, 'munchen': 1, 'internazionale': 1, 'milano': 1, 'town': 1, 'county': 1, 'rovers': 1, 'villa': 1, 'palace': 1, 'forest': 1, 'ham': 1, 'hove': 1, 'sport': 1, 'sports': 1, 'verein': 1, 'olympic': 1, 'dynamo': 1, 'calcio': 1, 'balompie': 1, 'futbol': 1 },
@@ -6142,13 +6156,20 @@
         root.appendChild(topbar('Fußball', ''));
         var rb = h('div', 'button fb-refresh', '⟳  Sender neu suchen');
         root.appendChild(focusable(rb, 'fb-refresh', function () { self.refreshChannels(true); }, 'fbtop'));
-        var wrap = h('div', 'fb');
-        var chips = h('div', 'fb-chips hscroll');
-        Football.LEAGUES.forEach(function (l) {
-            var c = h('div', 'fb-chip' + (self.league === l[0] ? ' active' : ''), l[1]);
+        var wrap = h('div', 'fb fb-f1');
+        // F1: Ligen links als Liste mit Anzahl der Spiele, oben „Jetzt live“
+        var chips = h('div', 'fb-side scroll');
+        chips.appendChild(h('div', 'fb-head', 'LIGEN'));
+        var cnt = Football.counts ? Football.counts() : {};
+        var leagues = [Football.LEAGUES[0], ['__live', '● Jetzt live']].concat(Football.LEAGUES.slice(1));
+        leagues.forEach(function (l) {
+            var c = h('div', 'fb-chip' + (self.league === l[0] ? ' active' : '') + (l[0] === '__live' ? ' lv' : ''));
+            c.appendChild(h('span', 'fb-cn', l[1]));
+            var n = cnt[l[0] || 'all'];
+            if (n !== undefined) c.appendChild(h('span', 'fb-cc', String(n)));
             chips.appendChild(focusable(c, 'fbl-' + (l[0] || 'all'), function () {
                 self.league = l[0]; self.focusKey = 'fbl-' + (l[0] || 'all'); Nav.show(self, true);
-            }, 'fbchips'));
+            }, 'fbside'));
         });
         wrap.appendChild(chips);
         var list = h('div', 'fb-list scroll');
@@ -6213,7 +6234,8 @@
         var days = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
         var months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
         var shown = d.matches.filter(function (m) {
-            if (self.league && m.c !== self.league) return false;
+            if (self.league === '__live') { if (!Football.isLive(m)) return false; }
+            else if (self.league && m.c !== self.league) return false;
             if (m.s === 'FINISHED' && m.t < now - 6 * 3600 * 1000) return false;   // alte Ergebnisse weglassen
             return m.s !== 'CANCELLED';
         });
@@ -6238,13 +6260,15 @@
             teams.appendChild(side(m.h, true));
             var live = /^(IN_PLAY|PAUSED|LIVE|EXTRA_TIME|PENALTY_SHOOTOUT|SUSPENDED)$/.test(m.s);
             var hasScore = m.sc && m.sc[0] !== null && m.sc[0] !== undefined && (live || m.s === 'FINISHED' || m.s === 'AWARDED' || m.t <= Date.now());
-            var mid = h('span', 'fb-mid' + (live ? ' live' : ''), hasScore ? m.sc[0] + ' : ' + m.sc[1] : '–');
+            var mid = h('span', 'fb-mid' + (live ? ' live' : '') + (hasScore ? ' sc' : ''), hasScore ? m.sc[0] + ' : ' + m.sc[1] : '–');
             teams.appendChild(mid);
             teams.appendChild(side(m.a, false));
             row.appendChild(teams);
             var stTxt = live ? ({ PAUSED: 'HALBZEIT', EXTRA_TIME: 'VERLÄNGERUNG' + (m.mn ? ' ' + m.mn : ''), PENALTY_SHOOTOUT: 'ELFMETER', SUSPENDED: 'UNTERBROCHEN' }[m.s] || (m.mn ? 'LIVE ' + m.mn : 'LIVE'))
                 : (m.s === 'FINISHED' || m.s === 'AWARDED') ? 'Ende' : m.s === 'POSTPONED' ? 'verlegt' : '';
-            row.appendChild(h('div', 'fb-state' + (live ? ' live' : ''), stTxt));
+            var stEl = h('div', 'fb-state' + (live ? ' live' : ''));
+            if (stTxt) stEl.appendChild(h('span', 'fb-pill' + (m.s === 'PAUSED' ? ' ht' : live ? ' lv' : ' end'), live && m.s !== 'PAUSED' ? '● ' + stTxt : stTxt));
+            row.appendChild(stEl);
             var tv = h('div', 'fb-tv');
             var over = m.s === 'FINISHED' || m.s === 'AWARDED';
             var r = over ? '' : Football.rights(m);
