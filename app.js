@@ -6212,8 +6212,7 @@
         if (manual) toast('Senderliste wird geladen …', 2500);
         Football.reloadChannels(manual).then(function (n) {
             if (Nav.top() !== self) return;
-            var key = Focus.cur ? Focus.cur.getAttribute('data-key') : null;
-            if (key) self.focusKey = key;
+            self.keepPlace();
             Nav.show(self, true);
             if (!manual) return;
             var after = Object.keys(self.events || {}).length, more = after - before;
@@ -6238,8 +6237,7 @@
                     : 'Der Spielplan ist gerade nicht erreichbar. Bitte später noch einmal versuchen.'));
                 return;
             }
-            var key = Focus.cur ? Focus.cur.getAttribute('data-key') : null;
-            if (key) self.focusKey = key;
+            self.keepPlace();
             Nav.show(self, true);
             Football.findChannels(d.matches, function (found) {
                 if (Nav.top() !== self) return;
@@ -6247,6 +6245,22 @@
                 self.markChannels();
             });
         });
+    };
+    /** Vor dem Neuzeichnen: Scroll-Stand merken; ist das markierte Spiel nicht zu sehen (Mausrad/Wischen), das oberste sichtbare markieren */
+    FootballScreen.prototype.keepPlace = function () {
+        var bx = Nav.boxes(), sc = [];
+        for (var bi = 0; bi < bx.length; bi++) sc.push(bx[bi].scrollTop);
+        this._scrolls = sc;
+        var cur = Focus.cur, list = document.querySelector('#app .fb-list');
+        var key = cur ? cur.getAttribute('data-key') : null;
+        if (cur && list && list.contains(cur)) {
+            var lr = list.getBoundingClientRect(), cr = cur.getBoundingClientRect();
+            if (cr.bottom < lr.top || cr.top > lr.bottom) {
+                var rows = list.querySelectorAll('.fb-row');
+                for (var i = 0; i < rows.length; i++) { var r = rows[i].getBoundingClientRect(); if (r.top >= lr.top - 2) { key = rows[i].getAttribute('data-key'); break; } }
+            }
+        }
+        if (key) this.focusKey = key;
     };
     FootballScreen.prototype.fill = function (list, d) {
         var self = this, lastDay = '', now = Date.now();
