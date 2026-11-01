@@ -1593,3 +1593,4 @@ body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 .fb-f1 .fb-ch .fb-more { flex: none; margin-left: 8px; background: #1a1408; color: #f4dc9e; font-size: 15px; padding: 3px 9px; border-radius: 12px; }
 .fb-f1 .fb-guess { width: 340px; text-align: right; }
 .fb-f1 .fb-chn { text-align: left; }
+.fb-lg.lg-SB { background: #2e7d32; }
