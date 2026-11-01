@@ -41,6 +41,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
@@ -284,8 +285,17 @@ class MainActivity : Activity() {
                 emit("error", error.errorCodeName + formatInfo(error))
             }
         })
+        // Datenrate für die Verbindungsanzeige im Player
+        p.addAnalyticsListener(object : AnalyticsListener {
+            override fun onBandwidthEstimate(eventTime: AnalyticsListener.EventTime, totalLoadTimeMs: Int, totalBytesLoaded: Long, bitrateEstimate: Long) {
+                lastBitrate = bitrateEstimate
+            }
+        })
         return p
     }
+
+    /** Zuletzt gemessene Datenrate (Bit/s) */
+    @Volatile private var lastBitrate = 0L
 
     private fun buildUi() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -1449,6 +1459,19 @@ class MainActivity : Activity() {
             try { val a = JSONArray(ids); for (i in 0 until a.length()) wanted.add(a.getString(i)) } catch (e: Throwable) { }
             epgDownload(url, account, wanted)
         }
+
+        /** Schlaf-Timer: nach dem Stoppen den Bildschirm nicht mehr wach halten (Fire TV darf in den Ruhemodus) */
+        @JavascriptInterface
+        fun keepAwake(on: Boolean) {
+            handler.post {
+                if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+
+        /** Verbindungsanzeige: gemessene Datenrate in kbit/s */
+        @JavascriptInterface
+        fun netInfo(): String = "{\"kbps\":" + (lastBitrate / 1000) + "}"
 
         /** Puffer: "small" | "normal" | "large" – Player wird mit der neuen Einstellung neu gebaut */
         @JavascriptInterface

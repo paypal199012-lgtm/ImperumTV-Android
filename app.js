@@ -877,6 +877,117 @@
         }
     };
 
+    /** Verbindungsqualität beim Abspielen: aus Hängern (Nachladen) der letzten 2 Minuten, dazu die Datenrate (Android) */
+    var NetQ = {
+        stalls: [], since: 0, started: false,
+        /** Anzeige: 'always' = immer mit der Leiste, 'problems' = nur bei Problemen, 'off' = aus */
+        mode: function () { var m = Storage.get('netq', 'always'); return m === 'problems' || m === 'off' ? m : 'always'; },
+        modeLabel: function (m) { m = m || this.mode(); return m === 'problems' ? 'Nur bei Problemen' : m === 'off' ? 'Aus' : 'Immer'; },
+        nextMode: function () { var m = this.mode(); Storage.set('netq', m === 'always' ? 'problems' : m === 'problems' ? 'off' : 'always'); return this.modeLabel(); },
+        reset: function () { this.stalls = []; this.since = 0; this.started = false; },
+        onBuffer: function (on) {
+            var now = Date.now();
+            if (on) { if (!this.since) this.since = now; return; }
+            if (this.since && this.started && now - this.since > 700) this.stalls.push(now);
+            this.since = 0;
+            this.started = true;
+        },
+        /** Wie lange hängt das Bild gerade schon (ms, 0 = läuft) */
+        waiting: function () { return this.since && this.started ? Date.now() - this.since : 0; },
+        level: function () {
+            var now = Date.now(), keep = [];
+            for (var i = 0; i < this.stalls.length; i++) if (now - this.stalls[i] < 120000) keep.push(this.stalls[i]);
+            this.stalls = keep;
+            var w = this.waiting();
+            if (w > 3000 || keep.length >= 2) return 'bad';
+            if (keep.length === 1 || w > 1000) return 'mid';
+            return this.started ? 'good' : 'wait';
+        },
+        mbit: function () {
+            try { if (AB && AB.netInfo) { var j = JSON.parse(AB.netInfo()); return (j.kbps || 0) / 1000; } } catch (e) { /* egal */ }
+            return 0;
+        },
+        text: function (lv) { return lv === 'bad' ? 'Schwache Verbindung' : lv === 'mid' ? 'Mäßige Verbindung' : 'Gute Verbindung'; },
+        short: function (lv) { return lv === 'bad' ? 'Schwach' : lv === 'mid' ? 'Mäßig' : 'Gut'; },
+        rate: function () { var m = this.mbit(); return m > 0 ? (m >= 10 ? Math.round(m) : m.toFixed(1).replace('.', ',')) + ' Mbit/s' : ''; },
+        bars: function (lv) {
+            var n = lv === 'bad' ? 1 : lv === 'mid' ? 2 : 4, out = '<span class="nq-bars">';
+            for (var i = 0; i < 4; i++) out += '<i class="' + (i < n ? 'on' : '') + '"></i>';
+            return out + '</span>';
+        }
+    };
+
+    /** Schlaf-Timer: stoppt die Wiedergabe nach der gewählten Zeit (1 Minute vorher kommt eine Warnung) */
+    var Sleep = {
+        until: 0, timer: null, node: null, warned: false,
+        active: function () { return this.until > Date.now(); },
+        minutesLeft: function () { return Math.max(0, Math.ceil((this.until - Date.now()) / 60000)); },
+        set: function (ms) {
+            this.until = Date.now() + ms;
+            this.warned = false;
+            this.start();
+            toast('Schlaf-Timer: Wiedergabe stoppt um ' + fmtClock(new Date(this.until)));
+        },
+        cancel: function (quiet) {
+            this.until = 0; this.warned = false;
+            clearInterval(this.timer); this.timer = null;
+            if (this.node) this.node.classList.add('hidden');
+            document.body.classList.remove('sleep-on');
+            if (!quiet) toast('Schlaf-Timer aus');
+        },
+        /** Bildschirm wach halten (aus nach dem Timer, damit der Fire TV in den Ruhemodus gehen kann) */
+        awake: function (on) { try { if (AB && AB.keepAwake) AB.keepAwake(!!on); } catch (e) { /* egal */ } },
+        start: function () {
+            var self = this;
+            if (!this.node) {
+                var stage = document.getElementById('stage');
+                if (stage) { this.node = h('div', 'hidden'); this.node.id = 'sleepbadge'; stage.appendChild(this.node); }
+            }
+            clearInterval(this.timer);
+            this.timer = setInterval(function () { self.tick(); }, 1000);
+            this.tick();
+        },
+        tick: function () {
+            var left = this.until - Date.now();
+            if (left <= 0) { this.fire(); return; }
+            if (this.node) { this.node.textContent = '☾ ' + this.minutesLeft() + ' Min'; this.node.classList.remove('hidden'); document.body.classList.add('sleep-on'); }
+            if (left <= 60000 && !this.warned) { this.warned = true; this.warn(); }
+            if (this.warned && Modal.node && Modal.node.getAttribute('data-sleep')) {
+                var t = Modal.node.querySelector('.modal-text');
+                if (t) t.textContent = 'Die Wiedergabe stoppt in ' + Math.max(0, Math.ceil(left / 1000)) + ' Sekunden.';
+            }
+        },
+        warn: function () {
+            var self = this;
+            Modal.open('☾  Gute Nacht', 'Die Wiedergabe stoppt in 60 Sekunden.', [
+                { label: '+ 30 Minuten', primary: true, action: function () { self.until = Date.now() + 30 * 60000; self.warned = false; toast('Schlaf-Timer: noch 30 Minuten'); } },
+                { label: 'Jetzt beenden', action: function () { self.fire(); } },
+                { label: 'Timer aus', action: function () { self.cancel(); } }
+            ]);
+            if (Modal.node) Modal.node.setAttribute('data-sleep', '1');
+        },
+        fire: function () {
+            this.cancel(true);
+            if (Modal.node && Modal.node.getAttribute('data-sleep')) Modal.close();
+            var top = Nav.top();
+            if (top instanceof PlayerScreen) Nav.back();
+            try { Player.stop(); } catch (e) { /* egal */ }
+            this.awake(false);
+            toast('Schlaf-Timer: Wiedergabe gestoppt. Gute Nacht!', 8000);
+        },
+        /** Auswahl im Player; endMs = Ende der Sendung bzw. des Films (oder 0) */
+        menu: function (endMs, endLabel, then) {
+            var self = this, b = [];
+            if (this.active()) b.push({ label: 'Aus (noch ' + this.minutesLeft() + ' Min)', action: function () { self.cancel(); if (then) then(); } });
+            [15, 30, 60, 90].forEach(function (m) {
+                b.push({ label: m + ' Min', primary: m === 30 && !self.active(), action: function () { self.set(m * 60000); if (then) then(); } });
+            });
+            if (endMs && endMs > Date.now() + 60000) b.push({ label: endLabel + ' · ' + fmtClock(new Date(endMs)), action: function () { self.set(endMs - Date.now()); if (then) then(); } });
+            b.push({ label: 'Abbrechen', action: function () { if (then) then(); } });
+            Modal.open('Schlaf-Timer', 'Die Wiedergabe stoppt automatisch – praktisch zum Einschlafen.', b);
+        }
+    };
+
     /** Puffer des Android-Players (Fire TV/Android): klein, normal, groß */
     var Buffer = {
         available: function () { return !!(AB && AB.setBuffer && AB.getBuffer); },
@@ -2870,7 +2981,10 @@
         },
 
         on: function (handlers) { this.handlers = handlers || {}; },
-        emit: function (name, a, b) { var f = this.handlers[name]; if (f) f(a, b); },
+        emit: function (name, a, b) {
+            if (name === 'buffer') NetQ.onBuffer(!!a);
+            var f = this.handlers[name]; if (f) f(a, b);
+        },
 
         /** rect in 1920er-Koordinaten oder null für Vollbild */
         /**
@@ -2891,6 +3005,8 @@
             this.subIndex = -1;
             this.audioLangs = this.nextLangs || '';            // nur für genau diesen Film/diese Folge
             this.nextLangs = '';
+            NetQ.reset();
+            Sleep.awake(true);
             this.emit('buffer', true);
             var self = this;
 
@@ -6629,6 +6745,10 @@
             Clock.next();
             v.textContent = Clock.label().replace('An · mit Sekunden', 'Mit Sekunden').replace('An · ohne Sekunden', 'Ohne Sekunden');
         });
+        row('netq', 'speed', 'Verbindungsanzeige', NetQ.modeLabel(), function (v) { v.textContent = NetQ.nextMode(); });
+        row('sleep', 'clock', 'Schlaf-Timer', Sleep.active() ? 'An · noch ' + Sleep.minutesLeft() + ' Min' : 'Aus', function (v) {
+            Sleep.menu(0, '', function () { v.textContent = Sleep.active() ? 'An · noch ' + Sleep.minutesLeft() + ' Min' : 'Aus'; });
+        });
         row('parental', 'lock', 'Kinderschutz', Parental.hasPin() ? 'An · PIN' : 'Aus', parentalOpen);
         row('profiles', 'users', 'Profile', Profiles.count() ? Profiles.count() + ' · ' + Profiles.cur().name : 'Aus', function () {
             if (Profiles.count() >= 2) Nav.push(new WhoScreen(function () { Nav.stack.length = 0; Nav.push(new HomeScreen()); }, true));
@@ -7367,6 +7487,8 @@
         this.ui.addEventListener('click', this.tapHandler);
         clearInterval(this.watchdog);
         this.watchdog = setInterval(function () { self.checkStall(); }, 2000);
+        clearInterval(this.netTimer);
+        this.netTimer = setInterval(function () { self.netTick(); }, 1000);
     };
     /** Filme und Folgen merken sich den Stand (Aufnahmen und Live nicht) */
     PlayerScreen.prototype.resumable = function () {
@@ -7686,6 +7808,13 @@
             btn('pl-switch', '⇄', 'Anderer Player', function () { self.switchPlayer(); });
         }
         btn('pl-aspect', '▭', 'Bildformat', function () { self.aspectMenu(); });
+        btn('pl-sleep', '☾', Sleep.active() ? 'Schlaf-Timer · ' + Sleep.minutesLeft() + ' Min' : 'Schlaf-Timer', function () {
+            var endMs = 0, label = '';
+            if (self.kind === 'live') { var cur = self.epgNow(); if (cur && cur.end) { endMs = cur.end; label = 'Ende der Sendung'; } }
+            else { var d = Player.duration(), c = Player.current(); if (d > 0) { endMs = Date.now() + (d - c) * 1000; label = self.kind === 'episode' ? 'Ende der Folge' : 'Ende des Films'; } }
+            clearTimeout(self.hideTimer);
+            Sleep.menu(endMs, label, function () { self.showOverlay(); });
+        });
         // Filme/Serien: immer zeigen; Live: nur wenn der Sender eine Auswahl hat
         var vod = this.kind !== 'live';
         if (vod || Player.trackList('audio').length > 1) btn('pl-audio', '♪', 'Sprache', function () { self.trackMenu('audio'); });
@@ -7700,11 +7829,75 @@
             });
         }
         head.appendChild(buttons);
+        // Verbindung: Balken, Gut/Mäßig/Schwach, Datenrate
+        var lv = NetQ.level(), nqm = NetQ.mode();
+        this.nqBox = null;
+        if (nqm === 'always' || (nqm === 'problems' && (lv === 'mid' || lv === 'bad'))) {
+            this.nqBox = h('div', 'pb-net ' + (lv === 'wait' ? 'good' : lv));
+            this.fillNetBox(lv);
+            head.insertBefore(this.nqBox, buttons);
+        }
+        // Bild hängt länger: Hinweis mit direkter Hilfe
+        this.nqHint = null;
+        if (NetQ.waiting() > 3000 && nqm !== 'off') {
+            var hint = h('div', 'pb-nethint');
+            var ht = h('div', 'pb-nethint-t');
+            ht.innerHTML = NetQ.bars('bad');
+            var htx = h('div');
+            htx.appendChild(h('b', null, 'Verbindung zu langsam – Bild lädt nach …'));
+            htx.appendChild(h('br'));
+            var rate = NetQ.rate();
+            htx.appendChild(h('span', null, (rate ? 'Datenrate ' + rate + ' · ' : '') + 'mehr Puffer hilft gegen Ruckler'));
+            ht.appendChild(htx);
+            hint.appendChild(ht);
+            if (Buffer.available() && Buffer.get() !== 'large') {
+                var hb = h('div', 'button primary', 'Puffer: Groß');
+                hint.appendChild(focusable(hb, 'pl-nq-buf', function () { Buffer.set('large'); setTimeout(function () { if (Nav.top() === self) self.start(); }, 400); self.renderOverlay(); }, 'player'));
+            }
+            var tb = h('div', 'button', 'Verbindungstest');
+            hint.appendChild(focusable(tb, 'pl-nq-test', function () { Nav.push(new NetTestScreen()); }, 'player'));
+            ui.appendChild(hint);
+            this.nqHint = hint;
+        }
         ui.appendChild(banner);
 
         var target = Focus.byKey(focusedKey) || Focus.byKey('pl-play') || Focus.byKey('pl-list') || buttons.firstChild;
         if (target) Focus.set(target);
         this.updateBar();
+    };
+    PlayerScreen.prototype.fillNetBox = function (lv) {
+        if (!this.nqBox) return;
+        if (lv === 'wait') lv = 'good';
+        this.nqBox.className = 'pb-net ' + lv;
+        var rate = NetQ.rate();
+        this.nqBox.innerHTML = NetQ.bars(lv) + '<div class="pb-net-l">' + NetQ.short(lv) + '</div><div class="pb-net-r">' + (rate || '&nbsp;') + '</div>';
+    };
+    /** Jede Sekunde: Abzeichen oben links, Kasten in der Info-Leiste, Hinweis beim Hängen */
+    PlayerScreen.prototype.netTick = function () {
+        if (Nav.top() !== this) { if (this.nqBadge) this.nqBadge.classList.add('hidden'); return; }
+        var lv = NetQ.level(), nqm = NetQ.mode();
+        if (!this.nqBadge) {
+            this.nqBadge = h('div', 'hidden'); this.nqBadge.id = 'netq';
+            $('#stage').appendChild(this.nqBadge);
+        }
+        var show = nqm !== 'off' && lv !== 'wait' && ((this.overlay && (nqm === 'always' || lv !== 'good')) || lv === 'bad');
+        if (show) {
+            var rate = NetQ.rate();
+            this.nqBadge.className = 'nq-' + lv;
+            this.nqBadge.innerHTML = NetQ.bars(lv) + '<span>' + NetQ.text(lv) + '</span>' + (rate ? '<em>· ' + rate + '</em>' : '');
+        } else this.nqBadge.className = 'hidden';
+        if (this.overlay) this.fillNetBox(lv);
+        if (this.overlay && nqm === 'problems' && !this.nqBox !== (lv === 'good' || lv === 'wait')) this.renderOverlay();   // Kasten ein-/ausblenden
+        // Hängt das Bild länger als 3 s: Leiste mit Hinweis zeigen (einmal pro Hänger)
+        var w = NetQ.waiting();
+        if (w > 3000 && nqm !== 'off' && !this.nqHintShown && !Modal.node && !this.zapOpen) {
+            this.nqHintShown = true;
+            if (this.overlay) this.renderOverlay(); else this.showOverlay(10000);
+        }
+        if (w === 0 && this.nqHintShown) {
+            this.nqHintShown = false;
+            if (this.overlay && this.nqHint) this.renderOverlay();
+        }
     };
     /** Bildformat wählen (gilt für Live TV, Filme und Serien) */
     PlayerScreen.prototype.aspectMenu = function () {
@@ -7976,6 +8169,8 @@
         clearTimeout(this.hideTimer);
         clearTimeout(this.subTimer);
         clearInterval(this.watchdog);
+        clearInterval(this.netTimer);
+        if (this.nqBadge) { this.nqBadge.parentNode && this.nqBadge.parentNode.removeChild(this.nqBadge); this.nqBadge = null; }
         // Zurück aus dem Live-Vollbild in die Senderliste/EPG: Sender weiterlaufen lassen, dort nur verkleinern
         var below = this._backTo;
         var ch = this.kind === 'live' ? this.item() : null;

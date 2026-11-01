@@ -1264,3 +1264,36 @@ body.video-mode.osd #clock { display: block; }
 .set6-stat.warn { border-color: #f0c25a; background: rgba(240,194,90,.16); }
 .set6-stat.warn .set6-stat-v { color: #f0c25a; }
 .set6-stat.err { border-color: rgba(255,138,128,.7); }
+
+/* ---------- Verbindungsanzeige im Player ---------- */
+.nq-bars { display: inline-flex; align-items: flex-end; height: 26px; flex: none; }
+.nq-bars i { display: block; width: 7px; margin-right: 4px; border-radius: 2px; background: rgba(255,255,255,.25); }
+.nq-bars i:nth-child(1) { height: 9px; } .nq-bars i:nth-child(2) { height: 15px; } .nq-bars i:nth-child(3) { height: 20px; } .nq-bars i:nth-child(4) { height: 26px; }
+#netq { position: absolute; left: 40px; top: 30px; z-index: 60; display: flex; align-items: center; padding: 10px 22px; border-radius: 30px;
+    background: rgba(0,0,0,.72); border: 2px solid; font-size: 23px; font-weight: bold; pointer-events: none; }
+#netq span { margin-left: 8px; } #netq em { font-style: normal; font-weight: normal; color: #c9c3b6; margin-left: 10px; font-size: 20px; }
+.nq-good { border-color: #6fd88a !important; } .nq-good .nq-bars i.on { background: #6fd88a; }
+.nq-mid { border-color: #f0c25a !important; } .nq-mid .nq-bars i.on { background: #f0c25a; }
+.nq-bad { border-color: #f07070 !important; } .nq-bad .nq-bars i.on { background: #f07070; }
+.pb-net { flex: none; min-width: 150px; margin-left: 24px; padding: 10px 16px; border-radius: 14px; text-align: center; border: 1.5px solid; }
+.pb-net .nq-bars { justify-content: center; }
+.pb-net-l { font-size: 21px; font-weight: bold; margin-top: 6px; } .pb-net-r { font-size: 17px; color: #c9c3b6; }
+.pb-net.good { border-color: #6fd88a; background: rgba(111,216,138,.1); } .pb-net.good .pb-net-l { color: #6fd88a; } .pb-net.good .nq-bars i.on { background: #6fd88a; }
+.pb-net.mid { border-color: #f0c25a; background: rgba(240,194,90,.12); } .pb-net.mid .pb-net-l { color: #f0c25a; } .pb-net.mid .nq-bars i.on { background: #f0c25a; }
+.pb-net.bad { border-color: #f07070; background: rgba(240,112,112,.12); } .pb-net.bad .pb-net-l { color: #f07070; } .pb-net.bad .nq-bars i.on { background: #f07070; }
+.pb-nethint { position: absolute; left: 50%; bottom: 300px; transform: translateX(-50%); display: flex; align-items: center; white-space: nowrap;
+    padding: 18px 26px; border-radius: 20px; background: rgba(12,12,12,.92); border: 2px solid #f0c25a; }
+.pb-nethint-t { display: flex; align-items: center; font-size: 24px; margin-right: 20px; }
+.pb-nethint-t .nq-bars { margin-right: 16px; } .pb-nethint-t .nq-bars i:first-child { background: #f07070; }
+.pb-nethint-t span { font-size: 19px; color: #c9c3b6; }
+.pb-nethint .button { margin-left: 14px; }
+/* ---------- Schlaf-Timer ---------- */
+#sleepbadge { position: absolute; top: 30px; right: 214px; z-index: 60; padding: 6px 16px; border-radius: 20px; background: rgba(0,0,0,.6);
+    border: 1.5px solid #e8c98a; color: #f4dc9e; font-size: 21px; font-weight: bold; pointer-events: none; }
+body.video-mode #sleepbadge { display: none; }
+body.video-mode.osd #sleepbadge { display: block; }
+#sleepbadge.hidden { display: none !important; }
+body.sleep-on.clock-on .hint { right: 380px; }
+body.sleep-on.clock-on .fb-refresh { right: 380px; }
+body.sleep-on.clock-on .home-head-btns { right: 380px; }
+body:not(.clock-on) #sleepbadge { right: 40px; }
