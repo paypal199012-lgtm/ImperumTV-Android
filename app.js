@@ -6726,6 +6726,15 @@
                 ]);
             });
         }
+        if (AB && AB.setCatchup && AB.getCatchup) {
+            var cuOn = function () { try { return !!AB.getCatchup(); } catch (e) { return false; } };
+            row('catchup', 'next', 'Näher am Live-Geschehen', cuOn() ? 'An' : 'Aus', function (v) {
+                var on = !cuOn();
+                try { AB.setCatchup(on); } catch (e) { /* egal */ }
+                v.textContent = on ? 'An' : 'Aus';
+                toast(on ? 'Nach einem Hänger holt Live TV den Rückstand unauffällig wieder auf (1,05-fach)' : 'Näher am Live-Geschehen: aus');
+            });
+        }
         if (VodPlayer.available()) {
             row('vodplayer', 'play', 'Player Filme & Serien', VodPlayer.nameOf(VodPlayer.pref()), function () {
                 VodPlayer.pick(function () { self.focusKey = 'set-vodplayer'; Nav.show(self); });
