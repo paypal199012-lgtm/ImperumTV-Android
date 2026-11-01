@@ -2073,7 +2073,7 @@
     };
     window.__androidOvpn = function (state, err) {
         if (state === 'an' || state === 'aus' || state === 'fehler') setTimeout(function () { Hello.send(true); }, 1500);
-        if (state === 'an') toast('VPN (OpenVPN) verbunden');
+        if (state === 'an') toast('VPN verbunden');
         else if (state === 'fehler') {
             toast('VPN: ' + (err || 'Verbindung fehlgeschlagen'), 8000);
             // Protokoll (ohne Passwort) an den Admin-Bereich „Fehlerberichte“
@@ -7639,7 +7639,7 @@
         if (OVpn.native()) {
             var vi = OVpn.info();
             if (vi.has) {
-                row('ovpn', 'shield', 'VPN (OpenVPN)', vi.state === 'an' ? 'Verbunden' : vi.state === 'verbindet' ? 'Verbindet …' : vi.state === 'fehler' ? 'Fehler' : 'Getrennt', function (v) {
+                row('ovpn', 'shield', 'VPN', vi.state === 'an' ? 'Verbunden' : vi.state === 'verbindet' ? 'Verbindet …' : vi.state === 'fehler' ? 'Fehler' : 'Getrennt', function (v) {
                     var on = OVpn.toggle();
                     v.textContent = on ? 'Verbindet …' : 'Getrennt';
                 });
@@ -7919,7 +7919,7 @@
         var status = i.state === 'an' ? 'Verbunden' + (place ? ' · ' + place : '') : i.state === 'verbindet' ? 'Verbindet …' :
             i.state === 'fehler' ? 'Fehler: ' + (i.error || 'unbekannt') : 'Getrennt';
         var on = i.state === 'an' || i.state === 'verbindet';
-        Modal.open('VPN (OpenVPN)', status + (i.server ? '\nServer: ' + i.server : '') + '\nÜber das VPN läuft nur ImperumTV.', [
+        Modal.open('VPN', status + (i.server ? '\nServer: ' + i.server : '') + '\nÜber das VPN läuft nur ImperumTV.', [
             { label: on ? 'Trennen' : 'Verbinden', primary: true, action: function () { OVpn.toggle(); toast(on ? 'VPN wird getrennt …' : 'VPN verbindet …'); } },
             { label: 'Beim Start verbinden: ' + (i.auto ? 'An' : 'Aus'), action: function () {
                 try { AB.ovpnSetAutoStart(!i.auto); } catch (e) { /* egal */ }
@@ -7930,7 +7930,7 @@
         ]);
     }
     function vpnSetupDialog() {
-        Modal.open('Eigenes VPN (OpenVPN)', 'Öffne am Handy oder PC ' + REMOTE.website.replace(/^https?:\/\//, '').replace(/\/+$/, '') +
+        Modal.open('Eigenes VPN', 'Öffne am Handy oder PC ' + REMOTE.website.replace(/^https?:\/\//, '').replace(/\/+$/, '') +
             '/playlist.html, melde dich mit MAC ' + Device.macText() + ' und Geräte-Schlüssel ' + Device.key +
             ' an und lade unten bei „VPN (OpenVPN)“ deine .ovpn-Datei mit Benutzername und Passwort hoch. Danach hier „Neu laden“ drücken.', [
             { label: 'Neu laden', primary: true, action: function () {
