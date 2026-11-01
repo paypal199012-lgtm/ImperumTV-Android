@@ -83,6 +83,10 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var playerView: PlayerView
     private lateinit var player: ExoPlayer
+    /** Zweiter Player für Live TV (VLC), wenn in den Einstellungen gewählt */
+    private lateinit var vlc: VlcEngine
+    /** Läuft der aktuelle Sender gerade in VLC? */
+    @Volatile private var useVlc = false
     private lateinit var httpFactory: DefaultHttpDataSource.Factory
     /** Oberfläche schon aufgebaut? (Während der Fehlerbericht offen ist, noch nicht) */
     private val uiReady: Boolean get() = ::webView.isInitialized && ::player.isInitialized
@@ -100,6 +104,9 @@ class MainActivity : Activity() {
     private var lastFrames = -1
     private var frozenSince = 0L
     private var freezeFixes = 0
+    private var lastFixAt = 0L
+    /** Adresse des laufenden Senders/Films (für das Neu-Öffnen nach einem Hänger) */
+    private var currentUrl = ""
     private var audioWarned = false
 
     /** Filme/Serien: gewünschte Tonsprachen in Reihenfolge (z. B. de, en); leer bei Sendern */
@@ -139,11 +146,20 @@ class MainActivity : Activity() {
         counters.ensureUpdated()
         val n = counters.renderedOutputBufferCount
         val now = System.currentTimeMillis()
-        if (n != lastFrames) { lastFrames = n; frozenSince = now; return }
-        if (now - frozenSince > 8_000 && freezeFixes < 1) {
+        if (n != lastFrames) {
+            lastFrames = n; frozenSince = now
+            // Lief der Sender nach der letzten Reparatur wieder 90 s sauber: Zähler zurück
+            if (freezeFixes > 0 && now - lastFixAt > 90_000) freezeFixes = 0
+            return
+        }
+        if (now - frozenSince > 8_000 && freezeFixes < 4 && currentUrl.isNotEmpty()) {
             freezeFixes++
             frozenSince = now
-            if (player.isCurrentMediaItemLive) player.seekToDefaultPosition()
+            lastFixAt = now
+            lastFrames = -1
+            // Wie beim Umschalten: Sender ganz neu öffnen (nur Nachladen half beim zweiten Hänger oft nicht)
+            player.stop()
+            player.setMediaItem(MediaItem.fromUri(currentUrl))
             player.prepare()
             player.playWhenReady = true
             emit("notice", "Bild hing – Sender wird neu geladen …")
@@ -157,9 +173,12 @@ class MainActivity : Activity() {
 
     private val ticker = object : Runnable {
         override fun run() {
-            try { checkFrozen() } catch (e: Throwable) { }
+            if (!useVlc) { try { checkFrozen() } catch (e: Throwable) { } }
             updateCache()
-            if (player.playbackState == Player.STATE_READY && player.isPlaying) {
+            if (useVlc) {
+                if (vlc.playingNow()) emit("time", cachedPosition)
+                try { lastBitrate = vlc.bitrate() } catch (e: Throwable) { }
+            } else if (player.playbackState == Player.STATE_READY && player.isPlaying) {
                 emit("time", cachedPosition)
             }
             handler.postDelayed(this, 500)
@@ -364,6 +383,7 @@ class MainActivity : Activity() {
             isFocusable = false
         }
         root.addView(playerView, FrameLayout.LayoutParams(0, 0))
+        vlc = VlcEngine(this) { n, v -> emit(n, v) }
 
         // ---------- Oberfläche ----------
         webView = WebView(this).apply {
@@ -592,6 +612,7 @@ class MainActivity : Activity() {
         if (!uiReady) { super.onStop(); return }
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('hidden')", null)
         player.pause()
+        if (useVlc) vlc.pause()
         webView.onPause()
         super.onStop()
     }
@@ -927,6 +948,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         try { if (::player.isInitialized) player.release() } catch (e: Throwable) { }
+        try { if (::vlc.isInitialized) vlc.release() } catch (e: Throwable) { }
         try { webView.destroy() } catch (e: Throwable) { }
         super.onDestroy()
     }
@@ -972,6 +994,12 @@ class MainActivity : Activity() {
     // ---------- Hilfen für den Player ----------
 
     private fun updateCache() {
+        if (useVlc && ::vlc.isInitialized) {
+            cachedPlaying = vlc.isPlaying()
+            cachedPosition = vlc.position()
+            cachedDuration = vlc.duration()
+            return
+        }
         cachedPlaying = player.playWhenReady && player.playbackState != Player.STATE_ENDED &&
             player.playbackState != Player.STATE_IDLE
         cachedPosition = player.currentPosition / 1000.0
@@ -1579,6 +1607,21 @@ class MainActivity : Activity() {
             }
         }
 
+        /** Player für Live TV: "exo" (eingebaut) oder "vlc". Gilt ab dem nächsten Senderwechsel. */
+        @JavascriptInterface
+        fun setLiveEngine(mode: String) {
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit()
+                .putString("liveEngine", if (mode == "vlc") "vlc" else "exo").apply()
+        }
+
+        @JavascriptInterface
+        fun getLiveEngine(): String =
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("liveEngine", "exo") ?: "exo"
+
+        /** Ist VLC in dieser Version eingebaut? */
+        @JavascriptInterface
+        fun hasVlc(): Boolean = ::vlc.isInitialized && vlc.available
+
         @JavascriptInterface
         fun getBuffer(): String =
             getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("buffer", "normal") ?: "normal"
@@ -1629,8 +1672,22 @@ class MainActivity : Activity() {
                     .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                     .setPreferredAudioLanguages(*audioLangs.toTypedArray())
                     .build()
-                placeVideo(x, y, w, h)
                 currentIsLive = url.contains("/live/")
+                currentUrl = url
+                // Live TV mit VLC? (Einstellungen → Player Live TV)
+                val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
+                useVlc = currentIsLive && vlc.available && prefs.getString("liveEngine", "exo") == "vlc"
+                if (useVlc) {
+                    player.stop()
+                    player.clearMediaItems()
+                    playerView.visibility = View.GONE
+                    placeView(vlc.view(root), x, y, w, h)
+                    vlc.open(url, true, prefs.getString("buffer", "normal") ?: "normal")
+                    updateCache()
+                    return@post
+                }
+                vlc.stop()
+                placeVideo(x, y, w, h)
                 player.setPlaybackSpeed(1f)
                 player.setMediaItem(MediaItem.fromUri(url))
                 player.prepare()
@@ -1641,7 +1698,7 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun setRect(x: Double, y: Double, w: Double, h: Double) {
-            handler.post { placeVideo(x, y, w, h) }
+            handler.post { if (useVlc) placeView(vlc.view(root), x, y, w, h) else placeVideo(x, y, w, h) }
         }
 
         @JavascriptInterface
@@ -1650,6 +1707,9 @@ class MainActivity : Activity() {
                 player.stop()
                 player.clearMediaItems()
                 playerView.visibility = View.GONE
+                vlc.stop()
+                useVlc = false
+                currentUrl = ""
                 updateCache()
             }
         }
@@ -1657,7 +1717,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun toggle() {
             handler.post {
-                player.playWhenReady = !player.playWhenReady
+                if (useVlc) vlc.toggle() else player.playWhenReady = !player.playWhenReady
                 updateCache()
             }
         }
@@ -1675,6 +1735,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun setResize(mode: String) {
             handler.post {
+                vlc.setResize(mode)
                 playerView.resizeMode = when (mode) {
                     "zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
@@ -1687,6 +1748,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun seekTo(seconds: Double) {
             handler.post {
+                if (useVlc) { vlc.seekTo(seconds); return@post }
                 if (!player.isCurrentMediaItemLive || player.isCurrentMediaItemSeekable) {
                     player.seekTo((seconds * 1000).toLong().coerceAtLeast(0))
                 }
@@ -1696,6 +1758,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun seekBy(seconds: Double) {
             handler.post {
+                if (useVlc) { vlc.seekBy(seconds); return@post }
                 if (!player.isCurrentMediaItemLive || player.isCurrentMediaItemSeekable) {
                     val target = (player.currentPosition + (seconds * 1000).toLong()).coerceAtLeast(0)
                     player.seekTo(target)
@@ -1706,6 +1769,7 @@ class MainActivity : Activity() {
         /** Nächste Tonspur. Rückgabe: Name, "=Name" bei nur einer Spur, "" wenn keine */
         @JavascriptInterface
         fun nextAudio(): String = onMain {
+            if (useVlc) return@onMain vlc.nextAudio()
             val list = groups(C.TRACK_TYPE_AUDIO)
             when {
                 list.isEmpty() -> ""
@@ -1722,6 +1786,7 @@ class MainActivity : Activity() {
         /** Untertitel durchschalten: Aus → 1 → 2 → … → Aus. Rückgabe: Name, "Aus" oder "" */
         @JavascriptInterface
         fun nextSubtitle(): String = onMain {
+            if (useVlc) return@onMain vlc.nextSubtitle()
             val list = groups(C.TRACK_TYPE_TEXT)
             if (list.isEmpty()) return@onMain ""
             subtitleIndex++
@@ -1740,6 +1805,7 @@ class MainActivity : Activity() {
         /** Alle Ton- bzw. Untertitelspuren als JSON-Liste: [{"i":0,"name":"Deutsch","detail":"5.1","selected":true}] */
         @JavascriptInterface
         fun tracks(kind: String): String = onMain {
+            if (useVlc) return@onMain vlc.tracks(kind)
             val type = if (kind == "text") C.TRACK_TYPE_TEXT else C.TRACK_TYPE_AUDIO
             val out = JSONArray()
             groups(type).forEachIndexed { i, g ->
@@ -1757,6 +1823,7 @@ class MainActivity : Activity() {
         /** Spur auswählen. Untertitel mit index -1 = aus */
         @JavascriptInterface
         fun selectTrack(kind: String, index: Int): Boolean = onMain {
+            if (useVlc) return@onMain vlc.selectTrack(kind, index)
             val type = if (kind == "text") C.TRACK_TYPE_TEXT else C.TRACK_TYPE_AUDIO
             if (type == C.TRACK_TYPE_TEXT && index < 0) {
                 subtitleIndex = -1
@@ -1783,6 +1850,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun applyPrefs(audio: String, subtitle: String) {
             handler.postDelayed({
+                if (useVlc) return@postDelayed
                 if (audio.isNotBlank()) {
                     groups(C.TRACK_TYPE_AUDIO).firstOrNull { trackName(it.getTrackFormat(0), "") == audio }?.let { select(it) }
                 }

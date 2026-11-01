@@ -66,6 +66,34 @@ fi
 
 JAVA_DIR="$OUT/app/src/main/java/tv/imperum/app"
 
+# VLC (libVLC) als zweiter Player für Live TV – neueste stabile 3.x-Version von Maven Central.
+# Nicht zu finden (oder VLC=0): Ersatzdatei, die App baut trotzdem (dann ohne VLC-Auswahl).
+VLCBASE=https://repo1.maven.org/maven2/org/videolan/android/libvlc-all
+VLCV=""
+if [ "${VLC:-1}" != "0" ]; then
+    VERS=$(curl -fsSL --max-time 20 "$VLCBASE/maven-metadata.xml" 2>/dev/null | grep -o "<version>3\.[0-9]*\.[0-9]*</version>" | sed 's/<[^>]*>//g' | sort -t. -k1,1n -k2,2n -k3,3n || true)
+    echo "libVLC-Versionen: $(echo $VERS | tr '\n' ' ')"
+    # 3.6.x bevorzugt (lange erprobt), sonst die neueste 3.x
+    VLCV=$(echo "$VERS" | grep '^3\.6\.' | tail -1)
+    [ -z "$VLCV" ] && VLCV=$(echo "$VERS" | tail -1)
+fi
+if [ -n "$VLCV" ] && curl -fsSL --max-time 20 "$VLCBASE/$VLCV/libvlc-all-$VLCV.pom" -o /tmp/libvlc.pom 2>/dev/null; then
+    KV=$(grep -A2 "<artifactId>kotlin-stdlib" /tmp/libvlc.pom | grep -o "<version>[^<]*" | sed 's/<version>//' | head -1)
+    echo "libVLC $VLCV (Kotlin-Bibliothek ${KV:-keine})"
+    case "$KV" in
+        2.2*|2.3*|2.4*|3.*)
+            # Neuere Kotlin-Bibliothek als unser Compiler: die eigene behalten
+            sed -i "s|// VLC_PLAYER.*|implementation(\"org.videolan.android:libvlc-all:$VLCV\") { exclude(group = \"org.jetbrains.kotlin\") }|" "$OUT/app/build.gradle.kts" ;;
+        *)
+            sed -i "s|// VLC_PLAYER.*|implementation(\"org.videolan.android:libvlc-all:$VLCV\")|" "$OUT/app/build.gradle.kts" ;;
+    esac
+    cp VlcEngine.kt "$JAVA_DIR/VlcEngine.kt"
+    echo "VLC $VLCV eingebunden"
+else
+    cp VlcStub.kt "$JAVA_DIR/VlcEngine.kt"
+    echo "Build ohne VLC"
+fi
+
 # OpenVPN (eigene .ovpn-Datei, Verbinden/Trennen in der App).
 # Die Bibliothek wird aus ihrem Quellcode mitgebaut. Klappt das nicht, baut der Workflow mit OPENVPN=0 ohne OpenVPN.
 OVPN_REPO=https://github.com/pia-foss/mobile-android-openvpn-tunnel

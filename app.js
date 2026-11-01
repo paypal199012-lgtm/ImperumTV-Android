@@ -7422,6 +7422,22 @@
             v.textContent = Settings.liveExt.toUpperCase();
             toast(Settings.liveExt === 'ts' ? 'Live-Sender laufen jetzt als TS (meist am stabilsten)' : 'Live-Sender laufen jetzt als HLS (M3U8)');
         });
+        if (AB && AB.hasVlc && AB.getLiveEngine && AB.setLiveEngine && (function () { try { return AB.hasVlc(); } catch (e) { return false; } })()) {
+            var engName = function (m) { return m === 'vlc' ? 'VLC' : 'ImperumTV'; };
+            var engGet = function () { try { return AB.getLiveEngine() === 'vlc' ? 'vlc' : 'exo'; } catch (e) { return 'exo'; } };
+            row('engine', 'play', 'Player Live TV', engName(engGet()), function (v) {
+                function pick(m) {
+                    try { AB.setLiveEngine(m); } catch (e) { /* egal */ }
+                    v.textContent = engName(m);
+                    toast('Live TV läuft ab dem nächsten Senderwechsel mit ' + engName(m), 4000);
+                }
+                Modal.open('Player Live TV', 'Mit welchem Player sollen Live-Sender laufen?\nRuckelt oder hängt ein Sender, probiere den anderen aus. Filme & Serien sind davon nicht betroffen.', [
+                    { label: 'ImperumTV (Standard)', primary: engGet() === 'exo', action: function () { pick('exo'); } },
+                    { label: 'VLC', primary: engGet() === 'vlc', action: function () { pick('vlc'); } },
+                    { label: 'Abbrechen' }
+                ]);
+            });
+        }
         if (Buffer.available()) {
             row('buffer', 'up', 'Puffer', Buffer.label(Buffer.get()), function (v) {
                 Modal.open('Puffer', 'Wie viel Vorrat die App lädt, bevor das Bild startet.\nKlein: Sender starten schneller, bei schwachem WLAN eher Ruckler.\n' +
@@ -8284,8 +8300,11 @@
     PlayerScreen.prototype.checkStall = function () {
         // Hängt das Bild länger als 15 Sekunden, Sender neu laden (max. 2 Mal)
         if (Nav.top() !== this || !Player.isPlaying()) { this.lastProgress = Date.now(); return; }
-        if (Date.now() - this.lastProgress > 15000 && this.retries < 2) {
+        // Lief der Sender nach dem letzten Neuladen wieder 90 s sauber: neue Hänger dürfen wieder repariert werden
+        if (this.retries && Date.now() - (this.retryAt || 0) > 90000 && Date.now() - this.lastProgress < 5000) this.retries = 0;
+        if (Date.now() - this.lastProgress > 15000 && this.retries < 3) {
             this.retries++;
+            this.retryAt = Date.now();
             toast('Sender hängt – wird neu geladen …');
             this.start();
         }
@@ -8402,9 +8421,13 @@
             this.showOverlay();
             return;
         }
-        if (this.kind === 'live' && this.retries < 1) {
+        // Live: Verbindung weg (Netz, Anbieter-Server kurz überlastet …): bis zu 3× nach kurzer Pause neu verbinden
+        if (this.kind === 'live' && this.retries < 3) {
             this.retries++;
-            this.start();
+            this.retryAt = Date.now();
+            var me = this, at = this.index;
+            if (this.retries > 1) toast('Verbindung zum Sender unterbrochen – neuer Versuch …', 3000);
+            setTimeout(function () { if (Nav.top() === me && me.index === at) me.start(); }, this.retries > 1 ? 2500 : 300);
             return;
         }
         toast('Wiedergabe fehlgeschlagen' + (msg ? ' (' + msg + ')' : '') + '. Versuche es erneut oder wähle etwas anderes.', 7000);
