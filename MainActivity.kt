@@ -342,6 +342,9 @@ class MainActivity : Activity() {
             }
             if (tell) getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putFloat("afrLast", want).apply()
             if (Math.abs(cur.refreshRate - want) < 0.6f) return
+            // Läuft der Fernseher schon mit einem glatten Vielfachen (z. B. 120 Hz bei 24 Bildern, 100 Hz bei 50): nicht umstellen
+            val ratio = cur.refreshRate / want
+            if (ratio > 1.5f && Math.abs(ratio - Math.round(ratio)) < 0.02f) return
             var best: android.view.Display.Mode? = null
             for (m in disp.supportedModes) {
                 if (m.physicalWidth != cur.physicalWidth || m.physicalHeight != cur.physicalHeight) continue
