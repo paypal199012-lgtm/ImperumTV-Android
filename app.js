@@ -1906,11 +1906,13 @@
             try { if (AB && AB.getLiveEngine && AB.getLiveEngine() === 'vlc') eng = 'VLC'; } catch (e) { /* egal */ }
             if (/^VLC/.test(what || '')) eng = 'VLC';
             try { if (AB && AB.getBuffer) buf = AB.getBuffer(); } catch (e2) { /* egal */ }
+            var tn = '';
+            try { if (AB && AB.getTunnel) tn = { auto: 'direkt (automatisch)', off: 'normal (aus)', broken: 'normal (Gerät kann es nicht)' }[AB.getTunnel()] || ''; } catch (e4) { /* egal */ }
             try { if (AB && AB.netInfo) kbps = (JSON.parse(AB.netInfo()).kbps || 0); } catch (e3) { /* egal */ }
             var mins = since ? Math.round((now - since) / 60000) : -1;
             this.send('haenger', (item.type === 'live' ? 'Sender: ' : 'Titel: ') + (item.name || '?') +
                 '\nWas: ' + (what || 'Bild hing') +
-                '\nPlayer: ' + eng + (buf ? ' · Puffer: ' + buf : '') +
+                '\nPlayer: ' + eng + (buf ? ' · Puffer: ' + buf : '') + (tn && eng !== 'VLC' ? ' · Bildausgabe: ' + tn : '') +
                 '\nFormat: ' + (item.type === 'live' ? Settings.liveExt : (item.ext || '?')) +
                 (kbps ? '\nDatenrate: ' + (kbps / 1000).toFixed(1) + ' Mbit/s' : '') +
                 (mins >= 0 ? '\nLief seit: ' + (mins < 1 ? 'unter 1 Minute' : mins + ' Min.') : '') +

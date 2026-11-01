@@ -156,6 +156,8 @@ class MainActivity : Activity() {
     private var audioAtReady = -1
     private var firstFrame = false
     private var tunnelChecked = false
+    /** Hänger mit direkter Bildausgabe seit App-Start */
+    private var tunnelFreezes = 0
 
     private fun tunnelPref(): String =
         getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("tunnel", "auto") ?: "auto"
@@ -238,12 +240,28 @@ class MainActivity : Activity() {
             frozenSince = now
             lastFixAt = now
             lastFrames = -1
+            // Hing das Bild mit direkter Bildausgabe: diesen Sender ohne sie neu öffnen.
+            // Passiert das ein zweites Mal (seit App-Start), bleibt sie auf diesem Gerät aus (Einstellungen: „Noch einmal versuchen“).
+            if (tunnelOn) {
+                tunnelFreezes++
+                tunnelOffNow = true
+                applyTunnel(false)
+                if (tunnelFreezes >= 2) {
+                    getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putBoolean("tunnelBroken", true).apply()
+                    emit("stall", "Bild stand still mit direkter Bildausgabe (2. Mal) – direkte Bildausgabe auf diesem Gerät abgeschaltet")
+                    emit("notice", "Bild hing – direkte Bildausgabe wurde auf diesem Gerät abgeschaltet.")
+                } else {
+                    emit("stall", "Bild stand still mit direkter Bildausgabe – Sender ohne sie neu geöffnet")
+                }
+            } else {
+                emit("stall", "Bild stand still (normale Bildausgabe) – Sender automatisch neu geöffnet")
+            }
             // Wie beim Umschalten: Sender ganz neu öffnen (nur Nachladen half beim zweiten Hänger oft nicht)
             player.stop()
             player.setMediaItem(MediaItem.fromUri(currentUrl))
             player.prepare()
             player.playWhenReady = true
-            emit("notice", "Bild hing – Sender wird neu geladen …")
+            if (!(tunnelOn && tunnelFreezes >= 2)) emit("notice", "Bild hing – Sender wird neu geladen …")
         }
     }
 
