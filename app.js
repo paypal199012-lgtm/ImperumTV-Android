@@ -6308,6 +6308,22 @@
     // =====================================================================
 
     var HALF_HOUR = 30 * 60 * 1000;
+    /** Doppelte / überlappende Sendungen entfernen (manche Anbieter liefern zwei Einträge für dieselbe Zeit → Text übereinander) */
+    function cleanEpg(list) {
+        var src = (list || []).filter(function (e) { return e && e.start && e.end > e.start; }).slice();
+        src.sort(function (a, b) { return a.start - b.start || b.end - a.end; });
+        var out = [], lastEnd = 0;
+        for (var i = 0; i < src.length; i++) {
+            var e = src[i];
+            if (e.start >= lastEnd - 60000) { out.push(e); lastEnd = e.end; continue; }
+            // Beginnt mitten in der vorigen Sendung: nur behalten, wenn deutlich länger läuft – dann ab Ende der vorigen
+            if (e.end > lastEnd + 10 * 60000) {
+                out.push({ title: e.title, desc: e.desc, start: lastEnd, end: e.end });
+                lastEnd = e.end;
+            }
+        }
+        return out;
+    }
     function floorHalfHour(ms) { return Math.floor(ms / HALF_HOUR) * HALF_HOUR; }
 
     /** Erinnerungen: kurz vor Beginn einer Sendung Bescheid geben (solange die App läuft) */
@@ -6358,10 +6374,21 @@
     EpgGridScreen.prototype.channels = function () {
         var self = this, list = this.filter().filter(function (ch) { return !NameTidy.isSep(ch.name); });
         if (!this.onlyProg) return list;
-        var local = Epg.valid && Epg.native(), map = local ? Epg.nowFull(list) : null;
+        var local = Epg.valid && Epg.native(), map = null;
+        if (local) {
+            // Nur nachsehen, ob es für den Sender Programm gibt (schnell, auch bei tausenden Sendern)
+            var key = this.catIndex + '|' + list.length;
+            if (this._hasKey === key && this._has) map = this._has;
+            else if (AB.epgHas) {
+                var ids = {}; list.forEach(function (c) { if (c.epg) ids[c.epg] = 1; });
+                map = {};
+                try { JSON.parse(AB.epgHas(JSON.stringify(Object.keys(ids))) || '[]').forEach(function (id) { map[id] = 1; }); } catch (e) { map = null; }
+                this._has = map; this._hasKey = key;
+            }
+        }
         return list.filter(function (ch) {
             if (!ch.epg) return false;
-            if (local) return !!map[ch.epg];
+            if (map) return !!map[ch.epg];
             var l = self.epg[ch.id];
             return !l || l.length > 0;
         });
@@ -6432,6 +6459,7 @@
             var cls = 'eg-chip' + (it.toggle ? ' tgl' + (self.onlyProg ? ' on' : '') : it.cat === self.catIndex ? ' active' : '') +
                 (self.col === 'cats' && i === self.chip ? ' focus' : '');
             var n = h('div', cls, it.label);
+            n.onclick = function (ev) { if (ev) ev.stopPropagation(); self.col = 'cats'; self.chip = i; self.chooseChip(); };
             strip.appendChild(n);
             nodes.push(n);
         });
@@ -6500,7 +6528,7 @@
         this.loading[ch.id] = true;
         EpgQueue.add(function () {
             return Data.epgFull(ch.id).then(function (list) {
-                self.epg[ch.id] = list;
+                self.epg[ch.id] = cleanEpg(list);
                 if (Nav.top() === self && !Modal.node) self.draw();
             });
         });
@@ -6536,6 +6564,7 @@
 
             var row = h('div', 'eg-row');
             row.style.top = (r * this.ROW_H) + 'px';
+            var rowIdx = idx;
             var nt = NameTidy.split(ch.name, ch.cat);
             var cn = h('div', 'eg-chan' + (idx === this.chIndex ? ' sel' + (this.col === 'prog' ? ' cur' : '') : ''));
             cn.appendChild(h('div', 'n', String(ch.num)));
@@ -6544,6 +6573,7 @@
             cn.appendChild(lg);
             cn.appendChild(h('div', 'nm', nt.name + (Favs.has('live', ch.id) ? ' ★' : '')));
             if (nt.tags.length) cn.appendChild(h('span', 'ch-tag' + (/^(HD|FHD|UHD|4K|8K|HDR)$/.test(nt.tags[0]) ? ' q' : ''), nt.tags[0]));
+            cn.onclick = this.clickHandler(idx, null);
             row.appendChild(cn);
 
             this.programs(ch).forEach(function (p) {
@@ -6563,6 +6593,7 @@
                     var pb = h('div', 'eg-pb'); pb.style.width = Math.round((now - a) / Math.max(1, b - a) * 100) + '%'; block.appendChild(pb);
                 }
                 if (mark) block.classList.add('rec');
+                block.onclick = self.clickHandler(rowIdx, p);
                 row.appendChild(block);
             });
             rows.appendChild(row);
@@ -6630,7 +6661,9 @@
         if (running) acts.appendChild(h('span', 'eg-act y', '▶ Ansehen'));
         if (Rec.available() && p && !p.placeholder) acts.appendChild(h('span', 'eg-act', '● Aufnehmen'));
         if (p && !p.placeholder && p.start > now) acts.appendChild(h('span', 'eg-act' + (running ? '' : ' y'), '🔔 Erinnern'));
-        acts.appendChild(h('span', 'eg-act-hint', 'mit OK'));
+        acts.appendChild(h('span', 'eg-act-hint', 'mit OK oder Klick'));
+        var self2 = this;
+        acts.onclick = function () { var c2 = self2.list[self2.chIndex]; if (c2) self2.choose(c2, self2.focusedProgram()); };
         box.appendChild(acts);
     };
     function durText(ms) {
@@ -6667,6 +6700,23 @@
             var url = Api.liveUrl(ch.id), rect = stageRect(self.previewBox);
             if (!Player.keep(url, rect)) Player.open(url, rect);
         }, 900);
+    };
+
+    /** Klick mit Maus oder Finger: erst markieren, zweiter Klick öffnet */
+    EpgGridScreen.prototype.clickHandler = function (idx, p) {
+        var self = this;
+        return function (ev) {
+            if (ev) ev.stopPropagation();
+            var ch = self.list[idx];
+            if (!ch) return;
+            var same = self.col === 'prog' && self.chIndex === idx && (!p || self.focusedProgram() === p);
+            self.col = 'prog';
+            self.chIndex = idx;
+            if (p && !p.placeholder) self.cursor = Math.max(p.start, self.winStart) + 1000;
+            else if (!p || p.placeholder) self.cursor = Math.max(self.cursor, Date.now());
+            if (same) { self.choose(ch, self.focusedProgram()); return; }
+            self.draw();
+        };
     };
 
     EpgGridScreen.prototype.moveTime = function (delta) {

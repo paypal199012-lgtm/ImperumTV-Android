@@ -1466,3 +1466,4 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 /* Breite Handys (Oberfläche breiter als 1920): Live TV wie Musterbild B, Vorschau rechts */
 body.wide .live-b .col-list { width: auto; right: 940px; }
 body.wide .live-b .col-info { left: auto; right: 40px; width: 880px; }
+.eg3 .eg-chan, .eg3 .eg-prog, .eg-chip, .eg-acts { cursor: pointer; }

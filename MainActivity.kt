@@ -1465,6 +1465,18 @@ class MainActivity : Activity() {
             return out.toString()
         }
 
+        /** Welche Sender haben überhaupt Programm? ids = JSON-Liste, Antwort = JSON-Liste der vorhandenen (schnell, ohne Auspacken) */
+        @JavascriptInterface
+        fun epgHas(ids: String): String {
+            val out = JSONArray()
+            try {
+                val a = JSONArray(ids)
+                val map = epgMap
+                for (i in 0 until a.length()) { val id = a.getString(i); if (map.containsKey(id)) out.put(id) }
+            } catch (e: Throwable) { }
+            return out.toString()
+        }
+
         /** Wie epgNow, aber mit Beginn und Ende: {"epgId":["Titel",Start-ms,Ende-ms],…} (für den Fortschrittsbalken) */
         @JavascriptInterface
         fun epgNowFull(ids: String): String {
