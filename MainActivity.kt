@@ -244,8 +244,8 @@ class MainActivity : Activity() {
             if (freezeFixes > 0 && now - lastFixAt > 90_000) freezeFixes = 0
             return
         }
-        // Bild steht seit 3 s (Ton evtl. auch): der Oberfläche melden – sie schaltet auf einen Ersatzsender, falls es einen gibt
-        if (now - frozenSince > 3_000 && !frozenSent && lastFrames >= 0) { frozenSent = true; emit("frozen", null) }
+        // Bild steht seit 5 s (Ton evtl. auch): der Oberfläche melden – sie schaltet auf einen Ersatzsender, falls es einen gibt
+        if (now - frozenSince > 5_000 && !frozenSent && lastFrames >= 0) { frozenSent = true; emit("frozen", null) }
         if (now - frozenSince > 8_000 && freezeFixes < 4 && currentUrl.isNotEmpty()) {
             freezeFixes++
             frozenSince = now
