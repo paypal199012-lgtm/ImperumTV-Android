@@ -1502,3 +1502,8 @@ body.wide .live-b .col-info { left: auto; right: 40px; }
 /* Einstellungen: untere Kacheln mit goldenem Rahmen */
 .set6-act { border: 2px solid rgba(232,201,138,.6); }
 .set6-act.focused { border-color: #f4dc9e; }
+/* Live TV: Rahmen der markierten Kategorie nicht mehr am Spaltenrand abschneiden */
+.live-b .col-cats { left: 20px; width: 400px; }
+.live-b .col-cats .scroll { padding: 0 10px; box-sizing: border-box; }
+.live-b .cat { margin: 5px 0; }
+.live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e, 0 0 14px rgba(244,220,158,.35) !important; }
