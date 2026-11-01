@@ -869,6 +869,13 @@
      * weniger (Uhr ohne Sekunden, Programm-Laden wartet, weniger Meldungen vom Player) – mehr Leistung fürs Bild.
      * Jede Taste bzw. die eingeblendete Leiste weckt alles wieder auf.
      */
+    /** Was hat die App zuletzt Großes gemacht? (für den Bericht „Taste verspätet“) */
+    var Busy = {
+        l: '', at: 0,
+        mark: function (label) { this.l = label; this.at = Date.now(); },
+        text: function () { return this.l ? this.l + ' (vor ' + Math.max(0, Date.now() - this.at) + ' ms)' : '-'; }
+    };
+
     var Quiet = {
         on: false, pendingEpg: false,
         set: function (on) {
@@ -2198,6 +2205,7 @@
 
     /** Rohliste des Anbieters in kleine Einträge umrechnen (läuft im Worker oder als Notlösung hier) */
     function mapList(kind, list, cats) {
+        try { Busy.mark('Liste umwandeln (' + kind + ')'); } catch (e) { /* im Worker gibt es Busy nicht */ }
         var out = [], i, s, name, item;
         for (i = 0; i < list.length; i++) {
             s = list[i];
@@ -2814,6 +2822,7 @@
                 return new Promise(function (resolve) {
                     setTimeout(function () {
                         try {
+                            Busy.mark('Listen laden');
                             var text = AB.cacheLoad('lists');
                             var v = text ? JSON.parse(text) : null;
                             resolve(v && v.key === k ? self.build(v) : null);
@@ -2857,11 +2866,18 @@
                 });
             });
         },
-        /** Etwas später speichern, wenn gerade nichts los ist */
+        /**
+         * Etwas später speichern, wenn gerade nichts los ist: Das Speichern großer Listen blockiert die Oberfläche
+         * auf dem Fire TV Stick bis zu einer Sekunde. Deshalb nur, wenn 5 s keine Taste gedrückt wurde und kein Vollbild läuft.
+         */
         saveSoon: function (acc) {
             var self = this;
             clearTimeout(this.timer);
-            this.timer = setTimeout(function () { self.save(acc); }, 8000);
+            this.timer = setTimeout(function wait() {
+                if (Date.now() - (Nav.userAt || 0) < 5000 || Quiet.on) { self.timer = setTimeout(wait, 3000); return; }
+                Busy.mark('Listen speichern');
+                self.save(acc);
+            }, 8000);
         },
         clear: function () {
             if (this.native()) { try { AB.cacheClear('lists'); } catch (e) { /* egal */ } return Promise.resolve(); }
@@ -3547,6 +3563,7 @@
         top: function () { return this.stack[this.stack.length - 1]; },
 
         show: function (screen, restoring) {
+            Busy.mark('Bildschirm zeichnen: ' + ((screen && screen.constructor && screen.constructor.name) || '?'));
             screen._dom = null;
             var app = $('#app');
             app.innerHTML = '';
@@ -6365,6 +6382,7 @@
         function step(first) {
             if (self.evSeq !== seq || (!first && Nav.top() !== self)) return;
             var t0 = Date.now();
+            Busy.mark('Fußball: Sender suchen');
             while (at < todo.length && Date.now() - t0 < 30) {
                 var m = todo[at++];
                 var ev = Football.eventChannels(m).filter(function (x) { return x.sc >= 20; });
@@ -9177,7 +9195,7 @@
                     window.__lagReported = true;
                     try { Report.send('verzögerung', 'Taste verspätet: ' + (wait + work) + ' ms (Warten ' + wait + ' ms, Verarbeiten ' + work + ' ms)\n' +
                         'Vorher keine Eingabe: ' + Math.round((idleMs || 0) / 1000) + ' s\nBildschirm: ' + ((Nav.top() && Nav.top().constructor && Nav.top().constructor.name) || '?') +
-                        '\nElemente: ' + document.getElementsByTagName('*').length); } catch (e) { /* egal */ }
+                        '\nElemente: ' + document.getElementsByTagName('*').length + '\nZuletzt: ' + Busy.text()); } catch (e) { /* egal */ }
                 }
             }
         };
