@@ -304,13 +304,15 @@ class MainActivity : Activity() {
     private val catchupTick = object : Runnable {
         override fun run() {
             try {
-                val on = getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getBoolean("catchup", true)
+                val on = getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getBoolean("catchup", false)
                 val p = player
                 if (on && currentIsLive && p.isPlaying) {
                     val ahead = p.totalBufferedDuration
                     val speed = p.playbackParameters.speed
-                    if (ahead > 4_000 && speed < 1.04f) p.setPlaybackSpeed(1.05f)
-                    else if (ahead < 1_500 && speed > 1.01f) p.setPlaybackSpeed(1f)
+                    // Nur bei deutlichem Rückstand (über 15 s Vorrat) und sanft (1,03-fach); schon bei 8 s wieder normal,
+                    // damit nie der ganze Vorrat aufgebraucht wird (sonst Ruckler)
+                    if (ahead > 15_000 && speed < 1.02f) p.setPlaybackSpeed(1.03f)
+                    else if (ahead < 8_000 && speed > 1.01f) p.setPlaybackSpeed(1f)
                 } else if (p.playbackParameters.speed > 1.01f && (!on || !currentIsLive)) {
                     p.setPlaybackSpeed(1f)
                 }
@@ -1548,7 +1550,7 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun getCatchup(): Boolean =
-            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getBoolean("catchup", true)
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getBoolean("catchup", false)
 
         /** Verbindungsanzeige: gemessene Datenrate in kbit/s */
         @JavascriptInterface
