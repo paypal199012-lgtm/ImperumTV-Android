@@ -7884,7 +7884,7 @@
         if (show) {
             var rate = NetQ.rate();
             this.nqBadge.className = 'nq-' + lv;
-            this.nqBadge.innerHTML = NetQ.bars(lv) + '<span>' + NetQ.text(lv) + '</span>' + (rate ? '<em>· ' + rate + '</em>' : '');
+            this.nqBadge.innerHTML = NetQ.bars(lv) + '<span>' + NetQ.text(lv) + '</span>' + (rate ? '<em>· Datenrate ' + rate + '</em>' : '');
         } else this.nqBadge.className = 'hidden';
         if (this.overlay) this.fillNetBox(lv);
         if (this.overlay && nqm === 'problems' && !this.nqBox !== (lv === 'good' || lv === 'wait')) this.renderOverlay();   // Kasten ein-/ausblenden
@@ -8011,6 +8011,7 @@
         this.ui.classList.add('player-ui-visible');
         document.body.classList.add('osd');
         this.renderOverlay();
+        this.netTick();                                 // Verbindungsanzeige gleichzeitig mit der Leiste
         clearTimeout(this.hideTimer);
         this.hideTimer = setTimeout(function () { self.hideOverlay(); }, ms || 5000);
     };
@@ -8026,6 +8027,8 @@
         this.ui.innerHTML = '';
         this.ui.classList.remove('player-ui-visible');
         document.body.classList.remove('osd');
+        this.nqBox = null;
+        this.netTick();                                 // Verbindungsanzeige gleichzeitig mit der Leiste ausblenden
         Focus.cur = null;
     };
     PlayerScreen.prototype.step = function (delta) {
