@@ -1474,3 +1474,6 @@ body.wide .live-b .col-info { left: auto; right: 40px; width: 880px; }
 /* Live TV: keine Sendernummern vor dem Logo */
 .live-b .row.lv .num { display: none; }
 .live-b .row.lv .logo { margin-left: 4px; }
+
+/* Überall goldener Hintergrund statt dunkler Flächen (Favoriten, Weiter ansehen, Suche …) */
+.col-grid, .col-grid .scroll, .col-cats, .col-cats .scroll { background: transparent; border: none; }

@@ -761,7 +761,9 @@
         // Puffer: 1 Reihe nach oben, 3 nach unten (dort lädt man meist hin – Bilder sind dann schon da)
         var COLW = 226, ROWH = 400, PADT = 10, PADL = 24, PADB = 40, BUF_UP = 1, BUF_DOWN = 3;
         grid.classList.add('vgrid');
-        var cols = Math.max(1, Math.floor(((scroll.clientWidth || 1500) - PADL) / COLW));
+        var avail = (scroll.clientWidth || 1500) - PADL - 20;
+        var cols = Math.max(1, Math.floor(avail / COLW));
+        COLW = Math.max(COLW, Math.floor(avail / cols));      // Platz rechts gleichmäßig verteilen (keine leere Spalte)
         var rows = Math.ceil(items.length / cols);
         grid.style.height = (PADT + rows * ROWH + PADB) + 'px';
         var nodes = {}, first = -1, last = -1, queued = false;
