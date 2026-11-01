@@ -3684,6 +3684,12 @@
                 item.lastChild.textContent = name;
             } else {
                 item.textContent = name;
+                // Wie bei Live TV: ☰ vor „Alle“, Punkt vor Kategorien ohne eigenes Zeichen
+                if (search && search.dots) {
+                    var im = /^([★▶✓☰⚑])\s*(.*)$/.exec(name);
+                    if (im && i !== 0) { item.textContent = im[2]; item.insertBefore(h('span', 'cat-dot all', im[1]), item.firstChild); }
+                    else item.insertBefore(h('span', 'cat-dot' + (i === 0 ? ' all' : ''), i === 0 ? '☰' : '•'), item.firstChild);
+                }
             }
             if (counts && counts[i] !== undefined && counts[i] !== null) {
                 var label = h('span', 'cat-name');
@@ -5234,7 +5240,7 @@
             Nav.show(self);
             var first = $('.poster');
             if (first) Focus.set(first);
-        }, { query: this.query, kind: this.favType(), onClick: function () { self.openSearch(); }, counts: this.catCounts(),
+        }, { query: this.query, kind: this.favType(), dots: true, onClick: function () { self.openSearch(); }, counts: this.catCounts(),
              sort: { label: 'Sortieren: ' + this.sortName(), onClick: function () { self.sortMenu(); } } }));
 
         var gridCol = h('div', 'col col-grid');

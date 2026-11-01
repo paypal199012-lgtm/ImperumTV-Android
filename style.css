@@ -1388,3 +1388,5 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 
 /* ---------- Filme/Serien R1: goldener Hintergrund durchgehend, keine schwarzen Flächen ---------- */
 .vod-r1 .col-cats, .vod-r1 .col-grid, .vod-r1 .col-grid .scroll, .vod-r1 .col-cats .scroll { background: transparent; border: none; }
+.cat-dot { display: inline-block; width: 22px; margin-right: 14px; color: #6f6b64; text-align: center; }
+.cat-dot.all { color: inherit; }
