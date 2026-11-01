@@ -8475,6 +8475,7 @@
         var self = this;
         this.rdy = false;                  // erst nach dem Start zählen kurze Hänger (nicht das Laden beim Umschalten)
         this.bufAt = 0;
+        clearTimeout(this.longT);
         this.lastTime = -1;
         this.lastProgress = Date.now();
         $('#subtitle').classList.add('hidden');
@@ -8493,11 +8494,22 @@
                 self.buffering = b;
                 // Kurzer Hänger (Bild und Ton stehen, lädt nach): ab 2 s mitzählen
                 if (!self.rdy) return;
-                if (b) { if (!self.bufAt) self.bufAt = Date.now(); return; }
+                if (b) {
+                    if (!self.bufAt) self.bufAt = Date.now();
+                    // Hängt es länger als 3 s: gleich beim ersten Mal auf den Ersatzsender
+                    clearTimeout(self.longT);
+                    var at = self.index;
+                    self.longT = setTimeout(function () {
+                        if (Nav.top() === self && self.index === at && self.buffering && self.rdy) self.tryAlt('Sender hing');
+                    }, 3000);
+                    return;
+                }
+                clearTimeout(self.longT);
                 if (self.bufAt && Date.now() - self.bufAt >= 2000) self.noteShort();
                 self.bufAt = 0;
             },
             hiccup: function () { if (self.rdy) self.noteShort(); },
+            frozen: function () { if (self.rdy) self.tryAlt('Bild stand'); },
             time: function (t) {
                 if (Math.abs(t - self.lastTime) > 0.2) { self.lastTime = t; self.lastProgress = Date.now(); }
                 if (self.overlay) self.updateBar();
@@ -9249,6 +9261,7 @@
     PlayerScreen.prototype.hide = function () {
         Quiet.set(false);
         clearTimeout(this.t407);
+        clearTimeout(this.longT);
         this.saveProgress(false);
         this.showPop(null);
         this.popFor = null;

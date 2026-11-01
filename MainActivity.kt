@@ -109,6 +109,8 @@ class MainActivity : Activity() {
     private var frozenSince = 0L
     private var freezeFixes = 0
     private var lastFixAt = 0L
+    /** Für dieses Standbild schon „frozen“ gemeldet */
+    private var frozenSent = false
     /** Adresse des laufenden Senders/Films (für das Neu-Öffnen nach einem Hänger) */
     private var currentUrl = ""
     private var audioWarned = false
@@ -235,12 +237,15 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         if (n != lastFrames) {
             // Bild stand kurz (2,5–8 s) und läuft von selbst weiter: der Oberfläche melden (zählt für den Ersatzsender)
-            if (lastFrames >= 0 && now - frozenSince >= 2_500) emit("hiccup", (now - frozenSince).toInt())
+            if (lastFrames >= 0 && now - frozenSince >= 2_500 && !frozenSent) emit("hiccup", (now - frozenSince).toInt())
+            frozenSent = false
             lastFrames = n; frozenSince = now
             // Lief der Sender nach der letzten Reparatur wieder 90 s sauber: Zähler zurück
             if (freezeFixes > 0 && now - lastFixAt > 90_000) freezeFixes = 0
             return
         }
+        // Bild steht seit 3 s (Ton evtl. auch): der Oberfläche melden – sie schaltet auf einen Ersatzsender, falls es einen gibt
+        if (now - frozenSince > 3_000 && !frozenSent && lastFrames >= 0) { frozenSent = true; emit("frozen", null) }
         if (now - frozenSince > 8_000 && freezeFixes < 4 && currentUrl.isNotEmpty()) {
             freezeFixes++
             frozenSince = now
@@ -1780,6 +1785,7 @@ class MainActivity : Activity() {
                 audioWarned = false
                 lastFrames = -1
                 freezeFixes = 0
+                frozenSent = false
                 frozenSince = System.currentTimeMillis()
                 langPickPending = audioLangs.isNotEmpty()
                 tunnelOffNow = false
