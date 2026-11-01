@@ -1245,11 +1245,11 @@ body.video-mode.osd #clock { display: block; }
 .set6-stat.on .set6-stat-v { color: #7ee08a; }
 .set6-stat.err .set6-stat-v { color: #ff8a80; }
 .set6-stat.focused { background: rgba(217,176,102,.38); border-color: #f4dc9e; }
-.set6-cols { display: flex; margin: 26px -14px 0; align-items: flex-start; }
+.set6-cols { display: flex; margin: 20px -14px 0; align-items: flex-start; }
 .set6-card { flex: 1; min-width: 0; margin: 0 14px; padding: 16px 16px 6px; border-radius: 20px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); box-sizing: border-box; }
-.set6-head { display: flex; align-items: center; font-size: 21px; font-weight: 800; letter-spacing: 3px; color: #d9b066; margin: 2px 0 12px 6px; }
+.set6-head { display: flex; align-items: center; font-size: 21px; font-weight: 800; letter-spacing: 3px; color: #d9b066; margin: 2px 0 10px 6px; }
 .set6-head svg { margin-right: 10px; }
-.set6 .set-row { height: 66px; padding: 0 20px; margin-bottom: 10px; box-sizing: border-box; border-radius: 12px; background: rgba(0,0,0,.35); border: 2px solid rgba(255,255,255,.08); }
+.set6 .set-row { height: 58px; padding: 0 20px; margin-bottom: 8px; box-sizing: border-box; border-radius: 12px; background: rgba(0,0,0,.35); border: 2px solid rgba(255,255,255,.08); }
 .set6 .set-label { display: flex; align-items: center; font-size: 25px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .set6 .set-label svg { flex: none; margin-right: 14px; color: #e8c98a; }
 .set6 .set-value { font-size: 21px; white-space: nowrap; margin-left: 16px; color: #d6cfbf; }
