@@ -1589,4 +1589,3 @@ body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 /* Sender-Knöpfe alle auf gleicher Höhe: Platz für „+N“ immer frei halten */
 .fb-f1 .fb-tv { position: relative; padding-right: 58px; box-sizing: border-box; }
 .fb-f1 .fb-more { position: absolute; right: 0; top: 50%; transform: translateY(-50%); margin: 0; }
-.fb-f1 .fb-ch { flex: none; width: 300px; box-sizing: border-box; }
