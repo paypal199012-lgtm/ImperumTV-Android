@@ -6330,8 +6330,11 @@
             if (!list || !list.length) continue;
             var tv = rows[i].querySelector('.fb-tv');
             tv.innerHTML = '';
-            tv.appendChild(h('span', 'fb-ch', '▶ ' + list[0].name));
-            if (list.length > 1) tv.appendChild(h('span', 'fb-more', '+' + (list.length - 1)));
+            // Ein Knopf, immer gleich breit: Sendername links, „+N“ rechts im Knopf
+            var chb = h('span', 'fb-ch');
+            chb.appendChild(h('span', 'fb-chn', '▶ ' + list[0].name));
+            if (list.length > 1) chb.appendChild(h('span', 'fb-more', '+' + (list.length - 1)));
+            tv.appendChild(chb);
         }
     };
     FootballScreen.prototype.open = function (m) {

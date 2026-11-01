@@ -1587,5 +1587,9 @@ body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 .fb-f1 .fb-more { flex: none; margin-left: 8px; background: #2a2723; color: #f4dc9e; font-weight: 800; font-size: 16px; padding: 6px 10px; border-radius: 14px; }
 .fb-f1 .fb-guess { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Sender-Knöpfe alle auf gleicher Höhe: Platz für „+N“ immer frei halten */
-.fb-f1 .fb-tv { position: relative; padding-right: 58px; box-sizing: border-box; }
-.fb-f1 .fb-more { position: absolute; right: 0; top: 50%; transform: translateY(-50%); margin: 0; }
+/* Sender-Knopf: alle gleich breit, „+N“ rechts im Knopf */
+.fb-f1 .fb-ch { display: flex; align-items: center; flex: none; width: 340px; box-sizing: border-box; padding: 8px 8px 8px 16px; }
+.fb-f1 .fb-chn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fb-f1 .fb-ch .fb-more { flex: none; margin-left: 8px; background: #1a1408; color: #f4dc9e; font-size: 15px; padding: 3px 9px; border-radius: 12px; }
+.fb-f1 .fb-guess { width: 340px; text-align: right; }
+.fb-f1 .fb-chn { text-align: left; }
