@@ -1471,3 +1471,6 @@ body.wide .live-b .col-info { left: auto; right: 40px; width: 880px; }
 .live-b .cat.with-n .cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-b .cat .cat-n { font-size: 19px; font-weight: 400; color: #a7a39a; margin-left: 10px; flex: none; }
 .live-b .cat.active .cat-n, .live-b .cat.focused .cat-n { color: #f4dc9e; }
+/* Live TV: keine Sendernummern vor dem Logo */
+.live-b .row.lv .num { display: none; }
+.live-b .row.lv .logo { margin-left: 4px; }
