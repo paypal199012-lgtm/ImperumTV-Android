@@ -1260,3 +1260,7 @@ body.video-mode.osd #clock { display: block; }
 .set6-act .set-tile-l { font-size: 25px; }
 .set6-act .set-tile-v { font-size: 19px; color: #b9b4a9; }
 .set6-act.focused { background: rgba(217,176,102,.38); }
+
+.set6-stat.warn { border-color: #f0c25a; background: rgba(240,194,90,.16); }
+.set6-stat.warn .set6-stat-v { color: #f0c25a; }
+.set6-stat.err { border-color: rgba(255,138,128,.7); }

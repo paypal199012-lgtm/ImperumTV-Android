@@ -877,6 +877,14 @@
         }
     };
 
+    /** Puffer des Android-Players (Fire TV/Android): klein, normal, groß */
+    var Buffer = {
+        available: function () { return !!(AB && AB.setBuffer && AB.getBuffer); },
+        get: function () { try { var m = AB.getBuffer(); return m === 'small' || m === 'large' ? m : 'normal'; } catch (e) { return 'normal'; } },
+        set: function (m) { try { AB.setBuffer(m); } catch (e) { /* egal */ } toast('Puffer: ' + this.label(m)); },
+        label: function (m) { return m === 'small' ? 'Klein · 0,5 s' : m === 'large' ? 'Groß · 4 s' : 'Normal · 1 s'; }
+    };
+
     var Favs = {
         set: null,
         load: function () { this.set = {}; var list = Storage.get('favs', []); for (var i = 0; i < list.length; i++) this.set[list[i]] = true; },
@@ -6546,6 +6554,20 @@
                 oi.state === 'an' ? 'on' : oi.state === 'fehler' ? 'err' : '', function () { vpnDialog(); });
         }
         stat('parstat', 'lock', 'Kinderschutz', Parental.hasPin() ? 'An' : 'Aus', '', parentalOpen);
+        // Abo beim Anbieter: Datum, ab 7 Tagen vorher gelb, abgelaufen rot
+        (function () {
+            var exp = Data.expiry, label = 'Abo', value = 'unbegrenzt', cls = '';
+            if (exp && !isNaN(exp.getTime())) {
+                var days = Math.ceil((exp.getTime() - Date.now()) / 86400000);
+                if (days <= 0) { label = 'Abo'; value = 'abgelaufen'; cls = 'err'; }
+                else if (days <= 7) { label = 'Abo läuft ab'; value = days === 1 ? 'morgen' : 'in ' + days + ' Tagen'; cls = 'warn'; }
+                else { label = 'Abo bis'; value = pad2(exp.getDate()) + '.' + pad2(exp.getMonth() + 1) + '.' + exp.getFullYear(); }
+            }
+            stat('abostat', 'epg', label, value, cls, function () {
+                toast(exp ? 'Dein Abo beim Anbieter läuft bis ' + pad2(exp.getDate()) + '.' + pad2(exp.getMonth() + 1) + '.' + exp.getFullYear() + '. Verlängern kannst du es bei deinem Anbieter.'
+                    : 'Dein Anbieter meldet kein Ablaufdatum.', 5000);
+            });
+        })();
         stat('devstat', 'device', 'Gerät', Device.macText(), 'small', function () { Nav.push(new PlaylistsScreen()); });
         hero.appendChild(stats);
         box.appendChild(hero);
@@ -6577,6 +6599,17 @@
             v.textContent = Settings.liveExt.toUpperCase();
             toast(Settings.liveExt === 'ts' ? 'Live-Sender laufen jetzt als TS (meist am stabilsten)' : 'Live-Sender laufen jetzt als HLS (M3U8)');
         });
+        if (Buffer.available()) {
+            row('buffer', 'up', 'Puffer', Buffer.label(Buffer.get()), function (v) {
+                Modal.open('Puffer', 'Wie viel Vorrat die App lädt, bevor das Bild startet.\nKlein: Sender starten schneller, bei schwachem WLAN eher Ruckler.\n' +
+                    'Groß: Start dauert etwas länger, dafür flüssiger bei schwachem Internet.', [
+                    { label: 'Klein · 0,5 s (schnellster Start)', primary: Buffer.get() === 'small', action: function () { Buffer.set('small'); v.textContent = Buffer.label('small'); } },
+                    { label: 'Normal · 1 s (wie bisher)', primary: Buffer.get() === 'normal', action: function () { Buffer.set('normal'); v.textContent = Buffer.label('normal'); } },
+                    { label: 'Groß · 4 s (gegen Ruckler)', primary: Buffer.get() === 'large', action: function () { Buffer.set('large'); v.textContent = Buffer.label('large'); } },
+                    { label: 'Abbrechen' }
+                ]);
+            });
+        }
         if (VodPlayer.available()) {
             row('vodplayer', 'play', 'Player Filme & Serien', VodPlayer.nameOf(VodPlayer.pref()), function () {
                 VodPlayer.pick(function () { self.focusKey = 'set-vodplayer'; Nav.show(self); });

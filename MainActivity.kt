@@ -201,27 +201,8 @@ class MainActivity : Activity() {
         } catch (e: Throwable) { }
     }
 
-    private fun buildUi() {
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // Handys mit Kamera-Loch: Bild bis an den Rand (die Oberfläche hält selbst Abstand zum Loch)
-        if (Build.VERSION.SDK_INT >= 28) {
-            try {
-                val lp = window.attributes
-                lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                window.attributes = lp
-            } catch (e: Throwable) { }
-        }
-
-        root = FrameLayout(this)
-        root.setBackgroundColor(Color.BLACK)
-
-        // ---------- Video ----------
-        val http = DefaultHttpDataSource.Factory()
-            .setUserAgent("ImperumTV/1.0 (Android)")
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(20_000)
-        httpFactory = http
+    /** Player bauen (beim Start und wenn der Puffer in den Einstellungen geändert wird) */
+    private fun createPlayer(http: DefaultHttpDataSource.Factory): ExoPlayer {
         // Ton, den das Gerät selbst nicht kann (MP2 vieler TV-Sender, Dolby, DTS …): FFmpeg springt ein, falls eingebaut.
         // Bild: klappt der eingebaute Decoder nicht, nimmt der Player den nächsten.
         // Ton immer selbst entschlüsseln und als PCM ausgeben: kein „Durchreichen“ von Dolby an den Fernseher
@@ -243,18 +224,24 @@ class MainActivity : Activity() {
         val extractors = DefaultExtractorsFactory()
         // Schneller Start: schon nach 1 s Video loslegen (Standard 2,5 s), nach einem Hänger nach 2 s (Standard 5 s).
         // Der große Vorrat (bis 50 s) bleibt, damit es danach nicht öfter nachlädt.
+        // Puffer aus den Einstellungen: klein = schnellster Start, groß = weniger Ruckler bei schwachem Internet
+        val (startMs, rebufferMs) = when (getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("buffer", "normal")) {
+            "small" -> Pair(500, 1_500)
+            "large" -> Pair(4_000, 8_000)
+            else -> Pair(1_000, 2_000)
+        }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
                 DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
-                1_000,
-                2_000)
+                startMs,
+                rebufferMs)
             .build()
-        player = ExoPlayer.Builder(this, renderers)
+        val p = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors))
             .setLoadControl(loadControl)
             .build()
-        player.addListener(object : Player.Listener {
+        p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
                     Player.STATE_BUFFERING -> emit("buffer", true)
@@ -297,6 +284,31 @@ class MainActivity : Activity() {
                 emit("error", error.errorCodeName + formatInfo(error))
             }
         })
+        return p
+    }
+
+    private fun buildUi() {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Handys mit Kamera-Loch: Bild bis an den Rand (die Oberfläche hält selbst Abstand zum Loch)
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                val lp = window.attributes
+                lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                window.attributes = lp
+            } catch (e: Throwable) { }
+        }
+
+        root = FrameLayout(this)
+        root.setBackgroundColor(Color.BLACK)
+
+        // ---------- Video ----------
+        val http = DefaultHttpDataSource.Factory()
+            .setUserAgent("ImperumTV/1.0 (Android)")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
+        httpFactory = http
+        player = createPlayer(http)
 
         playerView = PlayerView(this).apply {
             useController = false
@@ -1437,6 +1449,27 @@ class MainActivity : Activity() {
             try { val a = JSONArray(ids); for (i in 0 until a.length()) wanted.add(a.getString(i)) } catch (e: Throwable) { }
             epgDownload(url, account, wanted)
         }
+
+        /** Puffer: "small" | "normal" | "large" – Player wird mit der neuen Einstellung neu gebaut */
+        @JavascriptInterface
+        fun setBuffer(mode: String) {
+            val m = if (mode == "small" || mode == "large") mode else "normal"
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putString("buffer", m).apply()
+            handler.post {
+                try {
+                    val http = httpFactory
+                    val old = player
+                    player = createPlayer(http)
+                    player.trackSelectionParameters = old.trackSelectionParameters   // Sprache/Untertitel behalten
+                    playerView.player = player
+                    old.release()
+                } catch (e: Throwable) { }
+            }
+        }
+
+        @JavascriptInterface
+        fun getBuffer(): String =
+            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("buffer", "normal") ?: "normal"
 
         /** Gespeicherte Listen (Sender, Filme, Serien) für den Schnellstart: als Datei im App-Speicher */
         private fun cacheFile(name: String): java.io.File =
