@@ -590,9 +590,30 @@
             return out;
         },
 
+        /** Senkrechte Listen (Sender, Kategorien): direkt den Nachbarn nehmen statt alle Einträge zu vermessen */
+        quickNeighbor: function (cur, dir) {
+            var zone = cur.getAttribute('data-zone');
+            if (!zone || !(zone === 'list' || zone === 'cats')) return null;
+            var el = cur, p = cur.parentNode;
+            if (p && p.classList && p.classList.contains('row-wrap')) { el = p; p = p.parentNode; }
+            if (!p || !p.classList || !p.classList.contains('scroll')) return null;
+            var sib = dir === 'down' ? el.nextElementSibling : el.previousElementSibling;
+            for (var steps = 0; sib && steps < 30; steps++) {
+                if (sib.classList.contains('focusable')) return sib.getAttribute('data-zone') === zone && sib.offsetParent !== null ? sib : null;
+                var inner = sib.querySelectorAll ? sib.querySelectorAll('.focusable') : [];
+                if (inner.length) { var t = inner[dir === 'down' ? 0 : inner.length - 1]; return t.getAttribute('data-zone') === zone ? t : null; }
+                sib = dir === 'down' ? sib.nextElementSibling : sib.previousElementSibling;
+            }
+            return null;
+        },
+
         move: function (dir) {
             var cur = this.cur;
             if (!this.isValid(cur)) { this.first(); return false; }
+            if (dir === 'up' || dir === 'down') {
+                var q = this.quickNeighbor(cur, dir);
+                if (q) { this.set(q); return true; }
+            }
             var r = cur.getBoundingClientRect();
             var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
             var nodes = this.candidates(cur);
@@ -6505,8 +6526,12 @@
 
     /** Kategorien oben als Knöpfe, am Ende der Schalter „Nur mit Programm“ */
     EpgGridScreen.prototype.drawChips = function () {
-        var self = this, box = this.chipsBox, cats = this.categories();
+        var self = this, box = this.chipsBox;
         if (!box) return;
+        var sig = this.col + '|' + this.chip + '|' + this.catIndex + '|' + this.onlyProg;
+        if (this._chipSig === sig && box.firstChild) return;
+        this._chipSig = sig;
+        var cats = this.categories();
         box.innerHTML = '';
         var strip = h('div', 'eg-chip-strip');
         var items = cats.map(function (c, i) { return { label: i === 0 ? '☰  Alle' : i === 1 ? c : NameTidy.cat(c), cat: i }; });
@@ -8801,6 +8826,11 @@
     // =====================================================================
 
     function boot() {
+        // Fire TV / Android-TV-Boxen: sparsame Darstellung (kein Leuchten, kein Vergrößern) – spürbar flüssiger
+        try {
+            var ua = navigator.userAgent || '';
+            if (AB && (/AFT|AFTM|AFTT|AFTS|AFTK|BRAVIA|Android TV|; TV/i.test(ua) || !('ontouchstart' in window))) document.body.classList.add('lite');
+        } catch (e) { /* egal */ }
         applyScale();
         Clock.start();
         window.addEventListener('resize', applyScale);

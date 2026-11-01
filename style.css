@@ -1507,3 +1507,15 @@ body.wide .live-b .col-info { left: auto; right: 40px; }
 .live-b .col-cats .scroll { padding: 0 10px; box-sizing: border-box; }
 .live-b .cat { margin: 5px 0; }
 .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e, 0 0 14px rgba(244,220,158,.35) !important; }
+
+/* Sparmodus für Fire TV / Android-TV-Boxen: kein Leuchten, kein Vergrößern, keine Übergänge */
+body.lite *, body.lite *::before, body.lite *::after { transition: none !important; }
+body.lite .focused { box-shadow: 0 0 0 4px #f4dc9e !important; }
+body.lite .circle.focused, body.lite .poster.focused, body.lite .epc.focused .epc-img, body.lite .pf-item.focused .pf-av,
+body.lite .kbd-key.focused, body.lite .pin-key.focused { transform: none !important; }
+body.lite .epc.focused .epc-img, body.lite .lv-act.focused, body.lite .eg-chip.focus, body.lite .eg3 .eg-prog.focus { box-shadow: 0 0 0 3px #f4dc9e !important; }
+body.lite .poster .img, body.lite .p, body.lite .epc-img { box-shadow: none !important; }
+body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
+/* Sparmodus: Hintergründe als eigene Ebene, damit beim Blättern nur die Liste neu gezeichnet wird */
+body.lite .live-bg, body.lite #stage-bg, body.lite .detail-bg { -webkit-transform: translateZ(0); transform: translateZ(0); will-change: transform; }
+body.lite .scroll { will-change: scroll-position; }
