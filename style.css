@@ -1586,3 +1586,7 @@ body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 .fb-f1 .fb-ch { display: block; flex: 0 1 auto; min-width: 0; max-width: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
 .fb-f1 .fb-more { flex: none; margin-left: 8px; background: #2a2723; color: #f4dc9e; font-weight: 800; font-size: 16px; padding: 6px 10px; border-radius: 14px; }
 .fb-f1 .fb-guess { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Sender-Knöpfe alle auf gleicher Höhe: Platz für „+N“ immer frei halten */
+.fb-f1 .fb-tv { position: relative; padding-right: 58px; box-sizing: border-box; }
+.fb-f1 .fb-more { position: absolute; right: 0; top: 50%; transform: translateY(-50%); margin: 0; }
+.fb-f1 .fb-ch { flex: none; width: 300px; box-sizing: border-box; }
