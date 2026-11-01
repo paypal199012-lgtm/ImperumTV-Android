@@ -1594,3 +1594,8 @@ body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 .fb-f1 .fb-guess { width: 340px; text-align: right; }
 .fb-f1 .fb-chn { text-align: left; }
 .fb-lg.lg-SB { background: #2e7d32; }
+/* Lange Kategorien ganz lesbar: kleinere Schrift, bis zu drei Zeilen statt „…“ */
+.col-cats .cat.long { font-size: 21px; line-height: 25px; }
+.col-cats .cat.xlong { font-size: 19px; line-height: 23px; }
+.live-b .cat.long, .live-b .cat.xlong { padding-top: 8px; padding-bottom: 8px; }
+.live-b .cat.with-n .cat-name, .live-b .cat:not(.with-n) { -webkit-line-clamp: 3; }

@@ -3863,6 +3863,9 @@
             if (kidsHide && Parental.catProtected(kind, name)) return;     // Kinder-Profil: nicht freigegebene Kategorien gar nicht zeigen
             if (groups) groups.forEach(function (g) { if (g.at === i && i < cats.length) scroll.appendChild(h('div', 'cat-group', g.label)); });
             var item = h('div', 'cat' + (i === activeIndex ? ' active' : ''));
+            // Lange Kategorien ganz zeigen: etwas kleinere Schrift statt „…“
+            var nlen = String(name || '').length;
+            if (nlen > 40) item.classList.add('xlong'); else if (nlen > 24) item.classList.add('long');
             if (kind && Parental.catProtected(kind, name)) {
                 item.classList.add('locked');
                 item.innerHTML = icon('lock', 24) + '<span></span>';
