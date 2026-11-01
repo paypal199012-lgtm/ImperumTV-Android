@@ -6422,7 +6422,7 @@
         box.innerHTML = '';
         var strip = h('div', 'eg-chip-strip');
         var items = cats.map(function (c, i) { return { label: i === 0 ? '☰  Alle' : i === 1 ? c : NameTidy.cat(c), cat: i }; });
-        items.push({ label: (this.onlyProg ? '✓  ' : '') + 'Nur mit Programm', toggle: true });
+        items.unshift({ label: (this.onlyProg ? '✓  ' : '') + 'Nur mit Programm', toggle: true });   // ganz links, vor „Alle“
         this.chipItems = items;
         if (this.chip >= items.length) this.chip = items.length - 1;
         var nodes = [];
@@ -6435,7 +6435,7 @@
         });
         box.appendChild(strip);
         // Markierten Knopf sichtbar halten
-        var target = nodes[this.col === 'cats' ? this.chip : Math.min(this.catIndex, nodes.length - 1)];
+        var target = nodes[this.col === 'cats' ? this.chip : Math.min(this.catIndex + 1, nodes.length - 1)];
         var shift = 0;
         if (target) {
             var right = target.offsetLeft + target.offsetWidth, w = box.clientWidth || 1840;
@@ -6701,7 +6701,7 @@
         var earliest = floorHalfHour(Date.now()) - HALF_HOUR;
         switch (k) {
             case KEY.UP:
-                if (this.chIndex === 0) { this.col = 'cats'; this.chip = Math.min(this.catIndex, (this.chipItems || [0]).length - 1); break; }
+                if (this.chIndex === 0) { this.col = 'cats'; this.chip = Math.min(this.catIndex + 1, (this.chipItems || [0]).length - 1); break; }
                 this.chIndex = this.chIndex - 1; break;
             case KEY.DOWN: this.chIndex = Math.min(this.list.length - 1, this.chIndex + 1); break;
             case KEY.CH_UP: this.chIndex = Math.max(0, this.chIndex - this.ROWS); break;
