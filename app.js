@@ -4733,8 +4733,6 @@
         }
         setLive();
         Football.load(false).then(function () { if (Nav.top() instanceof HomeScreen) setLive(); }, function () { });
-        var favN = 0; for (var fk in Favs.set) if (Favs.set.hasOwnProperty(fk)) favN++;
-        item('', '★ <b>' + favN + '</b> Favoriten');
         root.appendChild(bar);
 
         var circles = h('div', 'home-circles');
