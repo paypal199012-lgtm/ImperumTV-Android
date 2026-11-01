@@ -1938,6 +1938,34 @@
         Report.jsError(r.message, 'Promise', r.stack);
     });
 
+    /**
+     * „Schaut gerade“ für die Admin-Seite: nur Art und Name (z. B. „Live: DE: DAZN 2“), keine Adresse, keine Zugangsdaten.
+     * Erst nach 4 s melden (beim schnellen Umschalten nicht jeden Sender); alle 10 Minuten auffrischen.
+     */
+    var Watch = {
+        cur: '', sent: null, sentAt: 0, timer: null,
+        set: function (what) {
+            what = String(what || '').slice(0, 120);
+            this.cur = what;
+            clearTimeout(this.timer);
+            if (what === this.sent) return;
+            var self = this;
+            this.timer = setTimeout(function () { self.send(); }, what ? 4000 : 1500);
+        },
+        of: function (kind, name) {
+            return (kind === 'live' ? 'Live: ' : kind === 'movie' ? 'Film: ' : kind === 'episode' ? 'Serie: ' : kind === 'preview' ? 'Vorschau: ' : '') + (name || '?');
+        },
+        send: function (force) {
+            if (!AB || !Device.validMac(Device.mac) || !Device.validKey(Device.key)) return;
+            if (!force && this.cur === this.sent) return;
+            var what = this.cur, self = this;
+            this.sent = what; this.sentAt = Date.now();
+            Remote.rpc('device_watch', { p_mac: Device.mac, p_key: Device.key, p_what: what }).then(null, function () { self.sent = null; });
+        },
+        /** alle 10 Minuten: läuft noch etwas, erneut melden (sonst gilt es auf der Admin-Seite als beendet) */
+        refresh: function () { if (this.cur) this.send(true); }
+    };
+
     /** OpenVPN mit eigener .ovpn-Datei (hochgeladen auf der Website beim Gerät). Verbinden/Trennen entscheidet jeder selbst. */
     /** Meldet der Website: App-Version, Gerät, VPN-Status (für die Geräte-Übersicht im Admin-Bereich) */
     var Hello = {
@@ -3253,6 +3281,7 @@
 
         stop: function () {
             this.url = null;
+            try { Watch.set(''); } catch (e0) { /* egal */ }
             if (this.android) { AB.stop(); return; }
             if (this.tizen) {
                 try { this.av.stop(); } catch (e) { /* war nicht offen */ }
@@ -5200,7 +5229,7 @@
         var self = this;
         Player.on({
             error: function () { toast('Vorschau nicht verfügbar: ' + ch.name); },
-            ready: function () { Player.applyPreferences(); },
+            ready: function () { Player.applyPreferences(); Watch.set(Watch.of('preview', ch.name)); },
             notice: function (msg) { if (/^Bild hing/.test(msg || '')) Report.stall(ch, 'Vorschau: Bild stand still – Sender automatisch neu geöffnet'); },
             stall: function (msg) { Report.stall(ch, 'Vorschau: ' + msg); }
         });
@@ -8406,7 +8435,8 @@
             },
             ready: function () {
                 Player.applyPreferences();
-                self.r407 = 0;                             // läuft wieder: nächste Ablehnung zählt neu
+                self.r407 = 0;
+                try { var wi = self.item(); Watch.set(Watch.of(self.kind, wi && wi.name)); } catch (e) { /* egal */ }                             // läuft wieder: nächste Ablehnung zählt neu
                 if (self.seekPending) {
                     var target = self.seekPending;
                     Player.seekTo(target);
@@ -8431,7 +8461,8 @@
         this.handoff = false;
         if (!this.openedAt || this.openedFor !== this.index) { this.openedAt = Date.now(); this.openedFor = this.index; }
         if (reuse && Player.keep(this.url(), null)) {
-            self.buffering = false;                    // Bild läuft schon: nur auf Vollbild vergrößert
+            self.buffering = false;
+            try { Watch.set(Watch.of('live', this.item().name)); } catch (e) { /* egal */ }                    // Bild läuft schon: nur auf Vollbild vergrößert
         } else {
             Player.open(this.url(), null);
         }
@@ -9233,6 +9264,7 @@
         function lifecycle(hidden) {
             if (hidden) {
                 Parental.lock();
+                try { Watch.set(''); Watch.send(); } catch (e0) { /* egal */ }
                 var top = Nav.top();
                 if (top && (top instanceof PlayerScreen || top instanceof LiveScreen)) {
                     if (top instanceof PlayerScreen) top.saveProgress(false);   // beim Zurückkommen geht es dort weiter
@@ -9389,6 +9421,7 @@
             if (Nav.top() instanceof LockScreen) return;
             Hello.send(true);
             Updater.flags();
+            Watch.refresh();
             Remote.load().then(null, function () { /* offline: gespeicherter Stand */ }).then(function () {
                 if (Api.acc && Api.acc.demo) return;      // Demo braucht keine Freischaltung
                 if (!License.active() && !(Nav.top() instanceof LockScreen)) Nav.replace(new LockScreen());
