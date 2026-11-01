@@ -6604,7 +6604,19 @@
             pi.style.width = Math.round((now - p.start) / (p.end - p.start) * 100) + '%';
             pr.appendChild(pi); box.appendChild(pr);
         }
-        if (p && p.desc) box.appendChild(h('div', 'eg-desc', p.desc));
+        // Wie Live TV: die nächsten drei Sendungen als Karten
+        var all = this.epg[ch.id] || [], from = p && !p.placeholder ? p.end : now;
+        var nx = all.filter(function (e) { return e.start >= from - 1000; }).slice(0, 3);
+        if (nx.length) {
+            var cards = h('div', 'lv-next eg-next');
+            nx.forEach(function (e) {
+                var c = h('div', 'lv-nx');
+                c.appendChild(h('b', null, fmtClock(new Date(e.start))));
+                c.appendChild(h('span', null, e.title));
+                cards.appendChild(c);
+            });
+            box.appendChild(cards);
+        } else if (p && p.desc) box.appendChild(h('div', 'eg-desc', p.desc));
         var acts = h('div', 'eg-acts');
         var running = !p || p.placeholder || (p.start <= now && p.end > now);
         if (running) acts.appendChild(h('span', 'eg-act y', '▶ Ansehen'));
@@ -6622,10 +6634,15 @@
     EpgGridScreen.prototype.schedulePreview = function () {
         var self = this, ch = this.list[this.chIndex];
         if (!ch) return;
-        var pn = NameTidy.split(ch.name, ch.cat);
-        this.previewLabel.innerHTML = '';
-        this.previewLabel.appendChild(document.createTextNode(pn.name));
-        if (pn.tags.length) this.previewLabel.appendChild(h('span', 'ch-tag', pn.tags[0]));
+        var pn = NameTidy.split(ch.name, ch.cat), lb = this.previewLabel, tnow = Date.now();
+        lb.innerHTML = '';
+        var tl = h('div', 'pv-title', pn.name);
+        pn.tags.forEach(function (t) { tl.appendChild(h('span', 'ch-tag' + (/^(HD|FHD|UHD|4K|8K|HDR)$/.test(t) ? ' q' : ''), t)); });
+        lb.appendChild(tl);
+        var cur = (this.epg[ch.id] || []).filter(function (e) { return e.start <= tnow && e.end > tnow; })[0];
+        lb.appendChild(h('div', 'pv-now', cur ? 'Jetzt: ' + cur.title + ' · ' + fmtClock(new Date(cur.start)) + '–' + fmtClock(new Date(cur.end))
+            : 'Kanal ' + ch.num + (this.epg[ch.id] && !this.epg[ch.id].length ? ' · Live' : '')));
+        if (cur) { var pr = h('div', 'pv-pr'), pi = h('i'); pi.style.width = Math.max(2, (tnow - cur.start) / (cur.end - cur.start) * 100) + '%'; pr.appendChild(pi); lb.appendChild(pr); }
         if (this.previewId === ch.id) return;
         clearTimeout(this.previewTimer);
         // Kommt man aus dem Vollbild zurück, läuft der Sender schon: sofort verkleinern statt warten

@@ -1437,3 +1437,27 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 .eg3 .eg-nowline { top: 38px; }
 .eg-nowlbl { position: absolute; top: 24px; background: #f4dc9e; color: #1a1408; font-size: 14px; font-weight: 900; padding: 1px 6px; border-radius: 6px; }
 .eg3 .eg-hint { bottom: 14px; left: 40px; font-size: 20px; }
+
+/* EPG E3 im Stil von Live TV (Musterbild B) */
+.eg3 .eg-preview { border-radius: 14px; }
+.eg3 .eg-preview-label { display: block; padding: 50px 24px 16px; }
+.eg3 .eg-preview-label .pv-title { font-size: 28px; }
+.eg3 .eg-preview-label .pv-now { font-size: 20px; }
+.eg3 .eg-title { font-size: 40px; }
+.eg3 .eg-meta { font-size: 23px; margin-bottom: 10px; }
+.eg-next { position: static; width: auto; margin-top: 4px; }
+.eg-next .lv-nx { padding: 10px 16px; font-size: 19px; }
+.eg-next .lv-nx b { font-size: 18px; }
+.eg3 .eg-chan { border-radius: 14px; border: 2px solid transparent; }
+.eg3 .eg-chan .lg { width: 76px; height: 48px; padding: 3px; box-sizing: border-box; }
+.eg3 .eg-chan.sel { background: rgba(217,176,102,.22); }
+.eg3 .eg-chan.cur { background: rgba(217,176,102,.32); border-color: #f4dc9e; box-shadow: none; }
+.eg3 .eg-prog { border-radius: 14px; border: 2px solid transparent; background: rgba(255,255,255,.06); }
+.eg3 .eg-prog.now { background: rgba(217,176,102,.22); }
+.eg3 .eg-prog.focus { background: rgba(217,176,102,.32); color: #fff; border-color: #f4dc9e; box-shadow: none; }
+.eg3 .eg-prog.focus .tm { color: #f4dc9e; }
+.eg3 .eg-prog.focus .eg-pb { background: #d9b066; }
+.eg3 .eg-prog.empty { border: 2px dashed rgba(255,255,255,.16); }
+.eg3 .eg-prog.empty.focus { border: 2px solid #f4dc9e; }
+.eg3 .eg-acts { top: 244px; }
+.eg3 .eg-act { border-radius: 30px; padding: 11px 24px; }
