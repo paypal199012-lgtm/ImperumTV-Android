@@ -1,3 +1,4 @@
+# Kommt nach .github/workflows/build-apk.yml
 name: Android APK bauen
 
 on:
@@ -31,9 +32,20 @@ jobs:
         working-directory: build-project
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      # Klappt der Bau mit OpenVPN nicht, wird die App ohne OpenVPN gebaut (Updates kommen trotzdem)
-      - name: APK ohne OpenVPN bauen (nur falls oben ein Fehler war)
+      # Erster Versuch fehlgeschlagen (oft nur ein kurzer Netzwerkfehler): noch einmal MIT OpenVPN versuchen
+      - name: APK bauen (2. Versuch mit OpenVPN)
+        id: retry
         if: steps.full.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          sleep 20
+          rm -rf build-project
+          sh setup-android.sh
+          cd build-project && gradle assembleRelease --no-daemon --stacktrace
+
+      # Klappt auch das nicht, wird die App ohne OpenVPN gebaut (Updates kommen trotzdem)
+      - name: APK ohne OpenVPN bauen (nur falls beide Versuche fehlschlagen)
+        if: steps.full.outcome == 'failure' && steps.retry.outcome == 'failure'
         run: |
           echo "::warning::OpenVPN ließ sich nicht mitbauen – APK wird ohne OpenVPN gebaut"
           OPENVPN=0 sh setup-android.sh
