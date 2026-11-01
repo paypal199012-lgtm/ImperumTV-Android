@@ -1546,7 +1546,7 @@
                 case 'get_series': return [{ series_id: 201, name: 'Blender Open Movies', cover: this.poster('Blender Open Movies', '#7a5a1a'), category_id: '20', rating: '7.2', last_modified: String(now) }];
                 case 'get_series_info':
                     return { info: { plot: 'Die freien Kurzfilme der Blender Foundation als Serie – zum Testen von Staffeln, Folgen und „Nächste Folge“.', genre: 'Animation', releaseDate: '2006' },
-                        episodes: { '1': this.movies.map(function (m, i) { return { id: String(301 + i), episode_num: i + 1, title: m.name.replace(/\s*\(\d{4}\)/, ''), container_extension: 'mp4', season: 1 }; }) } };
+                        episodes: { '1': this.movies.map(function (m, i) { return { id: String(301 + i), episode_num: i + 1, title: m.name.replace(/\s*\(\d{4}\)/, ''), container_extension: 'mp4', season: 1, info: { duration: '00:' + (m.min < 10 ? '0' : '') + m.min + ':00' } }; }) } };
                 default: return [];
             }
         },
@@ -2884,7 +2884,12 @@
                         var id2 = str(ep.id);
                         if (!id2) return;
                         var num = parseInt(ep.episode_num, 10) || 0;
+                        var ei = ep.info || {}, secs = parseInt(ei.duration_secs, 10) || 0;
+                        var dm = /^(\d+):(\d+):(\d+)$/.exec(str(ei.duration));
+                        if (!secs && dm) secs = (+dm[1]) * 3600 + (+dm[2]) * 60 + (+dm[3]);
                         all.push({
+                            img: str(ei.movie_image) || str(ei.cover_big) || '',
+                            min: secs ? Math.max(1, Math.round(secs / 60)) : 0,
                             type: 'episode',
                             id: id2,
                             season: parseInt(ep.season, 10) || parseInt(key, 10) || 1,
@@ -5815,8 +5820,10 @@
         }
         if (info.plot) { body.appendChild(h('div', 'splot', info.plot)); body.classList.add('with-plot'); }
         // Besetzung links unter dem Cover
-        var castNames = People.names(info.cast, 6);
-        if (castNames.length) { d.classList.add('with-cast'); d.appendChild(castNode(castNames, 'grid')); }
+        // S1: Staffeln und Folgen-Bilder über die ganze Breite, Besetzung als kurze Zeile
+        d.classList.add('s1');
+        var castNames = People.names(info.cast, 4);
+        if (castNames.length) body.appendChild(h('div', 's1-cast', 'Mit: ' + castNames.join(', ')));
 
         // Weiterschauen: zuletzt gesehene (oder nächste) Folge
         var all = this.episodes, last = Resume.forSeries(s.id), lastIndex = -1;
@@ -5870,7 +5877,7 @@
             }, 'seasons');
             row.appendChild(b);
         });
-        body.appendChild(row);
+        d.appendChild(row);
         // Gewählte Staffel sichtbar machen (z. B. Staffel 11 ganz rechts)
         function moreRight() { row.classList.toggle('more', row.scrollLeft + row.clientWidth < row.scrollWidth - 4); }
         row.addEventListener('scroll', moreRight);
@@ -5880,44 +5887,53 @@
             moreRight();
         }, 0);
 
-        // Folgen der gewählten Staffel
+        // Folgen der gewählten Staffel: Bilder nebeneinander
         var list = this.episodes.filter(function (e) { return e.season === self.season; });
-        var eps = h('div', 'episodes');
-        var scroll = h('div', 'scroll');
-        eps.appendChild(scroll);
-        if (!list.length) scroll.appendChild(h('div', 'empty-note', 'Keine Folgen gefunden.'));
+        var eps = h('div', 'epc-strip hscroll');
+        if (!list.length) eps.appendChild(h('div', 'empty-note', 'Keine Folgen gefunden.'));
+        var tones = ['#2f4f6b', '#4f6b2f', '#5b2f6b', '#6b552f', '#2f6b62', '#6b2f2f', '#3b3f73'];
         list.forEach(function (ep, i) {
-            var n = h('div', 'episode');
+            var n = h('div', 'epc'), num = ep.num || i + 1;
+            var img = h('div', 'epc-img');
+            if (ep.img) img.style.backgroundImage = 'url("' + ep.img.replace(/"/g, '%22') + '")';
+            else {
+                var tone = tones[(num - 1) % tones.length];
+                img.style.backgroundImage = 'linear-gradient(160deg, ' + tone + ', #0d0f13)';
+                img.appendChild(h('div', 'epc-num', 'F' + num));
+            }
+            n.appendChild(img);
             var e = Resume.forItem('episode', ep), seen = Seen.get(ep.id);
             var started = e && !e.next && e.pos >= 30;
-            // Gesehen: Haken + gedimmt · Angefangen: Rest-Zeit + Balken · Als Nächstes: Hinweis
+            var sub = ep.min ? ep.min + ' Min' : '';
+            function add(t) { sub = sub ? sub + ' · ' + t : t; }
+            // Gesehen: Haken · Angefangen: Rest-Zeit + Balken · Neu / Als Nächstes: Schild
             if (seen && seen.d && !started) {
                 n.classList.add('seen');
-                n.appendChild(h('span', 'ep-badge done', '✓ Gesehen'));
-            } else if (started) {
+                img.appendChild(h('span', 'epc-ok', '✓'));
+                var full = h('div', 'epc-bar'); full.style.width = '100%'; img.appendChild(full);
+                add('gesehen');
+            } else if (started || (seen && seen.p >= 3)) {
                 n.classList.add('started');
-                n.appendChild(h('span', 'ep-left', Resume.leftText(e)));
-                n.appendChild(progressNode(Resume.part(e)));
+                var bar = h('div', 'epc-bar');
+                bar.style.width = Math.max(3, Math.min(100, (started ? Resume.part(e) : seen.p / 100) * 100)) + '%';
+                img.appendChild(bar);
+                add(started ? Resume.leftText(e) : 'angefangen');
             } else if (NewEps.isFresh(s.id, ep.id)) {
-                n.classList.add('nw');
-                n.appendChild(h('span', 'ep-badge neu', 'NEU'));
+                img.appendChild(h('span', 'epc-tag neu', 'NEU'));
             } else if (e && e.next) {
-                n.classList.add('upnext');
-                n.appendChild(h('span', 'ep-badge next', '▶ Als Nächstes'));
-            } else if (seen && seen.p >= 3) {
-                n.classList.add('started');
-                n.appendChild(h('span', 'ep-left', 'Angefangen'));
-                n.appendChild(progressNode(seen.p / 100));
+                img.appendChild(h('span', 'epc-tag next', '▶ Als Nächstes'));
             }
-            n.appendChild(h('span', 'n', String(ep.num || i + 1)));
-            n.appendChild(document.createTextNode(ep.name));
+            n.appendChild(h('div', 'epc-t', num + '. ' + ep.name));
+            n.appendChild(h('div', 'epc-s', sub || ' '));
             focusable(n, 'ep-' + ep.id, function () { playWithResume(all, all.indexOf(ep), 'episode'); }, 'episodes');
-            scroll.appendChild(n);
+            eps.appendChild(n);
         });
-        body.appendChild(eps);
-        // Folgenliste immer unter den Staffeln beginnen lassen (Knöpfe können zwei Reihen brauchen)
-        var below = row.offsetTop + row.offsetHeight + 14;
-        if (below > 0) eps.style.top = below + 'px';
+        d.appendChild(eps);
+        // Aktuelle bzw. nächste Folge gleich sichtbar machen
+        if (lastIndex >= 0) setTimeout(function () {
+            var cur = eps.querySelector('[data-key="ep-' + all[lastIndex].id + '"]');
+            if (cur && cur.offsetLeft + cur.offsetWidth > eps.clientWidth) eps.scrollLeft = cur.offsetLeft - 40;
+        }, 0);
 
         if (!this.focusKey) this.focusKey = lastIndex >= 0 ? 'scont' : list.length ? 'ep-' + list[0].id : 'sfav';
     };

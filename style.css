@@ -1358,3 +1358,30 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 .lv-act { padding: 14px 26px; margin-right: 14px; border-radius: 30px; font-size: 23px; font-weight: bold; background: rgba(255,255,255,.1); }
 .lv-act.primary { background: #f4dc9e; color: #1a1408; }
 .lv-act.focused { box-shadow: 0 0 0 4px #f4dc9e, 0 0 24px rgba(244,220,158,.5); }
+
+/* ---------- Serien-Seite S1: Staffeln als Reiter, Folgen als Bilder ---------- */
+.detail.s1 .cover { left: 0; top: 0; width: 300px; height: 440px; }
+.detail.s1 .body { left: 340px; bottom: auto; height: 440px; }
+.detail.s1 h1 { font-size: 56px; margin-bottom: 8px; }
+.detail.s1 .splot { max-height: 66px; }
+.s1-cast { font-size: 21px; color: #a7a39a; margin: 0 0 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail.s1 > .seasons { position: absolute; left: 0; right: 0; top: 462px; margin: 0; }
+.epc-strip { position: absolute; left: -10px; right: -90px; top: 540px; height: 300px; white-space: nowrap; overflow-x: auto; overflow-y: hidden;
+    padding: 10px; scrollbar-width: none; }
+.epc-strip::-webkit-scrollbar { display: none; }
+.epc { display: inline-block; vertical-align: top; width: 340px; margin-right: 22px; border-radius: 14px; }
+.epc-img { position: relative; width: 340px; height: 190px; border-radius: 12px; overflow: hidden; background: #20252d center / cover no-repeat;
+    border: 3px solid transparent; box-sizing: border-box; box-shadow: 0 8px 20px rgba(0,0,0,.4); }
+.epc-num { position: absolute; left: 0; right: 0; top: 58px; text-align: center; font-size: 48px; font-weight: 900; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+.epc-ok { position: absolute; right: 10px; bottom: 14px; width: 34px; height: 34px; line-height: 34px; text-align: center; border-radius: 50%;
+    background: #3aa35b; font-size: 20px; font-weight: 900; color: #fff; }
+.epc-bar { position: absolute; left: 0; bottom: 0; height: 6px; background: #d9b066; }
+.epc-tag { position: absolute; left: 10px; top: 10px; padding: 3px 12px; border-radius: 8px; font-size: 18px; font-weight: 800; }
+.epc-tag.neu { background: #f4dc9e; color: #1a1408; }
+.epc-tag.next { background: #d9b066; color: #1a1408; }
+.epc-t { font-size: 24px; margin-top: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.epc-s { font-size: 19px; color: #a7a39a; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.epc.seen .epc-t { color: rgba(255,255,255,.65); }
+.epc.focused .epc-img { border-color: #f4dc9e; transform: scale(1.04); box-shadow: 0 0 0 2px #f4dc9e, 0 10px 30px rgba(0,0,0,.6); }
+.epc.focused .epc-t { color: #f4dc9e; font-weight: bold; }
+.epc.focused { box-shadow: none !important; }
