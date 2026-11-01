@@ -5001,18 +5001,19 @@
         find: function (ch) {
             if (!ch) return [];
             this.build();
-            var self = this, co = this.country(ch.name);
+            var self = this, co = this.country(ch.name) || this.country(ch.cat);
             // Reihenfolge: gleiches Land, ohne Land, deutsch, sonst
             function rank(c) {
-                var cc = self.country(c.name);
+                var cc = self.country(c.name) || self.country(c.cat);
                 return cc === co ? 0 : !cc ? 1 : cc === 'DE' ? 2 : 3;
             }
             return (this.index[this.key(ch)] || []).filter(function (c) {
                 if (c.id === ch.id || Hidden.has(c.id)) return false;
                 // Schwache Varianten (MOBILE, LOW, LQ, SD) nie als Ersatz – auf dem Fernseher zu unscharf
                 if (/mobile|(^|[^a-z])(low|lq|sd)([^a-z]|$)/i.test(NameTidy.plain(c.name))) return false;
-                var cc = self.country(c.name);
-                return !co || !cc || cc === co;
+                // Land: aus dem Namen („DE: …“), sonst aus der Kategorie („DE| DAZN“). Nur dasselbe Land (ohne Land: nur ohne Land)
+                var cc = self.country(c.name) || self.country(c.cat);
+                return co ? cc === co : !cc;
             }).sort(function (a, b) { return rank(a) - rank(b); }).slice(0, 8);
         }
     };
