@@ -4781,9 +4781,12 @@
     LiveScreen.prototype.render = function (root) {
         var self = this;
         document.body.classList.add('preview-mode');
-        root.appendChild(topbar('Live TV', 'OK: Vorschau · nochmal OK: Vollbild · OK lang: Favorit'));
+        // Hintergrund wie überall, nur das Vorschaubild bleibt frei (dort liegt das Video)
+        this.bg = h('div', 'live-bg');
+        root.appendChild(this.bg);
+        root.appendChild(topbar('Live TV', ''));
 
-        var columns = h('div', 'columns');
+        var columns = h('div', 'columns live-b');
         var cats = this.categories();
         // Anzahl Sender je Kategorie (ohne Trennzeilen)
         var vis = Parental.visible('live', Data.channels), cnt = {}, favN = 0, allN = 0;
@@ -4794,7 +4797,7 @@
             if (Favs.has('live', vis[ci].id)) favN++;
         }
         var counts = cats.map(function (c, i) { return i === 0 ? allN : i === 1 ? favN : (cnt[c] || 0); });
-        var catLabels = cats.map(function (c, i) { return i < 2 ? c : NameTidy.cat(c); });
+        var catLabels = cats.map(function (c, i) { return i === 0 ? '☰  Alle' : i === 1 ? c : NameTidy.cat(c); });
         columns.appendChild(categoryColumn(catLabels, this.catIndex, function (i) {
             self.catIndex = i;
             self.query = '';
@@ -4802,7 +4805,7 @@
             Nav.show(self);
             var first = $('.col-list .row');
             if (first) Focus.set(first);
-        }, { query: this.query, kind: 'live', counts: counts, onClick: function () { self.openSearch(); } }));
+        }, { query: this.query, kind: 'live', onClick: function () { self.openSearch(); } }));
 
         var listCol = h('div', 'col col-list');
         var scroll = h('div', 'scroll');
@@ -4863,10 +4866,31 @@
         this.previewBox = h('div', 'preview-box' + (this.selected ? '' : ' empty'));
         if (!this.selected) this.previewBox.appendChild(h('div', 'preview-placeholder', 'OK drücken für die Vorschau'));
         info.appendChild(this.previewBox);
-        this.infoPanel = h('div', 'info-panel');
-        info.appendChild(this.infoPanel);
+        // Darunter: die nächsten drei Sendungen und Knöpfe
+        this.nextBox = h('div', 'lv-next');
+        info.appendChild(this.nextBox);
+        var acts = h('div', 'lv-acts');
+        function act(key, label, primary, fn) {
+            var b = h('div', 'lv-act' + (primary ? ' primary' : ''), label);
+            acts.appendChild(focusable(b, key, fn, 'lvacts'));
+        }
+        function target() { return self.selected || self.infoCh || null; }
+        act('lv-full', '▶  Vollbild', true, function () {
+            var ch = target(); if (!ch) return;
+            var idx = self.list.indexOf(ch);
+            if (!self.selected || self.selected.id !== ch.id) { self.choose(ch, idx); }
+            self.openFullscreen(idx < 0 ? 0 : idx);
+        });
+        act('lv-fav', '★  Favorit', false, function () {
+            var ch = target(); if (!ch) return;
+            var on = Favs.toggle('live', ch.id);
+            toast(on ? ch.name + ' zu Favoriten hinzugefügt' : ch.name + ' aus Favoriten entfernt');
+        });
+        act('lv-epg', '☰  Ganzes Programm', false, function () { var ch = target(); if (ch) self.fullProgram(ch); });
+        info.appendChild(acts);
         columns.appendChild(info);
         root.appendChild(columns);
+        setTimeout(function () { self.placeBg(); }, 0);
 
         if (!this.focusKey) this.focusKey = this.selected ? 'ch-' + this.selected.id : (this.list.length ? 'ch-' + this.list[0].id : 'cat-0');
 
@@ -4887,6 +4911,7 @@
             return;
         }
         this.selected = ch;
+        this.infoCh = ch;
         var rows = document.querySelectorAll('.col-list .row');
         for (var i = 0; i < rows.length; i++) rows[i].classList.toggle('active', rows[i]._channel && rows[i]._channel.id === ch.id);
         this.previewBox.className = 'preview-box';
@@ -4906,6 +4931,34 @@
             if (self.selected && self.selected.id === ch.id) self.renderInfo(ch, list);
         });
     };
+    /** Hintergrund überall, nur über dem Vorschaubild frei lassen (dort liegt das Video) */
+    LiveScreen.prototype.placeBg = function () {
+        if (!this.bg || !this.previewBox) return;
+        var r = stageRect(this.previewBox), W = 1920, H = 1080;
+        var x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), hh = Math.round(r.h);
+        // Vier Stücke rund um das Vorschaubild (funktioniert auch auf älteren Geräten)
+        var parts = [[0, 0, W, y], [0, y + hh, W, H - y - hh], [0, y, x, hh], [x + w, y, W - x - w, hh]];
+        this.bg.innerHTML = '';
+        for (var i = 0; i < parts.length; i++) {
+            var p = parts[i], d = h('div', 'live-bg-p');
+            d.style.left = p[0] + 'px'; d.style.top = p[1] + 'px';
+            d.style.width = Math.max(0, p[2]) + 'px'; d.style.height = Math.max(0, p[3]) + 'px';
+            d.style.backgroundPosition = (-p[0]) + 'px ' + (-p[1]) + 'px';
+            this.bg.appendChild(d);
+        }
+    };
+    /** Ganzes Programm des Senders (heute) in einem Fenster */
+    LiveScreen.prototype.fullProgram = function (ch) {
+        var show = function (list) {
+            var now = Date.now();
+            var lines = (list || []).filter(function (e) { return e.end > now; }).slice(0, 14).map(function (e) {
+                return (e.start <= now ? 'Jetzt  ' : fmtClock(new Date(e.start)) + '  ') + e.title;
+            });
+            Modal.open(NameTidy.split(ch.name, ch.cat).name + ' · Programm', lines.length ? lines.join('\n') : 'Kein Programm verfügbar', [{ label: 'Schließen' }]);
+        };
+        var local = Epg.list(ch);
+        if (local) show(local); else Data.shortEpg(ch.id).then(show, function () { show([]); });
+    };
     /** Beim Durchblättern (ohne laufende Vorschau): Infos zum markierten Sender zeigen */
     LiveScreen.prototype.focusInfo = function (ch) {
         var self = this;
@@ -4913,6 +4966,7 @@
         clearTimeout(this.infoTimer);
         this.infoTimer = setTimeout(function () {
             if (Nav.top() !== self || self.selected) return;
+            self.infoCh = ch;
             var local = Epg.list(ch);
             if (local) self.renderInfo(ch, local.filter(function (e) { return e.end > Date.now(); }));
             else {
@@ -4925,36 +4979,36 @@
         }, 350);
     };
     LiveScreen.prototype.renderInfo = function (ch, epg) {
-        var p = this.infoPanel;
-        if (!p) return;
-        p.innerHTML = '';
-        var nt = NameTidy.split(ch.name, ch.cat);
-        var head = h('div', 'info-head');
-        var lg = h('img', 'info-logo');
-        if (ch.logo) lg.src = ch.logo;
-        lg.onerror = function () { lg.style.visibility = 'hidden'; };
-        head.appendChild(lg);
-        var ht = h('div', 'info-ht');
-        var tl = h('div', 'info-title', nt.name);
+        var box = this.previewBox;
+        if (!box) return;
+        var old = box.querySelector('.pv-info');
+        if (old) box.removeChild(old);
+        var nt = NameTidy.split(ch.name, ch.cat), now = Date.now();
+        var list = (epg || []).filter(function (e) { return !e.end || e.end > now; });
+        var cur = list.length && list[0].start <= now ? list[0] : null;
+        var info = h('div', 'pv-info');
+        var tl = h('div', 'pv-title', nt.name);
         nt.tags.forEach(function (t) { tl.appendChild(h('span', 'ch-tag' + (/^(HD|FHD|UHD|4K|8K|HDR)$/.test(t) ? ' q' : ''), t)); });
-        ht.appendChild(tl);
-        ht.appendChild(h('div', 'info-sub', 'Kanal ' + ch.num + (ch.cat ? ' · ' + NameTidy.cat(ch.cat) : '')));
-        head.appendChild(ht);
-        p.appendChild(head);
-        if (!epg.length) { p.appendChild(h('div', 'epg-row later', 'Kein Programm verfügbar')); return; }
-        epg.slice(0, 4).forEach(function (e, i) {
-            var row = h('div', 'epg-row' + (i > 0 ? ' later' : ''));
-            var running = e.start && e.end && e.start <= Date.now() && e.end > Date.now();
-            row.appendChild(h('span', 'time', running ? 'Jetzt' : e.start ? fmtClock(new Date(e.start)) : ''));
-            row.appendChild(h('span', 'et', e.title));
-            if (e.start && e.end) row.appendChild(h('span', 'dur', running ? fmtClock(new Date(e.start)) + '–' + fmtClock(new Date(e.end)) : Math.round((e.end - e.start) / 60000) + ' Min'));
-            p.appendChild(row);
-            if (running) {
-                var prog = h('div', 'progress'), bar = h('div', 'bar');
-                bar.style.width = Math.max(0, Math.min(100, (Date.now() - e.start) / (e.end - e.start) * 100)) + '%';
-                prog.appendChild(bar);
-                p.appendChild(prog);
-            }
+        info.appendChild(tl);
+        info.appendChild(h('div', 'pv-now', cur ? 'Jetzt: ' + cur.title + (cur.end ? ' · ' + fmtClock(new Date(cur.start)) + '–' + fmtClock(new Date(cur.end)) : '')
+            : 'Kanal ' + ch.num + (ch.cat ? ' · ' + NameTidy.cat(ch.cat) : '')));
+        if (cur && cur.end > cur.start) {
+            var pr = h('div', 'pv-pr'), pi = h('i');
+            pi.style.width = Math.max(2, Math.min(100, (now - cur.start) / (cur.end - cur.start) * 100)) + '%';
+            pr.appendChild(pi); info.appendChild(pr);
+        }
+        box.appendChild(info);
+        // Die nächsten drei Sendungen
+        var nb = this.nextBox;
+        if (!nb) return;
+        nb.innerHTML = '';
+        var next = list.filter(function (e) { return e !== cur; }).slice(0, 3);
+        if (!next.length) { nb.appendChild(h('div', 'lv-nx empty', list.length || cur ? 'Danach: kein weiteres Programm' : 'Kein Programm verfügbar')); return; }
+        next.forEach(function (e) {
+            var c = h('div', 'lv-nx');
+            c.appendChild(h('b', null, e.start ? fmtClock(new Date(e.start)) : ''));
+            c.appendChild(h('span', null, e.title));
+            nb.appendChild(c);
         });
     };
     LiveScreen.prototype.openFullscreen = function (index) {
