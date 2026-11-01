@@ -8473,6 +8473,8 @@
     };
     PlayerScreen.prototype.start = function () {
         var self = this;
+        this.rdy = false;                  // erst nach dem Start zählen kurze Hänger (nicht das Laden beim Umschalten)
+        this.bufAt = 0;
         this.lastTime = -1;
         this.lastProgress = Date.now();
         $('#subtitle').classList.add('hidden');
@@ -8487,7 +8489,15 @@
         if (this.popFor !== this.index) { this.popFor = this.index; this.introDone = false; this.nextCancelled = false; }
         this.showPop(null);
         Player.on({
-            buffer: function (b) { self.buffering = b; },
+            buffer: function (b) {
+                self.buffering = b;
+                // Kurzer Hänger (Bild und Ton stehen, lädt nach): ab 2 s mitzählen
+                if (!self.rdy) return;
+                if (b) { if (!self.bufAt) self.bufAt = Date.now(); return; }
+                if (self.bufAt && Date.now() - self.bufAt >= 2000) self.noteShort();
+                self.bufAt = 0;
+            },
+            hiccup: function () { if (self.rdy) self.noteShort(); },
             time: function (t) {
                 if (Math.abs(t - self.lastTime) > 0.2) { self.lastTime = t; self.lastProgress = Date.now(); }
                 if (self.overlay) self.updateBar();
@@ -8498,6 +8508,7 @@
             ready: function () {
                 Player.applyPreferences();
                 self.r407 = 0;
+                setTimeout(function () { self.rdy = true; self.bufAt = 0; }, 3000);
                 try { var wi = self.item(); Watch.set(Watch.of(self.kind, wi && wi.name)); } catch (e) { /* egal */ }                             // läuft wieder: nächste Ablehnung zählt neu
                 if (self.seekPending) {
                     var target = self.seekPending;
@@ -8653,6 +8664,19 @@
         this.stallLog.push(now);
         return this.stallLog.length >= 3 && this.tryAlt('Sender hing mehrfach');
     };
+    /** Kurze Hänger (2–8 s, erholt sich von selbst): 3 in 5 Minuten → Ersatzsender */
+    PlayerScreen.prototype.noteShort = function () {
+        if (this.kind !== 'live') return false;
+        var now = Date.now();
+        if (this.lastShort && now - this.lastShort < 3000) return false;     // derselbe Hänger doppelt gemeldet
+        this.lastShort = now;
+        this.shortLog = (this.shortLog || []).filter(function (t) { return now - t < 300000; });
+        this.shortLog.push(now);
+        if (this.shortLog.length < 3) return false;
+        this.shortLog = [];
+        Report.stall(this.item(), 'Mehrere kurze Hänger (3 in 5 Min.)', this.openedAt);
+        return this.tryAlt('Sender hing mehrmals kurz');
+    };
     /** Auf denselben Sender in anderer Variante umschalten. true = umgeschaltet */
     PlayerScreen.prototype.tryAlt = function (why) {
         if (this.kind !== 'live' || !Settings.altSwitch || (Api.acc && Api.acc.demo)) return false;
@@ -8672,7 +8696,7 @@
         }
         tried.push(alt.id);
         this.altUrl = Api.liveUrl(alt.id); this.altFor = this.index; this.altName = alt.name;
-        this.stallLog = []; this.retries = 0; this.r407 = 0; clearTimeout(this.t407);
+        this.stallLog = []; this.shortLog = []; this.retries = 0; this.r407 = 0; clearTimeout(this.t407);
         var nice = NameTidy.split(alt.name, alt.cat).name, tags = NameTidy.split(alt.name, alt.cat).tags;
         toast(why + ' – automatisch auf „' + nice + (tags.length ? ' ' + tags.join(' ') : '') + '“ umgeschaltet', 6000);
         Report.player(it, 'Ersatzsender (' + why + '): ' + alt.name);
@@ -9090,7 +9114,7 @@
     PlayerScreen.prototype.step = function (delta) {
         if (this.items.length < 2) return;
         this.index = (this.index + delta + this.items.length) % this.items.length;
-        this.retries = 0; this.altUrl = ''; this.altName = ''; this.r407 = 0; this.stallLog = []; clearTimeout(this.t407);
+        this.retries = 0; this.altUrl = ''; this.altName = ''; this.r407 = 0; this.stallLog = []; this.shortLog = []; clearTimeout(this.t407);
         this.start();
         this.showOverlay(2000);                       // Kanal gewechselt: nur kurz einblenden
     };
@@ -9172,7 +9196,7 @@
         this.closeZap();
         if (i !== this.index) {
             this.index = i;
-            this.retries = 0; this.altUrl = ''; this.altName = ''; this.r407 = 0; this.stallLog = []; clearTimeout(this.t407);
+            this.retries = 0; this.altUrl = ''; this.altName = ''; this.r407 = 0; this.stallLog = []; this.shortLog = []; clearTimeout(this.t407);
             this.start();
         }
         this.showOverlay(2000);                       // kurz Name und Programm des Senders zeigen

@@ -234,6 +234,8 @@ class MainActivity : Activity() {
         val n = if (tunnelOn && !tunnelCountersOk) (player.currentPosition / 250).toInt() else counters.renderedOutputBufferCount
         val now = System.currentTimeMillis()
         if (n != lastFrames) {
+            // Bild stand kurz (2,5–8 s) und läuft von selbst weiter: der Oberfläche melden (zählt für den Ersatzsender)
+            if (lastFrames >= 0 && now - frozenSince >= 2_500) emit("hiccup", (now - frozenSince).toInt())
             lastFrames = n; frozenSince = now
             // Lief der Sender nach der letzten Reparatur wieder 90 s sauber: Zähler zurück
             if (freezeFixes > 0 && now - lastFixAt > 90_000) freezeFixes = 0
