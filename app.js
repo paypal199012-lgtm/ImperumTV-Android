@@ -4654,9 +4654,8 @@
         if (Rec.available()) tileList.push(['recs', 'rec', 'AUFNAHMEN', function () { Nav.push(new RecordingsScreen()); }]);
         if (!Profiles.isKids()) tileList.push(           // Kinder-Profil: keine Einstellungen, keine Listen
             ['football', 'ball', 'FUSSBALL', function () { Nav.push(new FootballScreen()); }],
-            ['settings', 'gear', 'EINSTELLUNGEN', function () { Nav.push(new SettingsScreen()); }],
-            ['lists', 'list', 'LISTEN', function () { Nav.push(new PlaylistsScreen()); }]
-        );
+            ['settings', 'gear', 'EINSTELLUNGEN', function () { Nav.push(new SettingsScreen()); }]
+        );                                               // Listen: nur noch unter Einstellungen
         tileList.forEach(function (t) {
             var node = h('div', 'tile');
             node.innerHTML = '<div class="icon">' + icon(t[1], 46) + '</div><div class="label">' + t[2] + '</div>';
@@ -4667,7 +4666,7 @@
         var exp = Data.expiryText();
         if (exp) root.appendChild(h('div', 'expiry', 'Läuft ab: ' + exp));
         if (License.known() && !License.activated() && !License.free()) {
-            root.appendChild(h('div', 'trial-note', License.text() + ' · danach ' + REMOTE.price + ' einmalig unter Listen aktivieren'));
+            root.appendChild(h('div', 'trial-note', License.text() + ' · danach ' + REMOTE.price + ' einmalig unter Einstellungen → Wiedergabelisten aktivieren'));
         }
         if (!this.focusKey) this.focusKey = 'home-live';
     };
@@ -4939,21 +4938,23 @@
         });
     };
     /** Hintergrund überall, nur über dem Vorschaubild frei lassen (dort liegt das Video) */
-    LiveScreen.prototype.placeBg = function () {
-        if (!this.bg || !this.previewBox) return;
-        var r = stageRect(this.previewBox), W = 1920, H = 1080;
+    /** Goldener Hintergrund überall, nur über dem Vorschaubild frei (dort liegt das Video) */
+    function placeHoleBg(bg, box) {
+        if (!bg || !box) return;
+        var r = stageRect(box), W = 1920, H = 1080;
         var x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), hh = Math.round(r.h);
         // Vier Stücke rund um das Vorschaubild (funktioniert auch auf älteren Geräten)
         var parts = [[0, 0, W, y], [0, y + hh, W, H - y - hh], [0, y, x, hh], [x + w, y, W - x - w, hh]];
-        this.bg.innerHTML = '';
+        bg.innerHTML = '';
         for (var i = 0; i < parts.length; i++) {
             var p = parts[i], d = h('div', 'live-bg-p');
             d.style.left = p[0] + 'px'; d.style.top = p[1] + 'px';
             d.style.width = Math.max(0, p[2]) + 'px'; d.style.height = Math.max(0, p[3]) + 'px';
             d.style.backgroundPosition = (-p[0]) + 'px ' + (-p[1]) + 'px';
-            this.bg.appendChild(d);
+            bg.appendChild(d);
         }
-    };
+    }
+    LiveScreen.prototype.placeBg = function () { placeHoleBg(this.bg, this.previewBox); };
     /** Ganzes Programm des Senders (heute) in einem Fenster */
     LiveScreen.prototype.fullProgram = function (ch) {
         var show = function (list) {
@@ -6302,6 +6303,32 @@
     var HALF_HOUR = 30 * 60 * 1000;
     function floorHalfHour(ms) { return Math.floor(ms / HALF_HOUR) * HALF_HOUR; }
 
+    /** Erinnerungen: kurz vor Beginn einer Sendung Bescheid geben (solange die App läuft) */
+    var Remind = {
+        all: function () { return Storage.get('reminders', []) || []; },
+        key: function (chId, start) { return chId + ':' + start; },
+        has: function (chId, start) { var k = this.key(chId, start); return this.all().some(function (r) { return r.k === k; }); },
+        toggle: function (ch, p) {
+            var k = this.key(ch.id, p.start), list = this.all(), had = list.some(function (r) { return r.k === k; });
+            list = list.filter(function (r) { return r.k !== k && r.start > Date.now() - 3600000; });
+            if (!had) list.push({ k: k, ch: ch.id, name: NameTidy.split(ch.name, ch.cat).name, title: p.title, start: p.start });
+            Storage.set('reminders', list);
+            return !had;
+        },
+        check: function () {
+            var now = Date.now(), list = this.all(), due = null;
+            list.forEach(function (r) { if (!r.done && r.start - 60000 <= now && r.start > now - 10 * 60000 && !due) due = r; });
+            if (!due || Modal.node) return;
+            due.done = true;
+            Storage.set('reminders', list.filter(function (r) { return r.start > now - 3600000; }));
+            var ch = Data.channelById(due.ch);
+            Modal.open('🔔 ' + (due.start > now ? 'Gleich beginnt: ' : 'Jetzt läuft: ') + due.title, due.name + ' · ' + fmtClock(new Date(due.start)) + ' Uhr', ch ? [
+                { label: '▶  Ansehen', primary: true, action: function () { Player.stop(); Nav.push(new PlayerScreen(Data.channels, Data.channels.indexOf(ch), 'live')); } },
+                { label: 'Schließen' }] : [{ label: 'Schließen' }]);
+        }
+    };
+    setInterval(function () { try { Remind.check(); } catch (e) { /* egal */ } }, 20000);
+
     function EpgGridScreen(catIndex) {
         this.catIndex = catIndex || 0;
         this.chIndex = 0;
@@ -6312,11 +6339,26 @@
         this.epg = {};
         this.loading = {};
         this.previewId = null;
+        this.chip = 0;
+        this.onlyProg = !!Storage.get('epgOnlyProg', false);
     }
     EpgGridScreen.prototype.ROWS = 6;
+    EpgGridScreen.prototype.ROW_H = 82;
     EpgGridScreen.prototype.SPAN = 150 * 60 * 1000;      // 2,5 Stunden sichtbar
-    EpgGridScreen.prototype.X0 = 360;                    // Beginn der Zeitachse (px)
-    EpgGridScreen.prototype.WIDTH = 1520;                // Breite der Zeitachse (px)
+    EpgGridScreen.prototype.X0 = 440;                    // Beginn der Zeitachse (px)
+    EpgGridScreen.prototype.WIDTH = 1440;                // Breite der Zeitachse (px)
+    /** Sender der Kategorie, ohne ####-Trennzeilen; auf Wunsch nur Sender mit Programm */
+    EpgGridScreen.prototype.channels = function () {
+        var self = this, list = this.filter().filter(function (ch) { return !NameTidy.isSep(ch.name); });
+        if (!this.onlyProg) return list;
+        var local = Epg.valid && Epg.native(), map = local ? Epg.nowFull(list) : null;
+        return list.filter(function (ch) {
+            if (!ch.epg) return false;
+            if (local) return !!map[ch.epg];
+            var l = self.epg[ch.id];
+            return !l || l.length > 0;
+        });
+    };
     EpgGridScreen.prototype.categories = LiveScreen.prototype.categories;
     EpgGridScreen.prototype.filter = LiveScreen.prototype.filter;
 
@@ -6324,10 +6366,12 @@
         var self = this;
         document.body.classList.add('preview-mode');
         EpgQueue.clear();
-        this.list = this.filter();
+        this.list = this.channels();
         if (this.chIndex >= this.list.length) this.chIndex = 0;
 
-        var wrap = h('div', 'eg');
+        var wrap = h('div', 'eg eg3');
+        this.bg = h('div', 'live-bg');
+        wrap.appendChild(this.bg);
         this.previewBox = h('div', 'eg-preview');
         this.previewLabel = h('div', 'eg-preview-label', '');
         this.previewBox.appendChild(this.previewLabel);
@@ -6336,18 +6380,23 @@
         wrap.appendChild(this.info);
         this.clock = h('div', 'eg-clock', fmtClock(new Date()));
         wrap.appendChild(this.clock);
+        this.chipsBox = h('div', 'eg-chips');
+        wrap.appendChild(this.chipsBox);
         this.main = h('div', 'eg-main');
         wrap.appendChild(this.main);
         var hint = h('div', 'eg-hint');
         hint.innerHTML = '<span><b>◀ ▶</b> Zeit</span><span><b>▲ ▼</b> Sender</span><span><b>OK</b> Ansehen' +
-            (Rec.available() ? ' / Aufnehmen' : '') + '</span><span><i class="k red"></i>−2 Std.</span><span><i class="k green"></i>+2 Std.</span>' +
-            '<span><i class="k yellow"></i>Favorit</span><span><i class="k blue"></i>Jetzt</span><span><b>◀</b> ganz links: Kategorie</span>';
+            (Rec.available() ? ' / Aufnehmen' : '') + ' / Erinnern</span><span><i class="k red"></i>−2 Std.</span><span><i class="k green"></i>+2 Std.</span>' +
+            '<span><i class="k yellow"></i>Favorit</span><span><i class="k blue"></i>Jetzt</span><span><b>▲</b> ganz oben: Kategorien</span>';
         wrap.appendChild(hint);
         root.appendChild(wrap);
+        setTimeout(function () { placeHoleBg(self.bg, self.previewBox); }, 0);
 
         this.marks = Rec.marks();
         if (!this.list.length) {
-            this.main.appendChild(h('div', 'empty-note', 'Keine Sender in dieser Kategorie.'));
+            this.col = 'cats';
+            this.drawChips();
+            this.main.appendChild(h('div', 'empty-note', this.onlyProg ? 'In dieser Kategorie hat kein Sender ein Programm. Schalte „Nur mit Programm“ oben aus.' : 'Keine Sender in dieser Kategorie.'));
             return;
         }
         this.draw();
@@ -6358,6 +6407,51 @@
             self.marks = Rec.marks();
             self.draw();
         }, 30000);
+    };
+
+    /** Kategorien oben als Knöpfe, am Ende der Schalter „Nur mit Programm“ */
+    EpgGridScreen.prototype.drawChips = function () {
+        var self = this, box = this.chipsBox, cats = this.categories();
+        if (!box) return;
+        box.innerHTML = '';
+        var strip = h('div', 'eg-chip-strip');
+        var items = cats.map(function (c, i) { return { label: i === 0 ? '☰  Alle' : i === 1 ? c : NameTidy.cat(c), cat: i }; });
+        items.push({ label: (this.onlyProg ? '✓  ' : '') + 'Nur mit Programm', toggle: true });
+        this.chipItems = items;
+        if (this.chip >= items.length) this.chip = items.length - 1;
+        var nodes = [];
+        items.forEach(function (it, i) {
+            var cls = 'eg-chip' + (it.toggle ? ' tgl' + (self.onlyProg ? ' on' : '') : it.cat === self.catIndex ? ' active' : '') +
+                (self.col === 'cats' && i === self.chip ? ' focus' : '');
+            var n = h('div', cls, it.label);
+            strip.appendChild(n);
+            nodes.push(n);
+        });
+        box.appendChild(strip);
+        // Markierten Knopf sichtbar halten
+        var target = nodes[this.col === 'cats' ? this.chip : Math.min(this.catIndex, nodes.length - 1)];
+        var shift = 0;
+        if (target) {
+            var right = target.offsetLeft + target.offsetWidth, w = box.clientWidth || 1840;
+            if (right > w - 20) shift = right - w + 60;
+        }
+        strip.style.transform = 'translateX(' + (-shift) + 'px)';
+    };
+
+    EpgGridScreen.prototype.chooseChip = function () {
+        var it = this.chipItems && this.chipItems[this.chip], self = this;
+        if (!it) return;
+        if (it.toggle) {
+            this.onlyProg = !this.onlyProg;
+            Storage.set('epgOnlyProg', this.onlyProg);
+            this.chIndex = 0; this.rowTop = 0;
+            toast(this.onlyProg ? 'Nur noch Sender mit Programm' : 'Alle Sender werden gezeigt');
+            Nav.show(this);
+            return;
+        }
+        var name = this.categories()[it.cat];
+        function go() { self.catIndex = it.cat; self.chIndex = 0; self.rowTop = 0; Nav.show(self); }
+        if (Parental.catLocked('live', name)) Parental.ask('PIN für „' + name + '“', go); else go();
     };
 
     EpgGridScreen.prototype.hide = function () {
@@ -6379,7 +6473,7 @@
         var list = this.epg[ch.id], winEnd = this.winStart + this.SPAN, self = this;
         if (!list) return [{ placeholder: true, loading: true, title: 'Programm wird geladen …', start: this.winStart, end: winEnd }];
         var out = list.filter(function (p) { return p.end > self.winStart && p.start < winEnd; });
-        if (!out.length) return [{ placeholder: true, title: 'Kein Programm verfügbar', start: this.winStart, end: winEnd }];
+        if (!out.length) return [{ placeholder: true, nolist: !list.length, title: list.length ? 'Kein Programm in dieser Zeit' : '● LIVE · kein Programm vom Anbieter', start: this.winStart, end: winEnd }];
         return out;
     };
 
@@ -6433,24 +6527,33 @@
             if (next) this.load(next);
 
             var row = h('div', 'eg-row');
-            row.style.top = (r * 98) + 'px';
-            var cn = h('div', 'eg-chan' + (idx === this.chIndex ? ' sel' : '') + (idx === this.chIndex && this.col === 'chan' ? ' focus' : ''));
+            row.style.top = (r * this.ROW_H) + 'px';
+            var nt = NameTidy.split(ch.name, ch.cat);
+            var cn = h('div', 'eg-chan' + (idx === this.chIndex ? ' sel' + (this.col === 'prog' ? ' cur' : '') : ''));
             cn.appendChild(h('div', 'n', String(ch.num)));
-            cn.appendChild(h('div', 'nm', ch.name + (Favs.has('live', ch.id) ? ' ★' : '')));
+            var lg = h('div', 'lg');
+            if (ch.logo) { var im = h('img'); LazyImg.set(im, ch.logo); im.onerror = function () { this.style.visibility = 'hidden'; }; lg.appendChild(im); }
+            cn.appendChild(lg);
+            cn.appendChild(h('div', 'nm', nt.name + (Favs.has('live', ch.id) ? ' ★' : '')));
+            if (nt.tags.length) cn.appendChild(h('span', 'ch-tag' + (/^(HD|FHD|UHD|4K|8K|HDR)$/.test(nt.tags[0]) ? ' q' : ''), nt.tags[0]));
             row.appendChild(cn);
 
             this.programs(ch).forEach(function (p) {
                 var a = Math.max(p.start, self.winStart), b = Math.min(p.end, self.winStart + self.SPAN);
                 var cls = 'eg-prog';
-                if (p.placeholder) cls += ' empty';
+                if (p.placeholder) cls += ' empty' + (p.nolist ? ' nolist' : '');
                 if (!p.placeholder && p.start <= now && p.end > now) cls += ' now';
                 if (idx === self.chIndex && self.col === 'prog' && p === focused) cls += ' focus';
                 var block = h('div', cls);
                 block.style.left = (self.px(a) + 4) + 'px';
                 block.style.width = Math.max(20, self.px(b) - self.px(a) - 8) + 'px';
                 var mark = !p.placeholder && self.marks[ch.id + ':' + p.start];
-                block.appendChild(h('div', 't', (mark ? '● ' : '') + p.title));
+                var bell = !p.placeholder && p.start > now && Remind.has(ch.id, p.start);
+                block.appendChild(h('div', 't', (mark ? '● ' : '') + (bell ? '🔔 ' : '') + p.title));
                 if (!p.placeholder) block.appendChild(h('div', 'tm', fmtClock(new Date(p.start)) + ' – ' + fmtClock(new Date(p.end))));
+                if (!p.placeholder && p.start <= now && p.end > now) {
+                    var pb = h('div', 'eg-pb'); pb.style.width = Math.round((now - a) / Math.max(1, b - a) * 100) + '%'; block.appendChild(pb);
+                }
                 if (mark) block.classList.add('rec');
                 row.appendChild(block);
             });
@@ -6462,8 +6565,13 @@
         if (now >= this.winStart && now < this.winStart + this.SPAN) {
             var line = h('div', 'eg-nowline');
             line.style.left = this.px(now) + 'px';
+            line.style.height = (Math.min(this.ROWS, this.list.length - this.rowTop) * this.ROW_H + 6) + 'px';
             main.appendChild(line);
+            var nl = h('div', 'eg-nowlbl', 'JETZT');
+            nl.style.left = (this.px(now) - 30) + 'px';
+            main.appendChild(nl);
         }
+        this.drawChips();
         this.renderInfo(focused);
         this.schedulePreview();
     };
@@ -6471,26 +6579,53 @@
     EpgGridScreen.prototype.renderInfo = function (p) {
         var ch = this.list[this.chIndex], box = this.info;
         box.innerHTML = '';
-        if (!ch) return;
-        if (this.col === 'chan') {
-            box.appendChild(h('div', 'eg-title', ch.name));
-            box.appendChild(h('div', 'eg-meta', 'Kategorie: ' + this.categories()[this.catIndex] + ' · OK: Kategorie wechseln'));
+        if (this.col === 'cats') {
+            var it = this.chipItems && this.chipItems[this.chip];
+            box.appendChild(h('div', 'eg-title', it ? it.label.replace(/^[☰✓]\s*/, '') : 'Kategorien'));
+            box.appendChild(h('div', 'eg-meta', it && it.toggle ? 'OK: Sender ohne Programm ' + (this.onlyProg ? 'wieder zeigen' : 'ausblenden')
+                : 'OK: Kategorie wählen · ▼ zurück zum Programm'));
             return;
         }
-        box.appendChild(h('div', 'eg-title', p ? p.title : ch.name));
-        var meta = ch.name;
-        if (p && !p.placeholder) meta += ' · ' + dateText(p.start) + ' – ' + fmtClock(new Date(p.end));
+        if (!ch) return;
+        var nt = NameTidy.split(ch.name, ch.cat), now = Date.now();
+        box.appendChild(h('div', 'eg-title', p && !p.placeholder ? p.title : nt.name));
+        var meta = nt.name;
+        if (p && !p.placeholder) {
+            meta = (p.start <= now && p.end > now ? fmtClock(new Date(p.start)) : dateText(p.start)) + ' – ' + fmtClock(new Date(p.end));
+            if (p.start <= now && p.end > now) meta += ' · noch ' + Math.max(1, Math.round((p.end - now) / 60000)) + ' Min';
+            else if (p.start > now) meta += ' · in ' + durText(p.start - now);
+        } else if (p && p.nolist) meta += ' · Live – der Anbieter liefert für diesen Sender kein Programm';
         var mark = p && !p.placeholder && this.marks[ch.id + ':' + p.start];
         if (mark) meta += mark.status === 'recording' ? ' · ● Wird aufgenommen' : ' · ● Aufnahme geplant';
+        if (p && !p.placeholder && p.start > now && Remind.has(ch.id, p.start)) meta += ' · 🔔 Erinnerung an';
         box.appendChild(h('div', 'eg-meta', meta));
+        if (p && !p.placeholder && p.start <= now && p.end > now) {
+            var pr = h('div', 'eg-pr'), pi = h('i');
+            pi.style.width = Math.round((now - p.start) / (p.end - p.start) * 100) + '%';
+            pr.appendChild(pi); box.appendChild(pr);
+        }
         if (p && p.desc) box.appendChild(h('div', 'eg-desc', p.desc));
+        var acts = h('div', 'eg-acts');
+        var running = !p || p.placeholder || (p.start <= now && p.end > now);
+        if (running) acts.appendChild(h('span', 'eg-act y', '▶ Ansehen'));
+        if (Rec.available() && p && !p.placeholder) acts.appendChild(h('span', 'eg-act', '● Aufnehmen'));
+        if (p && !p.placeholder && p.start > now) acts.appendChild(h('span', 'eg-act' + (running ? '' : ' y'), '🔔 Erinnern'));
+        acts.appendChild(h('span', 'eg-act-hint', 'mit OK'));
+        box.appendChild(acts);
     };
+    function durText(ms) {
+        var m = Math.round(ms / 60000);
+        return m < 60 ? m + ' Min' : Math.floor(m / 60) + ' Std ' + (m % 60 ? (m % 60) + ' Min' : '');
+    }
 
     /** Vorschau des markierten Senders (startet erst, wenn man kurz verweilt) */
     EpgGridScreen.prototype.schedulePreview = function () {
         var self = this, ch = this.list[this.chIndex];
         if (!ch) return;
-        this.previewLabel.textContent = ch.num + ' · ' + ch.name;
+        var pn = NameTidy.split(ch.name, ch.cat);
+        this.previewLabel.innerHTML = '';
+        this.previewLabel.appendChild(document.createTextNode(pn.name));
+        if (pn.tags.length) this.previewLabel.appendChild(h('span', 'ch-tag', pn.tags[0]));
         if (this.previewId === ch.id) return;
         clearTimeout(this.previewTimer);
         // Kommt man aus dem Vollbild zurück, läuft der Sender schon: sofort verkleinern statt warten
@@ -6525,23 +6660,36 @@
 
     EpgGridScreen.prototype.onKey = function (k) {
         var p = this.focusedProgram(), ch = this.list[this.chIndex];
+        if (this.col === 'cats') {
+            var n = (this.chipItems || []).length;
+            switch (k) {
+                case KEY.LEFT: this.chip = Math.max(0, this.chip - 1); break;
+                case KEY.RIGHT: this.chip = Math.min(n - 1, this.chip + 1); break;
+                case KEY.DOWN: if (!ch) return true; this.col = 'prog'; break;
+                case KEY.UP: return true;
+                case KEY.ENTER: this.chooseChip(); return true;
+                default: return false;
+            }
+            this.drawChips();
+            this.renderInfo(p);
+            return true;
+        }
         if (!ch) return false;
         var earliest = floorHalfHour(Date.now()) - HALF_HOUR;
         switch (k) {
-            case KEY.UP: this.chIndex = Math.max(0, this.chIndex - 1); break;
+            case KEY.UP:
+                if (this.chIndex === 0) { this.col = 'cats'; this.chip = Math.min(this.catIndex, (this.chipItems || [0]).length - 1); break; }
+                this.chIndex = this.chIndex - 1; break;
             case KEY.DOWN: this.chIndex = Math.min(this.list.length - 1, this.chIndex + 1); break;
             case KEY.CH_UP: this.chIndex = Math.max(0, this.chIndex - this.ROWS); break;
             case KEY.CH_DOWN: this.chIndex = Math.min(this.list.length - 1, this.chIndex + this.ROWS); break;
             case KEY.RIGHT:
-                if (this.col === 'chan') { this.col = 'prog'; break; }
                 this.cursor = p.placeholder ? this.cursor + HALF_HOUR : p.end + 1000;
                 this.fitWindow();
                 break;
             case KEY.LEFT:
-                if (this.col === 'chan') return true;
                 var target = p.placeholder ? this.cursor - HALF_HOUR : p.start - 1000;
-                if (target < Math.max(earliest, this.winStart) && this.winStart <= earliest) { this.col = 'chan'; break; }
-                if (p.placeholder && this.cursor - HALF_HOUR < earliest) { this.col = 'chan'; break; }
+                if (target < earliest) return true;
                 this.cursor = Math.max(earliest, target);
                 this.fitWindow();
                 break;
@@ -6582,7 +6730,6 @@
 
     EpgGridScreen.prototype.choose = function (ch, p) {
         var self = this;
-        if (this.col === 'chan') { this.chooseCategory(); return; }
         var now = Date.now();
         if (!p.placeholder && p.end <= now) { toast('Diese Sendung ist schon vorbei.'); return; }
         var running = p.placeholder || (p.start <= now && p.end > now);
@@ -6596,7 +6743,20 @@
             screen.handoff = keepIt;
             Nav.push(screen);
         };
-        if (!Rec.available() || p.placeholder) { if (running) watch(); else toast('Diese Sendung beginnt erst um ' + fmtClock(new Date(p.start)) + '.'); return; }
+        if (p.placeholder) { watch(); return; }
+        var remindBtn = function () {
+            var on = Remind.has(ch.id, p.start);
+            return { label: on ? '🔔  Erinnerung löschen' : '🔔  Erinnern', primary: !running && !Rec.available(), action: function () {
+                var now2 = Remind.toggle(ch, p);
+                toast(now2 ? 'Ich erinnere dich um ' + fmtClock(new Date(p.start - 60000)) + ' an „' + p.title + '“' : 'Erinnerung gelöscht', 4500);
+                self.draw();
+            } };
+        };
+        if (!Rec.available()) {
+            if (running) { watch(); return; }
+            Modal.open(p.title, dateText(p.start) + ' – ' + fmtClock(new Date(p.end)) + ' · ' + NameTidy.split(ch.name, ch.cat).name, [remindBtn(), { label: 'Abbrechen' }]);
+            return;
+        }
 
         var mark = this.marks[ch.id + ':' + p.start];
         var when = dateText(p.start) + ' – ' + fmtClock(new Date(p.end)) + ' · ' + ch.name;
@@ -6617,6 +6777,7 @@
                 self.marks = Rec.marks(); self.draw();
             } });
         }
+        if (!running) buttons.push(remindBtn());
         buttons.push({ label: 'Abbrechen' });
         Modal.open(p.title, when, buttons);
     };

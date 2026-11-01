@@ -1389,3 +1389,51 @@ body:not(.clock-on) #sleepbadge { right: 40px; }
 .vod-r1 .col-cats, .vod-r1 .col-grid, .vod-r1 .col-grid .scroll, .vod-r1 .col-cats .scroll { background: transparent; border: none; }
 .cat-dot { display: inline-block; margin-right: 10px; color: #6f6b64; text-align: center; }
 .cat-dot.all { color: inherit; }
+
+/* ---------- EPG E3: Gold, Kategorien oben, saubere Namen, Logos ---------- */
+.eg3 .eg-preview { left: 40px; top: 30px; width: 620px; height: 349px; border: 2px solid rgba(217,176,102,.6); border-radius: 14px; overflow: hidden; box-sizing: border-box; }
+.eg3 .eg-preview-label { left: 0; right: 0; bottom: 0; padding: 40px 20px 14px; background: linear-gradient(transparent, rgba(0,0,0,.85)); display: flex; align-items: center; }
+.eg3 .eg-info { left: 700px; top: 34px; right: 260px; height: 350px; padding: 0; background: transparent; border: none; }
+.eg3 .eg-title { font-size: 46px; font-weight: 900; margin-bottom: 8px; }
+.eg3 .eg-meta { font-size: 25px; color: #f4dc9e; margin-bottom: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eg-pr { width: 520px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); margin-bottom: 14px; }
+.eg-pr i { display: block; height: 6px; border-radius: 3px; background: #d9b066; }
+.eg3 .eg-desc { font-size: 22px; line-height: 32px; max-height: 64px; color: #d8d2c6; }
+.eg-acts { position: absolute; left: 0; top: 268px; white-space: nowrap; }
+.eg-act { display: inline-block; padding: 10px 22px; border-radius: 26px; background: rgba(255,255,255,.1); font-size: 22px; font-weight: 800; margin-right: 12px; }
+.eg-act.y { background: #f4dc9e; color: #1a1408; }
+.eg-act-hint { font-size: 19px; color: #a7a39a; }
+.eg3 .eg-clock { top: 26px; right: 40px; }
+.eg-chips { position: absolute; left: 40px; right: 40px; top: 400px; height: 56px; overflow: hidden; }
+.eg-chip-strip { white-space: nowrap; padding: 4px; transition: transform .15s; }
+.eg-chip { display: inline-block; padding: 9px 20px; margin-right: 10px; border-radius: 24px; background: rgba(255,255,255,.1); font-size: 21px; font-weight: 700; }
+.eg-chip.active { background: rgba(217,176,102,.5); }
+.eg-chip.tgl.on { background: rgba(58,163,91,.35); }
+.eg-chip.focus { background: #f4dc9e; color: #1a1408; box-shadow: 0 0 0 3px #f4dc9e, 0 0 20px rgba(244,220,158,.5); }
+.eg3 .eg-main { top: 462px; background: transparent; }
+.eg3 .eg-axis { left: 440px; top: 0; height: 36px; border: none; }
+.eg3 .eg-time { top: 0; font-size: 22px; font-weight: 700; color: #cfc8bb; }
+.eg3 .eg-rows { top: 40px; height: 500px; right: 40px; }
+.eg3 .eg-row { height: 82px; }
+.eg3 .eg-chan { left: 40px; width: 380px; height: 74px; top: 0; border-radius: 12px; background: rgba(255,255,255,.05); padding: 0 12px 0 0; }
+.eg3 .eg-chan .n { width: 46px; font-size: 20px; margin-right: 10px; }
+.eg3 .eg-chan .lg { width: 70px; height: 46px; border-radius: 8px; background: #11151a; flex: none; display: flex; align-items: center; justify-content: center; margin-right: 12px; overflow: hidden; }
+.eg3 .eg-chan .lg img { max-width: 62px; max-height: 40px; }
+.eg3 .eg-chan .nm { font-size: 23px; font-weight: 800; flex: 1; min-width: 0; }
+.eg3 .eg-chan .ch-tag { flex: none; margin-left: 8px; }
+.eg3 .eg-chan.sel { background: rgba(217,176,102,.25); }
+.eg3 .eg-chan.cur { background: rgba(217,176,102,.4); box-shadow: 0 0 0 3px #f4dc9e; }
+.eg3 .eg-prog { top: 0; height: 74px; padding: 8px 14px; border-radius: 10px; background: rgba(255,255,255,.08); border: none; }
+.eg3 .eg-prog .t { font-size: 21px; }
+.eg3 .eg-prog .tm { font-size: 16px; margin-top: 2px; }
+.eg3 .eg-prog.now { background: rgba(217,176,102,.30); }
+.eg3 .eg-prog .eg-pb { position: absolute; left: 0; bottom: 0; height: 4px; background: #d9b066; }
+.eg3 .eg-prog.empty { background: transparent; border: 1.5px dashed rgba(255,255,255,.18); display: flex; align-items: center; }
+.eg3 .eg-prog.empty .tm { display: none; }
+.eg3 .eg-prog.focus { background: #f4dc9e; color: #1a1408; box-shadow: 0 0 0 3px #f4dc9e, 0 0 24px rgba(244,220,158,.45); }
+.eg3 .eg-prog.focus .tm { color: rgba(26,20,8,.75); }
+.eg3 .eg-prog.focus .eg-pb { background: #1a1408; }
+.eg3 .eg-prog.empty.focus { background: rgba(217,176,102,.35); color: #fff; border-color: transparent; }
+.eg3 .eg-nowline { top: 38px; }
+.eg-nowlbl { position: absolute; top: 24px; background: #f4dc9e; color: #1a1408; font-size: 14px; font-weight: 900; padding: 1px 6px; border-radius: 6px; }
+.eg3 .eg-hint { bottom: 14px; left: 40px; font-size: 20px; }
