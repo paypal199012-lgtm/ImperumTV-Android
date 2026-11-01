@@ -7831,12 +7831,7 @@
         head.appendChild(buttons);
         // Verbindung: Balken, Gut/Mäßig/Schwach, Datenrate
         var lv = NetQ.level(), nqm = NetQ.mode();
-        this.nqBox = null;
-        if (nqm === 'always' || (nqm === 'problems' && (lv === 'mid' || lv === 'bad'))) {
-            this.nqBox = h('div', 'pb-net ' + (lv === 'wait' ? 'good' : lv));
-            this.fillNetBox(lv);
-            head.insertBefore(this.nqBox, buttons);
-        }
+        this.nqBox = null;                              // Anzeige steht oben in der Mitte, nicht mehr in der Leiste
         // Bild hängt länger: Hinweis mit direkter Hilfe
         this.nqHint = null;
         if (NetQ.waiting() > 3000 && nqm !== 'off') {
@@ -7887,7 +7882,6 @@
             this.nqBadge.innerHTML = NetQ.bars(lv) + '<span>' + NetQ.text(lv) + '</span>' + (rate ? '<em>· Datenrate ' + rate + '</em>' : '');
         } else this.nqBadge.className = 'hidden';
         if (this.overlay) this.fillNetBox(lv);
-        if (this.overlay && nqm === 'problems' && !this.nqBox !== (lv === 'good' || lv === 'wait')) this.renderOverlay();   // Kasten ein-/ausblenden
         // Hängt das Bild länger als 3 s: Leiste mit Hinweis zeigen (einmal pro Hänger)
         var w = NetQ.waiting();
         if (w > 3000 && nqm !== 'off' && !this.nqHintShown && !Modal.node && !this.zapOpen) {
