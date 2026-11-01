@@ -5002,14 +5002,15 @@
             if (!ch) return [];
             this.build();
             var self = this, co = this.country(ch.name);
-            // Reihenfolge: gleiches Land, ohne Land, deutsch, sonst; schwache Varianten (MOBILE/LOW/SD) zuletzt
+            // Reihenfolge: gleiches Land, ohne Land, deutsch, sonst
             function rank(c) {
-                var cc = self.country(c.name), r = cc === co ? 0 : !cc ? 1 : cc === 'DE' ? 2 : 3;
-                if (/mobile|low|lq|(^|[^a-z])sd([^a-z]|$)/i.test(NameTidy.plain(c.name))) r += 10;
-                return r;
+                var cc = self.country(c.name);
+                return cc === co ? 0 : !cc ? 1 : cc === 'DE' ? 2 : 3;
             }
             return (this.index[this.key(ch)] || []).filter(function (c) {
                 if (c.id === ch.id || Hidden.has(c.id)) return false;
+                // Schwache Varianten (MOBILE, LOW, LQ, SD) nie als Ersatz – auf dem Fernseher zu unscharf
+                if (/mobile|(^|[^a-z])(low|lq|sd)([^a-z]|$)/i.test(NameTidy.plain(c.name))) return false;
                 var cc = self.country(c.name);
                 return !co || !cc || cc === co;
             }).sort(function (a, b) { return rank(a) - rank(b); }).slice(0, 8);
