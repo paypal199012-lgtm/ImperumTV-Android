@@ -1536,9 +1536,11 @@ body.android .lv-act:not(.primary):not(.focused), body.android .eg-chip:not(.act
 body.android .eg3 .eg-prog:not(.now):not(.focus):not(.empty), body.android .eg3 .eg-chan:not(.sel):not(.cur) { background: #1e1c19; }
 body.android .set-row:not(.focused), body.android .set6-card .set-row:not(.focused) { background: #1a1816; }
 .btn-svg { display: inline-block; vertical-align: -6px; margin-right: 12px; line-height: 0; }
-/* Verschieben: Knöpfe zum Antippen am Sender */
-.mv-ctl { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: flex; z-index: 2; }
-.mv-b { display: inline-block; min-width: 54px; height: 54px; line-height: 54px; text-align: center; margin-left: 8px; border-radius: 27px;
-    background: #f4dc9e; color: #1a1408; font-size: 24px; font-weight: 900; cursor: pointer; padding: 0 10px; box-sizing: border-box; }
-.mv-b.ok { background: #3aa35b; color: #fff; font-size: 21px; padding: 0 16px; }
+/* Verschieben: Knöpfe zum Antippen am Sender (Design V8) */
+.mv-ctl { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; z-index: 2;
+    background: #141210; border-radius: 28px; padding: 4px 6px; border: 1px solid rgba(255,255,255,.18); }
+.mv-b { display: inline-block; width: 46px; height: 46px; line-height: 46px; text-align: center; margin: 0 2px; border-radius: 50%;
+    background: transparent; color: #fff; font-size: 18px; font-weight: 900; cursor: pointer; }
+.mv-b.ok { background: #f4dc9e; color: #1a1408; margin-left: 8px; font-size: 0; }
+.mv-b.ok::before { content: "✓"; font-size: 24px; }
 .row.moving::after { display: none; }
