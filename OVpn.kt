@@ -52,11 +52,13 @@ object ImperumOVpn {
             val c = appCtx ?: return
             val text = try { logItem.getString(c) } catch (e: Throwable) { return } ?: return
             if (text.isBlank()) return
+            // Zugangsdaten nie ins Protokoll (es landet in Fehlerberichten und Screenshots)
+            val clean = text.replace(Regex("(username '[^']*' )\\S+"), "$1[…]")
             // Lange Liste der OpenVPN-Optionen („  name = wert“) weglassen – sonst verdrängt sie die wichtigen Zeilen
             if (Regex("^\\s+[a-z0-9_]+(\\[\\d+\\])? = ").containsMatchIn(text)) return
             val error = try { logItem.logLevel == VpnStatus.LogLevel.ERROR } catch (e: Throwable) { false }
             synchronized(logLines) {
-                logLines.addLast((if (error) "FEHLER: " else "") + text.take(300))
+                logLines.addLast((if (error) "FEHLER: " else "") + clean.take(300))
                 while (logLines.size > 80) logLines.removeFirst()
             }
         }
@@ -166,9 +168,61 @@ object ImperumOVpn {
                 update("fehler", why)
             }
         }, TIMEOUT_MS)
+        // Server-Namen selbst nachschlagen (DNS über HTTPS bei Cloudflare/Google): manche Router/Netze liefern für
+        // VPN-Server falsche Adressen (z. B. von Facebook) – dann antwortet nie ein Server
+        Thread {
+            val conf = try { resolveRemotes(config(c)) } catch (e: Throwable) { config(c) }
+            main.post { if (myAttempt == attempt) launch(c, conf) }
+        }.start()
+    }
+
+    private fun addLog(line: String) {
+        synchronized(logLines) {
+            logLines.addLast(line.take(300))
+            while (logLines.size > 80) logLines.removeFirst()
+        }
+    }
+
+    /** IPv4 eines Namens über DNS-over-HTTPS (erst Cloudflare, dann Google); leer = nicht gefunden */
+    private fun dohLookup(host: String): String {
+        val urls = listOf("https://1.1.1.1/dns-query?type=A&name=", "https://8.8.8.8/resolve?type=A&name=")
+        for (u in urls) {
+            try {
+                val conn = java.net.URL(u + java.net.URLEncoder.encode(host, "UTF-8")).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 4000; conn.readTimeout = 4000
+                conn.setRequestProperty("accept", "application/dns-json")
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val ans = org.json.JSONObject(body).optJSONArray("Answer") ?: continue
+                for (i in 0 until ans.length()) {
+                    val a = ans.getJSONObject(i)
+                    if (a.optInt("type") == 1) return a.optString("data")
+                }
+            } catch (e: Throwable) { }
+        }
+        return ""
+    }
+
+    /** „remote name port“ → „remote IP port“, wenn die sichere Abfrage eine Adresse liefert */
+    private fun resolveRemotes(conf: String): String {
+        val re = Regex("(?m)^(\\s*remote\\s+)([A-Za-z0-9.-]+[A-Za-z][A-Za-z0-9.-]*)(\\s.*)?$")
+        return re.replace(conf) { m ->
+            val host = m.groupValues[2]
+            val ip = dohLookup(host)
+            val sys = try { java.net.InetAddress.getByName(host).hostAddress ?: "" } catch (e: Throwable) { "" }
+            if (ip.isNotEmpty()) {
+                addLog("DNS: $host → $ip (sicher nachgeschlagen)" + (if (sys.isNotEmpty() && sys != ip) " · Router meldete $sys" else ""))
+                m.groupValues[1] + ip + m.groupValues[3]
+            } else {
+                addLog("DNS: $host → " + (if (sys.isNotEmpty()) sys else "nicht gefunden") + " (Router)")
+                m.value
+            }
+        }
+    }
+
+    private fun launch(c: Context, conf: String) {
         try {
             val cp = ConfigParser()
-            cp.parseConfig(StringReader(config(c)))
+            cp.parseConfig(StringReader(conf))
             val p = cp.convertProfile()
             p.mName = "ImperumTV"
             val u = user(c)
