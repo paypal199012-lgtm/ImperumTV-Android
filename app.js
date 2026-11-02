@@ -870,6 +870,87 @@
      * weniger (Uhr ohne Sekunden, Programm-Laden wartet, weniger Meldungen vom Player) – mehr Leistung fürs Bild.
      * Jede Taste bzw. die eingeblendete Leiste weckt alles wieder auf.
      */
+    /**
+     * Farbthema: Alle Gold-Töne der Oberfläche (Rahmen, Schrift, Lichtstrahlen, Knöpfe) werden in die Themenfarbe umgerechnet,
+     * das ImperumTV-Logo färbt sich mit. Senderlogos, Cover und Video bleiben unverändert. Gilt pro Gerät.
+     */
+    var Theme = {
+        LIST: [['gold', 'Gold'], ['blau', 'Blau'], ['silber', 'Silber'], ['smaragd', 'Smaragd'], ['pink', 'Pink'], ['violett', 'Violett'], ['tuerkis', 'Türkis'], ['kobalt', 'Kobalt']],
+        DEF: {
+            blau:    { h: 212, s: 1.0,  logo: 'hue-rotate(175deg) saturate(1.2)' },
+            silber:  { h: 0,   s: 0,    l: 1.06, logo: 'grayscale(1) brightness(1.08)' },
+            smaragd: { h: 150, s: 0.95, logo: 'hue-rotate(95deg) saturate(1.1)' },
+            pink:    { h: 322, s: 1.15, logo: 'hue-rotate(-95deg) saturate(1.6)' },
+            violett: { h: 268, s: 0.95, logo: 'hue-rotate(225deg) saturate(1.2)' },
+            tuerkis: { h: 178, s: 1.0,  logo: 'hue-rotate(135deg) saturate(1.3)' },
+            kobalt:  { h: 230, s: 1.35, logo: 'hue-rotate(195deg) saturate(1.8)' }
+        },
+        src: null,
+        cur: function () { var t = Storage.rawGet('theme', 'gold'); return this.DEF[t] ? t : 'gold'; },      // pro Gerät, nicht pro Profil
+        label: function (t) { t = t || this.cur(); for (var i = 0; i < this.LIST.length; i++) if (this.LIST[i][0] === t) return this.LIST[i][1]; return 'Gold'; },
+        link: function () {
+            var ls = document.getElementsByTagName('link');
+            for (var i = 0; i < ls.length; i++) if (/style\.css/.test(ls[i].href || '')) return ls[i];
+            return null;
+        },
+        /** Text der Original-Stylesheet (einmal gelesen) */
+        source: function () {
+            if (this.src !== null) return this.src;
+            var out = '', l = this.link();
+            try {
+                if (l && l.sheet) { var rs = l.sheet.cssRules; for (var i = 0; i < rs.length; i++) out += rs[i].cssText + '\n'; }
+            } catch (e) { out = ''; }
+            if (!out && l) {
+                try { var x = new XMLHttpRequest(); x.open('GET', l.href, false); x.send(); out = x.responseText || ''; } catch (e2) { out = ''; }
+            }
+            this.src = out;
+            return out;
+        },
+        /** Eine Farbe umrechnen: nur Gold-/Brauntöne (Farbton 18–62°), alles andere bleibt */
+        conv: function (r, g, b, a, d) {
+            r /= 255; g /= 255; b /= 255;
+            var mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, h = 0, sa = 0, dd = mx - mn;
+            if (dd) {
+                sa = l > 0.5 ? dd / (2 - mx - mn) : dd / (mx + mn);
+                h = mx === r ? ((g - b) / dd + (g < b ? 6 : 0)) : mx === g ? ((b - r) / dd + 2) : ((r - g) / dd + 4);
+                h *= 60;
+            }
+            if (sa < 0.08 || h < 18 || h > 62) return null;
+            var nh = d.h / 360, ns = Math.min(1, sa * d.s), nl = d.l ? Math.min(1, l * d.l) : l;
+            function hue(p, q, t) { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; }
+            var R, G, B;
+            if (!ns) { R = G = B = nl; } else {
+                var q = nl < 0.5 ? nl * (1 + ns) : nl + ns - nl * ns, p = 2 * nl - q;
+                R = hue(p, q, nh + 1 / 3); G = hue(p, q, nh); B = hue(p, q, nh - 1 / 3);
+            }
+            R = Math.round(R * 255); G = Math.round(G * 255); B = Math.round(B * 255);
+            return a < 1 ? 'rgba(' + R + ',' + G + ',' + B + ',' + a + ')' : 'rgb(' + R + ',' + G + ',' + B + ')';
+        },
+        apply: function (name) {
+            var old = document.getElementById('theme-css'), l = this.link(), self = this;
+            if (old) old.parentNode.removeChild(old);
+            var d = this.DEF[name];
+            if (!d) { if (l) l.disabled = false; document.body.removeAttribute('data-theme'); return; }
+            var css = this.source();
+            if (!css) return;
+            css = css.replace(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g, function (m, x) {
+                if (x.length === 3) x = x.charAt(0) + x.charAt(0) + x.charAt(1) + x.charAt(1) + x.charAt(2) + x.charAt(2);
+                return self.conv(parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16), 1, d) || m;
+            }).replace(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/g, function (m, r, g, b, a) {
+                return self.conv(+r, +g, +b, a === undefined ? 1 : +a, d) || m;
+            });
+            // ImperumTV-Logo in der Themenfarbe (nur das eigene Logo, nicht die Senderlogos)
+            css += '\nimg[src$="logo-frei.png"], img[src$="img/icon.png"] { filter: ' + d.logo + ' !important; }\n';
+            var st = document.createElement('style');
+            st.id = 'theme-css';
+            st.appendChild(document.createTextNode(css));
+            document.head.appendChild(st);
+            if (l) l.disabled = true;
+            document.body.setAttribute('data-theme', name);
+        },
+        set: function (name) { try { localStorage.setItem('imptv.theme', JSON.stringify(name)); } catch (e) { /* egal */ } this.apply(name); }
+    };
+
     /** Was hat die App zuletzt Großes gemacht? (für den Bericht „Taste verspätet“) */
     var Busy = {
         l: '', at: 0,
@@ -7709,6 +7790,18 @@
         });
 
         col('clock', 'ANZEIGE & FAMILIE');
+        row('theme', 'tv', 'Farbthema', Theme.label(), function () {
+            var cur = Theme.cur(), b = Theme.LIST.map(function (t) {
+                return { label: t[1], primary: t[0] === cur, action: function () {
+                    Theme.set(t[0]);
+                    self.focusKey = 'set-theme';
+                    Nav.show(self);
+                    toast('Farbthema: ' + t[1]);
+                } };
+            });
+            b.push({ label: 'Abbrechen' });
+            Modal.open('Farbthema', 'Farbe der Oberfläche auf diesem Gerät. Senderlogos, Cover und das Bild bleiben unverändert.', b);
+        });
         row('clock', 'clock', 'Uhrzeit oben rechts', Clock.label().replace('An · mit Sekunden', 'Mit Sekunden').replace('An · ohne Sekunden', 'Ohne Sekunden'), function (v) {
             Clock.next();
             v.textContent = Clock.label().replace('An · mit Sekunden', 'Mit Sekunden').replace('An · ohne Sekunden', 'Ohne Sekunden');
@@ -9464,6 +9557,7 @@
         // Android/Fire TV: sparsamere Effekte (schwache Grafikchips)
         if (AB) document.body.classList.add('lowfx');
 
+        try { if (Theme.cur() !== 'gold') Theme.apply(Theme.cur()); } catch (eT) { /* Farbthema ist nur Kosmetik */ }
         Device.load();
         var saved = Storage.get('account', null);
         var lastId = Storage.get('playlistId', null);
