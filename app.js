@@ -1724,7 +1724,7 @@
                 case 'get_vod_categories': return [{ category_id: '10', category_name: 'Blender Open Movies' }];
                 case 'get_vod_streams': return this.movies.map(function (m, i) {
                     return { stream_id: m.id, name: m.name, stream_icon: self.poster(m.name, m.color), category_id: '10', container_extension: 'mp4',
-                        rating: m.rating, year: String(m.year), added: String(now - i * 86400) };
+                        rating: m.rating, year: String(m.year), added: String(now - i * 86400), genre: m.genre };
                 });
                 case 'get_vod_info':
                     var mv = this.movie(extra && extra.vod_id);
@@ -1732,7 +1732,7 @@
                         duration: '00:' + (mv.min < 10 ? '0' : '') + mv.min + ':00', movie_image: this.poster(mv.name, mv.color),
                         backdrop_path: [this.backdrop(mv.color)] } : {} };
                 case 'get_series_categories': return [{ category_id: '20', category_name: 'Demo-Serien' }];
-                case 'get_series': return [{ series_id: 201, name: 'Blender Open Movies', cover: this.poster('Blender Open Movies', '#7a5a1a'), category_id: '20', rating: '7.2', last_modified: String(now) }];
+                case 'get_series': return [{ series_id: 201, name: 'Blender Open Movies', cover: this.poster('Blender Open Movies', '#7a5a1a'), category_id: '20', rating: '7.2', last_modified: String(now), genre: 'Animation, Abenteuer, Familie' }];
                 case 'get_series_info':
                     return { info: { plot: 'Die freien Kurzfilme der Blender Foundation als Serie – zum Testen von Staffeln, Folgen und „Nächste Folge“.', genre: 'Animation', releaseDate: '2006' },
                         episodes: { '1': this.movies.map(function (m, i) { return { id: String(301 + i), episode_num: i + 1, title: m.name.replace(/\s*\(\d{4}\)/, ''), container_extension: 'mp4', season: 1, info: { duration: '00:' + (m.min < 10 ? '0' : '') + m.min + ':00' } }; }) } };
@@ -2372,6 +2372,62 @@
     }
     function ratingText(v) { return v > 0 ? '★ ' + v.toFixed(1) : ''; }
 
+    /**
+     * Genre-Angabe („Action, Abenteuer“, „Sci-Fi & Fantasy“, „Komödie“, „DE | HORROR“ …) als Bitmaske.
+     * Reihenfolge = GENRE_NAMES. Läuft auch im Worker, deshalb ohne Zugriff auf andere Teile der App.
+     */
+    function genreMask(text) {
+        if (!text) return 0;
+        var t = ' ' + String(text).toLowerCase().replace(/[àáâ]/g, 'a').replace(/[èéê]/g, 'e').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ä/g, 'a') + ' ';
+        var R = [/[^a-z](action)[^a-z]/, /[^a-z](adventure|abenteuer|aventure|avventura)/, /[^a-z](animation|animiert|zeichentrick|cartoon|anime|animat)/,
+            /[^a-z](comedy|komodie|komoedie|comedie|commedia|comedia|komedi)/, /[^a-z](crime|krimi|kriminal|polar|policier)/,
+            /[^a-z](documentar|dokumentar|doku|documentaire|docu)/, /[^a-z](drama|drame)[^a-z]/, /[^a-z](family|familie|famille|kids|kinder|children|enfant)/,
+            /[^a-z](fantasy|fantastique|fantasie)/, /[^a-z](history|historie|geschicht|historisch|histoire|historical)/, /[^a-z](horror|horreur|terror)[^a-z]/,
+            /[^a-z](music|musik|musical|musique)/, /[^a-z](mystery|mystere|mysterium)/, /[^a-z](romance|romantik|romantisch|liebe|love|romantic|romant)/,
+            /[^a-z](science.?fiction|sci.?fi|scifi|s\.f\.)|[^a-z]sf[^a-z]/, /[^a-z](thriller)/, /[^a-z](war|krieg|kriegsfilm|guerre|guerra)[^a-z]/,
+            /[^a-z](western)/, /[^a-z](sport)/];
+        var m = 0;
+        for (var i = 0; i < R.length; i++) if (R[i].test(t)) m |= 1 << i;
+        return m;
+    }
+    var GENRE_NAMES = ['Action', 'Abenteuer', 'Animation', 'Komödie', 'Krimi', 'Dokumentation', 'Drama', 'Familie & Kinder', 'Fantasy', 'Geschichte',
+        'Horror', 'Musik', 'Mystery', 'Liebesfilm', 'Science-Fiction', 'Thriller', 'Krieg', 'Western', 'Sport'];
+
+    /** Genres eines Films/einer Serie: Angabe des Anbieters + Name der Kategorie + was in den Details stand */
+    var Genre = {
+        catCache: {},
+        learned: null,
+        load: function () { if (!this.learned) this.learned = Storage.get('genreLearned', {}) || {}; return this.learned; },
+        of: function (item) {
+            if (!item) return 0;
+            if (item._gm === undefined) {
+                var c = item.cat || '', cm = this.catCache[c];
+                if (cm === undefined) cm = this.catCache[c] = genreMask(c);
+                item._gm = (item.g || 0) | cm | (this.load()[item.type + item.id] || 0);
+            }
+            return item._gm;
+        },
+        /** Aus den Film-/Serien-Details gelernt (merkt sich höchstens 6000 Einträge) */
+        learnId: function (type, id, text) {
+            var m = genreMask(text);
+            if (!m) return;
+            var L = this.load(), k = type + id;
+            if ((L[k] || 0) === m) return;
+            L[k] = m;
+            var keys = Object.keys(L);
+            if (keys.length > 6000) for (var i = 0; i < keys.length - 6000; i++) delete L[keys[i]];
+            Storage.set('genreLearned', L);
+            this.changedAt = Date.now();
+            var list = (type === 'movie' ? Data.movies : Data.series) || [];
+            for (var j = 0; j < list.length; j++) if (String(list[j].id) === String(id)) { list[j]._gm = undefined; break; }
+        },
+        names: function (mask) {
+            var out = [];
+            for (var i = 0; i < GENRE_NAMES.length; i++) if (mask & (1 << i)) out.push(GENRE_NAMES[i]);
+            return out;
+        }
+    };
+
     /** Rohliste des Anbieters in kleine Einträge umrechnen (läuft im Worker oder als Notlösung hier) */
     function mapList(kind, list, cats) {
         try { Busy.mark('Liste umwandeln (' + kind + ')'); } catch (e) { /* im Worker gibt es Busy nicht */ }
@@ -2388,13 +2444,13 @@
                 item = { type: 'movie', id: parseInt(s.stream_id, 10), name: name, logo: str(s.stream_icon),
                     cat: cats[String(s.category_id)] || '', ext: str(s.container_extension) || 'mp4',
                     year: firstYear(str(s.year)) || firstYear(str(s.release_date)) || firstYear(str(s.releaseDate)) || yearFromName(name),
-                    rating: parseRating(s.rating, s.rating_5based), added: parseInt(s.added, 10) || 0 };
+                    rating: parseRating(s.rating, s.rating_5based), added: parseInt(s.added, 10) || 0, g: genreMask(str(s.genre)) };
             } else {
                 name = str(s.name) || 'Serie ' + s.series_id;
                 item = { type: 'series', id: parseInt(s.series_id, 10), name: name, logo: str(s.cover),
                     cat: cats[String(s.category_id)] || '',
                     year: firstYear(str(s.releaseDate)) || firstYear(str(s.release_date)) || firstYear(str(s.year)) || yearFromName(name),
-                    rating: parseRating(s.rating, s.rating_5based), added: parseInt(s.last_modified, 10) || 0 };
+                    rating: parseRating(s.rating, s.rating_5based), added: parseInt(s.last_modified, 10) || 0, g: genreMask(str(s.genre)) };
             }
             if (!isNaN(item.id)) out.push(item);
         }
@@ -2432,8 +2488,8 @@
         },
         item: function (kind, r, cats) {
             if (kind === 'live') return { type: 'live', id: r[0], num: r[1], name: r[2], logo: r[3], cat: cats[r[4]] || '', epg: r[5] };
-            if (kind === 'movie') return { type: 'movie', id: r[0], name: r[1], logo: r[2], cat: cats[r[3]] || '', ext: r[4], year: r[5], rating: r[6], added: r[7] };
-            return { type: 'series', id: r[0], name: r[1], logo: r[2], cat: cats[r[3]] || '', year: r[4], rating: r[5], added: r[6] };
+            if (kind === 'movie') return { type: 'movie', id: r[0], name: r[1], logo: r[2], cat: cats[r[3]] || '', ext: r[4], year: r[5], rating: r[6], added: r[7], g: genreMask(r[8]) };
+            return { type: 'series', id: r[0], name: r[1], logo: r[2], cat: cats[r[3]] || '', year: r[4], rating: r[5], added: r[6], g: genreMask(r[7]) };
         },
         build: function (text, kind, cats) {
             var me = this;
@@ -2484,7 +2540,7 @@
                         postMessage({ id: d.id, end: true, total: list.length });
                     };
                 };
-                var src = [str, firstYear, yearFromName, parseRating, mapList].map(function (f) { return f.toString(); }).join('\n') +
+                var src = [str, firstYear, yearFromName, parseRating, genreMask, mapList].map(function (f) { return f.toString(); }).join('\n') +
                     '\n(' + body.toString() + ')();';
                 var w = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
                 var me = this;
@@ -2964,8 +3020,8 @@
             for (var i = 0; i < list.length; i++) {
                 x = list[i];
                 out[i] = kind === 'live' ? [x.id, x.num, x.name, x.logo, x.cat, x.epg] :
-                    kind === 'movie' ? [x.id, x.name, x.logo, x.cat, x.ext, x.year, x.rating, x.added] :
-                    [x.id, x.name, x.logo, x.cat, x.year, x.rating, x.added];
+                    kind === 'movie' ? [x.id, x.name, x.logo, x.cat, x.ext, x.year, x.rating, x.added, x.g || 0] :
+                    [x.id, x.name, x.logo, x.cat, x.year, x.rating, x.added, x.g || 0];
             }
             return out;
         },
@@ -2974,8 +3030,8 @@
             for (var i = 0; i < rows.length; i++) {
                 r = rows[i];
                 out[i] = kind === 'live' ? { type: 'live', id: r[0], num: r[1], name: r[2], logo: r[3], cat: r[4], epg: r[5] } :
-                    kind === 'movie' ? { type: 'movie', id: r[0], name: r[1], logo: r[2], cat: r[3], ext: r[4], year: r[5], rating: r[6], added: r[7] } :
-                    { type: 'series', id: r[0], name: r[1], logo: r[2], cat: r[3], year: r[4], rating: r[5], added: r[6] };
+                    kind === 'movie' ? { type: 'movie', id: r[0], name: r[1], logo: r[2], cat: r[3], ext: r[4], year: r[5], rating: r[6], added: r[7], g: r[8] || 0 } :
+                    { type: 'series', id: r[0], name: r[1], logo: r[2], cat: r[3], year: r[4], rating: r[5], added: r[6], g: r[7] || 0 };
             }
             return out;
         },
@@ -3175,7 +3231,11 @@
         },
 
         movieInfo: function (id) {
-            return Api.call('get_vod_info', { vod_id: id }).then(function (json) { return parseInfo(json && json.info); });
+            return Api.call('get_vod_info', { vod_id: id }).then(function (json) {
+                var info = parseInfo(json && json.info);
+                Genre.learnId('movie', id, info.genre);
+                return info;
+            });
         },
 
         seriesDetails: function (id) {
@@ -3207,7 +3267,9 @@
                     });
                 });
                 all.sort(function (a, b) { return a.season - b.season || a.num - b.num; });
-                return { episodes: all, info: parseInfo(json.info) };
+                var sinfo = parseInfo(json.info);
+                Genre.learnId('series', id, sinfo.genre);
+                return { episodes: all, info: sinfo };
             });
         },
 
@@ -5878,8 +5940,35 @@
         if (this.kind === 'series') browse.push(NEWEP_CAT);
         browse.push(NEW_CAT);
         if (this.kind === 'movies') browse.push(this.yearLabel(), UNSEEN_CAT);
-        this.groupAt = [{ at: 0, label: 'FÜR DICH' }, { at: base.length, label: 'NEU & STÖBERN' }, { at: base.length + browse.length, label: 'KATEGORIEN' }];
-        return base.concat(browse, cats);
+        var genres = this.genreLabels();
+        this.groupAt = [{ at: 0, label: 'FÜR DICH' }, { at: base.length, label: 'NEU & STÖBERN' }];
+        if (genres.length) this.groupAt.push({ at: base.length + browse.length, label: 'GENRES' });
+        this.groupAt.push({ at: base.length + browse.length + genres.length, label: 'KATEGORIEN' });
+        return base.concat(browse, genres, cats);
+    };
+    /** Genre-Einträge in der linken Liste: unsichtbares Zeichen davor, damit sie nie mit einer Anbieter-Kategorie gleichen Namens verwechselt werden */
+    var GENRE_MARK = '\u200B';
+    function isGenreCat(cat) { return typeof cat === 'string' && cat.charAt(0) === GENRE_MARK; }
+    /** Wie viele Titel je Genre (nur neu zählen, wenn sich die Liste geändert hat) */
+    MoviesScreen.prototype.genreCounts = function () {
+        var items = this.items(), g = this._gcount;
+        if (!g || g.items !== this.allItems() || g.len !== items.length || g.at < (Genre.changedAt || 0)) {
+            var per = new Array(GENRE_NAMES.length);
+            for (var k = 0; k < per.length; k++) per[k] = 0;
+            for (var i = 0; i < items.length; i++) {
+                var m = Genre.of(items[i]);
+                if (!m) continue;
+                for (var b = 0; b < per.length; b++) if (m & (1 << b)) per[b]++;
+            }
+            g = this._gcount = { items: this.allItems(), len: items.length, per: per, at: Date.now() };
+        }
+        return g.per;
+    };
+    MoviesScreen.prototype.genreLabels = function () {
+        var per = this.genreCounts(), idx = [];
+        for (var i = 0; i < per.length; i++) if (per[i] > 0) idx.push(i);
+        idx.sort(function (a, b) { return per[b] - per[a] || a - b; });
+        return idx.map(function (i) { return GENRE_MARK + GENRE_NAMES[i]; });
     };
     /** Wie viele Filme/Serien in jeder Kategorie stecken (ein Durchlauf über alle Einträge) */
     MoviesScreen.prototype.catCounts = function () {
@@ -5912,6 +6001,7 @@
             if (self.kind === 'movies' && cat === self.yearLabel()) return c.year;
             if (self.kind === 'movies' && cat === SEEN_CAT) return seenMovies;
             if (self.kind === 'movies' && cat === UNSEEN_CAT) return items.length - seenMovies;
+            if (isGenreCat(cat)) return self.genreCounts()[GENRE_NAMES.indexOf(cat.slice(1))] || 0;
             return c.per[cat] || 0;
         });
     };
@@ -5996,6 +6086,10 @@
         if (cat === NEWEP_CAT) return Parental.visible('series', NewEps.series());
         if (cat === SEEN_CAT) return items.filter(function (m) { return !!Seen.movie(m.id); });
         if (cat === UNSEEN_CAT) return items.filter(function (m) { return !Seen.movie(m.id); });
+        if (isGenreCat(cat)) {
+            var bit = 1 << GENRE_NAMES.indexOf(cat.slice(1));
+            return items.filter(function (m) { return (Genre.of(m) & bit) !== 0; });
+        }
         if (this.kind === 'movies' && cat === this.yearLabel()) {
             var year = new Date().getFullYear();
             return items.filter(function (m) { return m.year === year; });

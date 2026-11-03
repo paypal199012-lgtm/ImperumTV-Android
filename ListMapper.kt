@@ -18,8 +18,8 @@ import java.io.Writer
  *
  * Die Umrechnung entspricht genau mapList() in app.js:
  *   live:   [id, num, name, logo, catId, epg]
- *   movie:  [id, name, logo, catId, ext, year|null, rating, added]
- *   series: [id, name, logo, catId, year|null, rating, added]
+ *   movie:  [id, name, logo, catId, ext, year|null, rating, added, genre]
+ *   series: [id, name, logo, catId, year|null, rating, added, genre]
  */
 object ListMapper {
     private const val CHUNK = 2000
@@ -28,9 +28,9 @@ object ListMapper {
 
     private val LIVE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "epg_channel_id")
     private val MOVIE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "container_extension",
-        "year", "release_date", "releaseDate", "rating", "rating_5based", "added")
+        "year", "release_date", "releaseDate", "rating", "rating_5based", "added", "genre")
     private val SERIES_KEYS = setOf("series_id", "name", "cover", "category_id", "releaseDate", "release_date",
-        "year", "rating", "rating_5based", "last_modified")
+        "year", "rating", "rating_5based", "last_modified", "genre")
 
     private val YEAR = Regex("(19|20)\\d{2}")
     private val YEAR_BRACKET = Regex("[(\\[](19|20)\\d{2}[)\\]]")
@@ -162,6 +162,7 @@ object ListMapper {
                 out.write(","); out.write(year?.toString() ?: "null")
                 out.write(","); out.write(num(rating(f["rating"], f["rating_5based"])))
                 out.write(","); out.write((jsInt(f["added"]) ?: 0L).toString())
+                out.write(","); quote(out, str(f["genre"]).take(80))
             }
             else -> {
                 val name = str(f["name"]).ifEmpty { "Serie $idText" }
@@ -172,6 +173,7 @@ object ListMapper {
                 out.write(","); out.write(year?.toString() ?: "null")
                 out.write(","); out.write(num(rating(f["rating"], f["rating_5based"])))
                 out.write(","); out.write((jsInt(f["last_modified"]) ?: 0L).toString())
+                out.write(","); quote(out, str(f["genre"]).take(80))
             }
         }
         out.write("]")
