@@ -5292,6 +5292,8 @@
             var m;
             if ((m = /^key:(\w+)$/.exec(c)) && this.KEYS[m[1]]) {
                 onKeyDown({ keyCode: KEY[this.KEYS[m[1]]], repeat: false, preventDefault: function () { }, stopPropagation: function () { } });
+                // Fernhilfe schickt nur "gedrückt", nie "losgelassen": OK sofort loslassen, sonst gilt es als langes Drücken (= Favorit)
+                if (m[1] === 'ok') LongPress.up();
                 return;
             }
             if ((m = /^click:([\s\S]+)$/.exec(c))) {
