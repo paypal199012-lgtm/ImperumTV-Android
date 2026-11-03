@@ -5125,7 +5125,7 @@
     }
 
     /**
-     * Fernwartung vom Admin (Admin-Seite → Gerät): kommt beim Start bzw. alle 10 Minuten mit device_flags.
+     * Fernwartung vom Admin (Admin-Seite → Gerät): kommt beim Start bzw. jede Minute mit device_flags.
      * Neu laden / Cache leeren erst, wenn gerade nichts abgespielt wird.
      */
     var RemoteCmd = {
@@ -9975,6 +9975,12 @@
                 if (!License.active() && !(Nav.top() instanceof LockScreen)) Nav.replace(new LockScreen());
             });
         }, 600000);
+
+        // Fernwartung (z. B. „Fernhilfe anfragen“) jede Minute abholen, damit Anfragen vom Support schnell ankommen
+        setInterval(function () {
+            if (Nav.top() instanceof LockScreen) return;
+            Updater.flags();
+        }, 60000);
     }
 
     /** Nach der Aktivierung: mit der zuletzt genutzten Liste weitermachen oder die Listen zeigen */
