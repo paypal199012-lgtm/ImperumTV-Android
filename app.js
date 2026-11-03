@@ -2456,15 +2456,16 @@
 
     /**
      * „Genres sammeln“: im Hintergrund leise die Details aller Filme und Serien abfragen und deren Genres merken.
-     * Nur wenn gerade nichts läuft, höchstens eine Abfrage alle 1,5 s; bei Fehlern lange Pause.
+     * Nur wenn gerade nichts läuft, etwa 2 Abfragen pro Sekunde; bei Fehlern lange Pause.
      */
     var GenreScan = {
-        timer: null, busy: false, fails: 0, pauseUntil: 0, done: 0, total: 0,
+        timer: null, busy: 0, fails: 0, pauseUntil: 0, done: 0, total: 0, flying: {},
+        PARALLEL: 2,          // höchstens 2 Abfragen gleichzeitig, neue alle 0,5 s → etwa 2 pro Sekunde
         on: function () { return Storage.get('genreScan', true) !== false; },
         start: function () {
             var self = this;
             if (this.timer) return;
-            this.timer = setInterval(function () { self.tick(); }, 1500);
+            this.timer = setInterval(function () { self.tick(); }, 500);
         },
         /** Nächster Titel ohne Genre-Prüfung: erst Filme (neueste zuerst), dann Serien */
         next: function () {
@@ -2475,7 +2476,7 @@
                 if (!list) continue;
                 total += list.length;
                 for (var i = list.length - 1; i >= 0; i--) {
-                    if (!Genre.known(type, list[i].id)) { todo++; if (!first) first = { type: type, id: list[i].id }; }
+                    if (!Genre.known(type, list[i].id)) { todo++; if (!first && !this.flying[type + list[i].id]) first = { type: type, id: list[i].id }; }
                 }
             }
             this.total = total; this.done = total - todo;
@@ -2508,18 +2509,22 @@
         },
         tick: function () {
             var self = this;
-            if (this.busy || !this.idle()) return;
+            if (this.busy >= this.PARALLEL || !this.idle()) return;
             var n = this.next();
-            if (!n) { Genre.flush(); return; }
-            this.busy = true;
+            if (!n) { if (!this.busy) Genre.flush(); return; }
+            this.busy++;
+            var fk = n.type + n.id;
+            this.flying[fk] = 1;
             var acc = Api.acc;
             Api.call(n.type === 'movie' ? 'get_vod_info' : 'get_series_info', n.type === 'movie' ? { vod_id: n.id } : { series_id: n.id }).then(function (json) {
-                self.busy = false; self.fails = 0;
+                self.busy--; delete self.flying[fk]; self.fails = 0;
                 if (Api.acc !== acc) return;
                 var info = parseInfo(json && json.info);
                 Genre.learnId(n.type, n.id, info.genre, info.plot);
             }, function (e) {
-                self.busy = false;
+                self.busy--; delete self.flying[fk];
+                // Anbieter bremst (zu viele Anfragen / gesperrt): gleich 10 Minuten Pause
+                if (e && /HTTP (429|403|503)/.test(e.message || '')) self.fails = 4;
                 // Fehler: kurz warten; derselbe Titel 3× kaputt → überspringen; viele Fehler hintereinander → 10 Minuten Pause
                 var k = n.type + n.id;
                 self.failCount = self.failId === k ? (self.failCount || 0) + 1 : 1;
