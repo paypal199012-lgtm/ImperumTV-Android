@@ -2482,9 +2482,21 @@
             return first;
         },
         progress: function () {
+            if (!this.total) this.next();          // gleich zählen, auch bevor die erste Abfrage lief
             if (!this.total) return '';
             var p = Math.floor(this.done * 100 / this.total);
             return p >= 100 ? '' : p + ' %';
+        },
+        /** Kurzer Zustand für die Einstellungen */
+        status: function () {
+            if (!this.on()) return 'Aus';
+            var p = this.progress();
+            if (!p) return this.total ? 'An · fertig' : 'An · wartet auf die Listen';
+            var why = '';
+            if (!this.timer) why = ' · startet gleich';
+            else if (Date.now() < this.pauseUntil) why = ' · Pause (Server antwortet nicht)';
+            else if (Nav.top() instanceof PlayerScreen) why = ' · pausiert, solange etwas läuft';
+            return 'An · ' + p + why;
         },
         idle: function () {
             if (!Api.acc || Api.acc.demo || !this.on()) return false;
@@ -2506,14 +2518,17 @@
                 if (Api.acc !== acc) return;
                 var info = parseInfo(json && json.info);
                 Genre.learnId(n.type, n.id, info.genre, info.plot);
-            }, function () {
+            }, function (e) {
                 self.busy = false;
                 // Fehler: kurz warten; derselbe Titel 3× kaputt → überspringen; viele Fehler hintereinander → 10 Minuten Pause
                 var k = n.type + n.id;
                 self.failCount = self.failId === k ? (self.failCount || 0) + 1 : 1;
                 self.failId = k;
                 if (self.failCount >= 3) Genre.learnId(n.type, n.id, '', '');
-                if (++self.fails >= 5) { self.fails = 0; self.pauseUntil = Date.now() + 10 * 60000; }
+                if (++self.fails >= 5) {
+                    self.fails = 0; self.pauseUntil = Date.now() + 10 * 60000;
+                    if (!self.reported) { self.reported = true; try { Report.send('fehler', 'Genres sammeln: 5 Fehler hintereinander (' + (e && e.message ? e.message : 'unbekannt') + ') – 10 Minuten Pause'); } catch (x) { /* egal */ } }
+                }
                 else self.pauseUntil = Date.now() + 15000;
             });
         }
@@ -8289,10 +8304,10 @@
         });
 
         col('clock', 'ANZEIGE & FAMILIE');
-        row('genrescan', 'list', 'Genres sammeln', GenreScan.on() ? (GenreScan.progress() ? 'An · ' + GenreScan.progress() : 'An') : 'Aus', function (v) {
+        row('genrescan', 'list', 'Genres sammeln', GenreScan.status(), function (v) {
             var on = !GenreScan.on();
             Storage.set('genreScan', on);
-            v.textContent = on ? 'An' : 'Aus';
+            v.textContent = GenreScan.status();
             toast(on ? 'Die App lädt im Hintergrund die Genres aller Filme und Serien – nur wenn gerade nichts läuft.' : 'Genres sammeln: aus', 6000);
         });
         row('theme', 'tv', 'Farbthema', Theme.label(), function () {
@@ -9999,7 +10014,7 @@
         Player.init();
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
         applyStallWait();
-        setTimeout(function () { GenreScan.start(); }, 60000);   // Genres im Hintergrund sammeln (nur wenn nichts läuft)
+        setTimeout(function () { GenreScan.start(); }, 15000);   // Genres im Hintergrund sammeln (nur wenn nichts läuft)
         setTimeout(function () { Updater.flags(); }, 8000);     // vom Admin erzwungenes Update?
         setTimeout(function () { try { Help.resume(); } catch (e) { /* egal */ } }, 6000);   // Fernhilfe lief vor dem Neustart
         setTimeout(function () { Report.flushNative(); }, 8000);   // Absturzbericht vom letzten Mal an die Website
