@@ -2396,35 +2396,126 @@
     /** Genres eines Films/einer Serie: Angabe des Anbieters + Name der Kategorie + was in den Details stand */
     var Genre = {
         catCache: {},
-        learned: null,
-        load: function () { if (!this.learned) this.learned = Storage.get('genreLearned', {}) || {}; return this.learned; },
+        learned: null, learnedFor: null, dirty: 0, saveT: null, changedAt: 0,
+        /** Gelernte Genres je Wiedergabeliste: { "m123": Maske, "s45": Maske } (0 = geprüft, kein Genre) */
+        key: function () { return 'genres.' + hash32(Resume.accKey(), 7).toString(36); },
+        load: function () {
+            var k = this.key();
+            if (!this.learned || this.learnedFor !== k) { this.learned = Storage.get(k, {}) || {}; this.learnedFor = k; }
+            return this.learned;
+        },
+        idKey: function (type, id) { return (type === 'movie' ? 'm' : 's') + id; },
         of: function (item) {
             if (!item) return 0;
             if (item._gm === undefined) {
                 var c = item.cat || '', cm = this.catCache[c];
                 if (cm === undefined) cm = this.catCache[c] = genreMask(c);
-                item._gm = (item.g || 0) | cm | (this.load()[item.type + item.id] || 0);
+                item._gm = (item.g || 0) | cm | (this.load()[this.idKey(item.type, item.id)] || 0);
             }
             return item._gm;
         },
-        /** Aus den Film-/Serien-Details gelernt (merkt sich höchstens 6000 Einträge) */
-        learnId: function (type, id, text) {
+        known: function (type, id) { return this.load().hasOwnProperty(this.idKey(type, id)); },
+        /** Horror steht bei Serien fast nie im Genre (TMDB kennt es dort nicht): an der Beschreibung erkennen */
+        HORROR: /(zombie|vampir|werw[oö]lf|werewol|d[äa]mon|demon|exorz|exorcis|spuk|besessen|possess|untote|undead|poltergeist|okkult|occult|haunt|horror)/i,
+        /** Aus den Film-/Serien-Details gelernt */
+        learnId: function (type, id, text, plot) {
             var m = genreMask(text);
-            if (!m) return;
-            var L = this.load(), k = type + id;
-            if ((L[k] || 0) === m) return;
+            if (plot && this.HORROR.test(plot)) m |= 1 << GENRE_NAMES.indexOf('Horror');
+            var L = this.load(), k = this.idKey(type, id);
+            if (L.hasOwnProperty(k) && L[k] === m) return;
             L[k] = m;
-            var keys = Object.keys(L);
-            if (keys.length > 6000) for (var i = 0; i < keys.length - 6000; i++) delete L[keys[i]];
-            Storage.set('genreLearned', L);
             this.changedAt = Date.now();
+            var item = this.byId(type, id);
+            if (item) item._gm = undefined;
+            this.save();
+        },
+        save: function () {
+            var self = this;
+            if (++this.dirty >= 25) { this.flush(); return; }
+            if (!this.saveT) this.saveT = setTimeout(function () { self.flush(); }, 20000);
+        },
+        flush: function () {
+            clearTimeout(this.saveT); this.saveT = null; this.dirty = 0;
+            if (this.learned && this.learnedFor) Storage.set(this.learnedFor, this.learned);
+        },
+        byId: function (type, id) {
             var list = (type === 'movie' ? Data.movies : Data.series) || [];
-            for (var j = 0; j < list.length; j++) if (String(list[j].id) === String(id)) { list[j]._gm = undefined; break; }
+            if (this._mapOf !== list) {
+                this._map = {};
+                for (var i = 0; i < list.length; i++) this._map[list[i].id] = list[i];
+                this._mapOf = list;
+            }
+            return this._map[id] || null;
         },
         names: function (mask) {
             var out = [];
             for (var i = 0; i < GENRE_NAMES.length; i++) if (mask & (1 << i)) out.push(GENRE_NAMES[i]);
             return out;
+        }
+    };
+
+    /**
+     * „Genres sammeln“: im Hintergrund leise die Details aller Filme und Serien abfragen und deren Genres merken.
+     * Nur wenn gerade nichts läuft, höchstens eine Abfrage alle 1,5 s; bei Fehlern lange Pause.
+     */
+    var GenreScan = {
+        timer: null, busy: false, fails: 0, pauseUntil: 0, done: 0, total: 0,
+        on: function () { return Storage.get('genreScan', true) !== false; },
+        start: function () {
+            var self = this;
+            if (this.timer) return;
+            this.timer = setInterval(function () { self.tick(); }, 1500);
+        },
+        /** Nächster Titel ohne Genre-Prüfung: erst Filme (neueste zuerst), dann Serien */
+        next: function () {
+            var lists = [['movie', Data.moviesLoaded ? Data.movies : null], ['series', Data.seriesLoaded ? Data.series : null]];
+            var todo = 0, first = null, total = 0;
+            for (var l = 0; l < lists.length; l++) {
+                var list = lists[l][1], type = lists[l][0];
+                if (!list) continue;
+                total += list.length;
+                for (var i = list.length - 1; i >= 0; i--) {
+                    if (!Genre.known(type, list[i].id)) { todo++; if (!first) first = { type: type, id: list[i].id }; }
+                }
+            }
+            this.total = total; this.done = total - todo;
+            return first;
+        },
+        progress: function () {
+            if (!this.total) return '';
+            var p = Math.floor(this.done * 100 / this.total);
+            return p >= 100 ? '' : p + ' %';
+        },
+        idle: function () {
+            if (!Api.acc || Api.acc.demo || !this.on()) return false;
+            if (document.hidden || Modal.node) return false;
+            var top = Nav.top();
+            if (top instanceof PlayerScreen) return false;
+            try { if (Player.isPlaying && Player.isPlaying()) return false; } catch (e) { /* egal */ }
+            return Date.now() >= this.pauseUntil;
+        },
+        tick: function () {
+            var self = this;
+            if (this.busy || !this.idle()) return;
+            var n = this.next();
+            if (!n) { Genre.flush(); return; }
+            this.busy = true;
+            var acc = Api.acc;
+            Api.call(n.type === 'movie' ? 'get_vod_info' : 'get_series_info', n.type === 'movie' ? { vod_id: n.id } : { series_id: n.id }).then(function (json) {
+                self.busy = false; self.fails = 0;
+                if (Api.acc !== acc) return;
+                var info = parseInfo(json && json.info);
+                Genre.learnId(n.type, n.id, info.genre, info.plot);
+            }, function () {
+                self.busy = false;
+                // Fehler: kurz warten; derselbe Titel 3× kaputt → überspringen; viele Fehler hintereinander → 10 Minuten Pause
+                var k = n.type + n.id;
+                self.failCount = self.failId === k ? (self.failCount || 0) + 1 : 1;
+                self.failId = k;
+                if (self.failCount >= 3) Genre.learnId(n.type, n.id, '', '');
+                if (++self.fails >= 5) { self.fails = 0; self.pauseUntil = Date.now() + 10 * 60000; }
+                else self.pauseUntil = Date.now() + 15000;
+            });
         }
     };
 
@@ -3233,7 +3324,7 @@
         movieInfo: function (id) {
             return Api.call('get_vod_info', { vod_id: id }).then(function (json) {
                 var info = parseInfo(json && json.info);
-                Genre.learnId('movie', id, info.genre);
+                Genre.learnId('movie', id, info.genre, info.plot);
                 return info;
             });
         },
@@ -3268,7 +3359,7 @@
                 });
                 all.sort(function (a, b) { return a.season - b.season || a.num - b.num; });
                 var sinfo = parseInfo(json.info);
-                Genre.learnId('series', id, sinfo.genre);
+                Genre.learnId('series', id, sinfo.genre, sinfo.plot);
                 return { episodes: all, info: sinfo };
             });
         },
@@ -5942,7 +6033,7 @@
         if (this.kind === 'movies') browse.push(this.yearLabel(), UNSEEN_CAT);
         var genres = this.genreLabels();
         this.groupAt = [{ at: 0, label: 'FÜR DICH' }, { at: base.length, label: 'NEU & STÖBERN' }];
-        if (genres.length) this.groupAt.push({ at: base.length + browse.length, label: 'GENRES' });
+        if (genres.length) this.groupAt.push({ at: base.length + browse.length, label: 'GENRES' + (GenreScan.on() && GenreScan.progress() ? ' · wird ergänzt ' + GenreScan.progress() : '') });
         this.groupAt.push({ at: base.length + browse.length + genres.length, label: 'KATEGORIEN' });
         return base.concat(browse, genres, cats);
     };
@@ -8198,6 +8289,12 @@
         });
 
         col('clock', 'ANZEIGE & FAMILIE');
+        row('genrescan', 'list', 'Genres sammeln', GenreScan.on() ? (GenreScan.progress() ? 'An · ' + GenreScan.progress() : 'An') : 'Aus', function (v) {
+            var on = !GenreScan.on();
+            Storage.set('genreScan', on);
+            v.textContent = on ? 'An' : 'Aus';
+            toast(on ? 'Die App lädt im Hintergrund die Genres aller Filme und Serien – nur wenn gerade nichts läuft.' : 'Genres sammeln: aus', 6000);
+        });
         row('theme', 'tv', 'Farbthema', Theme.label(), function () {
             var cur = Theme.cur(), b = Theme.LIST.map(function (t) {
                 return { label: t[1], primary: t[0] === cur, action: function () {
@@ -9902,6 +9999,7 @@
         Player.init();
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
         applyStallWait();
+        setTimeout(function () { GenreScan.start(); }, 60000);   // Genres im Hintergrund sammeln (nur wenn nichts läuft)
         setTimeout(function () { Updater.flags(); }, 8000);     // vom Admin erzwungenes Update?
         setTimeout(function () { try { Help.resume(); } catch (e) { /* egal */ } }, 6000);   // Fernhilfe lief vor dem Neustart
         setTimeout(function () { Report.flushNative(); }, 8000);   // Absturzbericht vom letzten Mal an die Website
