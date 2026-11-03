@@ -545,7 +545,8 @@ class MainActivity : Activity() {
                     try { view.destroy() } catch (e: Throwable) { }
                     val why = if (detail.didCrash()) "Oberfläche abgestürzt" else "Oberfläche wegen Speichermangel beendet"
                     saveCrashReport("$why (${count}x in 1 Min.)\nWebView: ${webViewVersion()}")
-                    handler.post {
+                    // Achtung: hier wäre „handler“ der Handler der (schon zerstörten) WebView → null. Darum der der Activity.
+                    this@MainActivity.handler.post {
                         // Dreimal in einer Minute: aufgeben statt endlos neu zu starten
                         if (count >= 3) finish() else recreate()
                     }

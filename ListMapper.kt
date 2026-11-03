@@ -30,9 +30,10 @@ object ListMapper {
     private val MOVIE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "container_extension",
         "year", "release_date", "releaseDate", "rating", "rating_5based", "added", "genre")
     private val SERIES_KEYS = setOf("series_id", "name", "cover", "category_id", "releaseDate", "release_date",
-        "year", "rating", "rating_5based", "last_modified", "genre")
+        "year", "rating", "rating_5based", "last_modified", "genre", "plot")
 
     private val YEAR = Regex("(19|20)\\d{2}")
+    private val HORROR = Regex("(zombie|vampir|werw[oö]lf|werewol|d[äa]mon|demon|exorz|exorcis|spuk|besessen|possess|untote|undead|poltergeist|okkult|occult|haunt|horror)", RegexOption.IGNORE_CASE)
     private val YEAR_BRACKET = Regex("[(\\[](19|20)\\d{2}[)\\]]")
     private val YEAR_END = Regex("[ ._-](19|20)\\d{2}\\z")
     private val INT_FLOAT = Regex("^-?\\d+\\.0+$")
@@ -173,7 +174,9 @@ object ListMapper {
                 out.write(","); out.write(year?.toString() ?: "null")
                 out.write(","); out.write(num(rating(f["rating"], f["rating_5based"])))
                 out.write(","); out.write((jsInt(f["last_modified"]) ?: 0L).toString())
-                out.write(","); quote(out, str(f["genre"]).take(80))
+                // Horror steht bei Serien selten im Genre: an der Beschreibung erkennen (wie mapList in app.js)
+                val horror = HORROR.containsMatchIn(str(f["plot"]))
+                out.write(","); quote(out, str(f["genre"]).take(80) + (if (horror) " horror" else ""))
             }
         }
         out.write("]")
