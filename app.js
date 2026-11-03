@@ -2456,16 +2456,16 @@
 
     /**
      * „Genres sammeln“: im Hintergrund leise die Details aller Filme und Serien abfragen und deren Genres merken.
-     * Nur wenn gerade nichts läuft, etwa 2 Abfragen pro Sekunde; bei Fehlern lange Pause.
+     * Eine Abfrage pro Sekunde, auch während der Wiedergabe; bei Fehlern lange Pause.
      */
     var GenreScan = {
         timer: null, busy: 0, fails: 0, pauseUntil: 0, done: 0, total: 0, flying: {},
-        PARALLEL: 2,          // höchstens 2 Abfragen gleichzeitig, neue alle 0,5 s → etwa 2 pro Sekunde
+        PARALLEL: 1,          // eine Abfrage pro Sekunde, läuft auch während der Wiedergabe weiter
         on: function () { return Storage.get('genreScan', true) !== false; },
         start: function () {
             var self = this;
             if (this.timer) return;
-            this.timer = setInterval(function () { self.tick(); }, 500);
+            this.timer = setInterval(function () { self.tick(); }, 1000);
         },
         /** Nächster Titel ohne Genre-Prüfung: erst Filme (neueste zuerst), dann Serien */
         next: function () {
@@ -2496,15 +2496,10 @@
             var why = '';
             if (!this.timer) why = ' · startet gleich';
             else if (Date.now() < this.pauseUntil) why = ' · Pause (Server antwortet nicht)';
-            else if (Nav.top() instanceof PlayerScreen) why = ' · pausiert, solange etwas läuft';
             return 'An · ' + p + why;
         },
         idle: function () {
             if (!Api.acc || Api.acc.demo || !this.on()) return false;
-            if (document.hidden || Modal.node) return false;
-            var top = Nav.top();
-            if (top instanceof PlayerScreen) return false;
-            try { if (Player.isPlaying && Player.isPlaying()) return false; } catch (e) { /* egal */ }
             return Date.now() >= this.pauseUntil;
         },
         tick: function () {
@@ -8313,7 +8308,7 @@
             var on = !GenreScan.on();
             Storage.set('genreScan', on);
             v.textContent = GenreScan.status();
-            toast(on ? 'Die App lädt im Hintergrund die Genres aller Filme und Serien – nur wenn gerade nichts läuft.' : 'Genres sammeln: aus', 6000);
+            toast(on ? 'Die App lädt im Hintergrund die Genres aller Filme und Serien (eine Abfrage pro Sekunde).' : 'Genres sammeln: aus', 6000);
         });
         row('theme', 'tv', 'Farbthema', Theme.label(), function () {
             var cur = Theme.cur(), b = Theme.LIST.map(function (t) {
