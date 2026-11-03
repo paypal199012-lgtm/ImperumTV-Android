@@ -29,7 +29,18 @@
         return hh > 0 ? hh + ':' + pad2(mm) + ':' + pad2(ss) : mm + ':' + pad2(ss);
     }
 
-    function fmtClock(date) { return pad2(date.getHours()) + ':' + pad2(date.getMinutes()); }
+    /** iPhone: Uhrzeit nach der Zeitzone des Geräts (falls die Oberfläche eine andere annimmt) */
+    function tzFix(date) {
+        try {
+            var b = window.AndroidBridge;
+            if (b && b.tzMinutes) {
+                var nat = +b.tzMinutes(), loc = -date.getTimezoneOffset();
+                if (isFinite(nat) && nat !== loc) return new Date(date.getTime() + (nat - loc) * 60000);
+            }
+        } catch (e) { }
+        return date;
+    }
+    function fmtClock(date) { date = tzFix(date); return pad2(date.getHours()) + ':' + pad2(date.getMinutes()); }
 
     // Diese Daten hat jedes Profil für sich (Hauptprofil „p0“ nutzt die bisherigen Schlüssel)
     var PROFILE_KEYS = { favs: 1, seen: 1, newEps: 1, resume: 1, kidsCats: 1 };
@@ -1008,11 +1019,12 @@
             if (on) this.tick();
         },
         tick: function () {
-            var self = this, n = new Date(), sec = this.mode() === 'sec' && !Quiet.on;
+            clearTimeout(this.timer);
+            var self = this, n = tzFix(new Date()), sec = this.mode() === 'sec' && !Quiet.on;
             this.t.innerHTML = pad2(n.getHours()) + ':' + pad2(n.getMinutes()) + (sec ? '<span>:' + pad2(n.getSeconds()) + '</span>' : '');
             this.d.textContent = this.DAYS[n.getDay()] + ', ' + n.getDate() + '. ' + this.MONTHS[n.getMonth()];
             // genau zum nächsten Sekunden- bzw. Minutenwechsel weiterstellen
-            var wait = sec ? 1000 - n.getMilliseconds() : 60000 - n.getSeconds() * 1000 - n.getMilliseconds();
+            var wait = sec ? 1000 - n.getMilliseconds() : Math.min(15000, 60000 - n.getSeconds() * 1000 - n.getMilliseconds());
             this.timer = setTimeout(function () { self.tick(); }, wait + 15);
         }
     };
@@ -1647,6 +1659,10 @@
     // Demo: freie Testvideos (Creative Commons), z. B. für die Prüfung im LG- oder Samsung-Store
     // =====================================================================
 
+    // App-Store-Version (iPhone): kostenlos, ohne Freischaltung, ohne „Schaut gerade“, ohne Bezahlsender-Hinweise.
+    // Wird nur beim Bauen der Store-Version auf true gesetzt (Workflow appstore.yml).
+    var STORE_BUILD = false;
+
     var Demo = {
         ENABLED: false,                  // Demo ausgeblendet (zum Wiedereinschalten auf true setzen)
         playlist: { id: 'demo', name: 'Demo', demo: true },
@@ -1724,16 +1740,24 @@
         },
         movie: function (id) { for (var i = 0; i < this.movies.length; i++) if (String(this.movies[i].id) === String(id)) return this.movies[i]; return null; },
         liveUrl: function (id) { for (var i = 0; i < this.live.length; i++) if (this.live[i].id === Number(id)) return this.live[i].url; return this.live[0].url; },
-        movieUrl: function (id) { var m = this.movie(id) || this.movies[0]; return this.FILMS + m.file; },
+        // Erst die zuverlässigen Quellen (HLS/archive.org), der Google-Speicher lehnt manche Netze ab (403, VPN)
+        movieUrl: function (id) { var m = this.movie(id) || this.movies[0]; return this.ALT[m.id] || this.FILMS + m.file; },
         /** Zweite Quelle, falls der Google-Speicher ablehnt (z. B. 403 über VPN) */
+        // Im iPhone-Simulator geprüft (11/2026): der Google-Speicher (FILMS) lehnt inzwischen ab (403), bitdash ist abgeschaltet
         ALT: {
             101: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-            102: 'https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4',
-            103: 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8',
+            102: 'https://archive.org/download/ElephantsDream/ed_hd.mp4',
+            103: 'https://archive.org/download/Sintel/sintel-2048-stereo_512kb.mp4',
             104: 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8'
         },
-        altMovieUrl: function (id) { return this.ALT[Number(id)] || ''; },
-        episodeUrl: function (id) { var m = this.movies[(Number(id) - 301) % this.movies.length] || this.movies[0]; return this.FILMS + m.file; }
+        /** Zweite Quelle, falls die erste nicht startet */
+        BACKUP: {
+            102: 'https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4',
+            103: 'https://download.blender.org/durian/trailer/sintel_trailer-720p.mp4',
+            104: 'https://test-streams.mux.dev/tos_ismc/main.m3u8'
+        },
+        altMovieUrl: function (id) { var m = this.movie(id); return m ? (this.BACKUP[m.id] || '') : ''; },
+        episodeUrl: function (id) { var m = this.movies[(Number(id) - 301) % this.movies.length] || this.movies[0]; return this.ALT[m.id] || this.BACKUP[m.id] || this.FILMS + m.file; }
     };
 
     /** Verständliche Meldung statt roher Server-Antwort (z. B. HTML-Fehlerseite) */
@@ -1858,6 +1882,13 @@
 
         /** MAC-Adresse und Geräte-Schlüssel: bleiben für dieses Gerät immer gleich */
         load: function () {
+            // iPhone/iPad: MAC-Adresse und Schlüssel kommen fertig aus der App (Schlüsselbund, wie in der bisherigen iPhone-App)
+            try {
+                if (AB && AB.deviceMacKey) {
+                    var mk = String(AB.deviceMacKey() || '').split('|');
+                    if (this.validMac(mk[0]) && this.validKey(mk[1])) { this.mac = mk[0]; this.key = mk[1]; Storage.set('device', { mac: this.mac, key: this.key }); return; }
+                }
+            } catch (eI) { /* weiter wie bisher */ }
             var base = '';
             try { if (AB && AB.deviceId) base = String(AB.deviceId() || ''); } catch (e) { base = ''; }
             if (!base) {
@@ -1883,7 +1914,7 @@
         },
         macText: function () { return this.mac.toLowerCase(); },
         link: function () {
-            return REMOTE.website + '?mac=' + encodeURIComponent(this.macText()) + '&key=' + this.key;
+            return REMOTE.website + '?mac=' + encodeURIComponent(this.macText()) + '&key=' + this.key + (STORE_BUILD ? '&app=apple' : '');
         }
     };
 
@@ -1900,7 +1931,7 @@
             this.state = { activated: !!row.activated, trialUntil: until, freeUntil: free, serverActive: !!row.active, checked: Date.now() };
             Storage.set('license', this.state);
         },
-        known: function () { return !!this.state; },
+        known: function () { return STORE_BUILD || !!this.state; },
         /** Vom Entwickler kostenlos freigeschaltet (z. B. für 1 Jahr) */
         free: function () {
             return !!(this.state && !this.state.activated && this.state.freeUntil && Date.now() + (this.offset || 0) < this.state.freeUntil);
@@ -1909,9 +1940,9 @@
             var d = new Date(this.state.freeUntil);
             return 'Freigeschaltet bis ' + pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear();
         },
-        activated: function () { return !!(this.state && this.state.activated); },
+        activated: function () { return STORE_BUILD || !!(this.state && this.state.activated); },
         active: function () {
-            if (!this.state) return true;     // noch nie geprüft (z. B. ganz neues Gerät ohne Internet)
+            if (STORE_BUILD || !this.state) return true;     // noch nie geprüft (z. B. ganz neues Gerät ohne Internet)
             if (this.state.activated) return true;
             var t = Date.now() + (this.offset || 0);
             return t < this.state.trialUntil || t < (this.state.freeUntil || 0);
@@ -1922,6 +1953,7 @@
             return Math.max(0, Math.ceil(ms / 86400000));
         },
         text: function () {
+            if (STORE_BUILD) return 'Dein Gerät ist verbunden.';
             if (!this.state) return '';
             if (this.state.activated) return 'Dein Gerät ist aktiviert.';
             if (this.free()) return this.freeText();
@@ -2040,7 +2072,7 @@
             return (kind === 'live' ? 'Live: ' : kind === 'movie' ? 'Film: ' : kind === 'episode' ? 'Serie: ' : kind === 'preview' ? 'Vorschau: ' : '') + (name || '?');
         },
         send: function (force) {
-            if (!AB || !Device.validMac(Device.mac) || !Device.validKey(Device.key)) return;
+            if (STORE_BUILD || !AB || !Device.validMac(Device.mac) || !Device.validKey(Device.key)) return;
             if (!force && this.cur === this.sent) return;
             var what = this.cur, self = this;
             this.sent = what; this.sentAt = Date.now();
@@ -2152,6 +2184,30 @@
         /** Knopf für den Wiedergabelisten-Bildschirm: verbinden, bevor eine Liste geladen wird */
         button: function (key, group) {
             var self = this, node = this.badge();
+            if (!node && this.native()) {
+                // Noch kein VPN eingerichtet: Knopf trotzdem zeigen – erst vom Konto holen, sonst erklären, wie es geht
+                node = h('div', 'vpn-badge off vpn-btn');
+                node.innerHTML = icon('shield', 34) + '<span>VPN einrichten</span>';
+                var sp = node.getElementsByTagName('span')[0];
+                return focusable(node, key, function () {
+                    sp.textContent = 'VPN wird gesucht …';
+                    self.sync(function () {
+                        if (self.info().has) {
+                            self.toggle();
+                            sp.textContent = 'VPN verbindet …';
+                            return;
+                        }
+                        sp.textContent = 'VPN einrichten';
+                        var btns = [];
+                        if (AB && AB.openUrl) btns.push({ label: 'Website öffnen', primary: true, action: function () { AB.openUrl(Device.link()); } });
+                        btns.push({ label: 'OK', primary: !btns.length });
+                        Modal.open('VPN einrichten', 'Für dieses Gerät ist noch kein VPN hinterlegt.\n\n' +
+                            '1. Scanne den QR-Code oder öffne die Website.\n' +
+                            '2. Lade beim Gerät deine .ovpn-Datei hoch (von deinem VPN-Anbieter) und trage dort Benutzername und Passwort für das VPN ein.\n' +
+                            '3. Danach hier noch einmal auf „VPN einrichten“ drücken – die App verbindet sich dann.', btns);
+                    });
+                }, group);
+            }
             if (!node) return null;
             node.className += ' vpn-btn';
             var i = this.info(), span = node.getElementsByTagName('span')[0];
@@ -2675,6 +2731,7 @@
         },
         /** Wer zeigt es in Deutschland? (Rechtelage, ohne Gewähr) */
         rights: function (m) {
+            if (STORE_BUILD) return '';                  // Store: keine Namen von Bezahlsendern
             var d = new Date(m.t), wd = d.getDay(), hr = d.getHours();
             switch (m.c) {
                 case 'BL1':
@@ -2778,6 +2835,7 @@
         },
         /** Welche Sender kommen laut Rechtelage in Frage? */
         rightsLists: function (m) {
+            if (STORE_BUILD) return [];                  // Store: nicht nach Bezahlsendern raten
             var d = new Date(m.t), wd = d.getDay(), hr = d.getHours(), out = [];
             if (m.c === 'BL1') {
                 if (wd === 6 && hr < 17) {
@@ -3677,6 +3735,7 @@
 
         show: function (screen, restoring) {
             Busy.mark('Bildschirm zeichnen: ' + ((screen && screen.constructor && screen.constructor.name) || '?'));
+            setTimeout(function () { IosBack.update(); }, 0);
             screen._dom = null;
             var app = $('#app');
             app.innerHTML = '';
@@ -3766,6 +3825,7 @@
             var target = Focus.byKey(screen.focusKey);
             if (target) Focus.set(target); else Focus.first();
             if (saved) this.restoreScroll(screen, saved);
+            IosBack.update();
         },
 
         replace: function (screen) {
@@ -3907,6 +3967,56 @@
     // =====================================================================
     // Bausteine für die Oberfläche
     // =====================================================================
+
+    /** iPhone/iPad: es gibt keine Zurück-Taste – runder Knopf oben links (auf der Startseite ausgeblendet) */
+    var IosBack = {
+        node: null,
+        init: function () {
+            var stage = document.getElementById('stage');
+            if (!stage || this.node) return;
+            var b = h('div', 'ios-back hidden');
+            b.innerHTML = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>';
+            // iPhone: schon beim Loslassen des Fingers auslösen (nicht auf den „Klick“ warten, den iOS manchmal verschluckt)
+            var lastTouch = 0, sx = 0, sy = 0;
+            function goBack() {
+                // Knopf heißt „zurück zur Übersicht“: im Player sofort raus (nicht erst die Leiste ausblenden)
+                var top = Nav.top();
+                if (!Modal.node && top instanceof PlayerScreen) {
+                    if (top.zapOpen && top.closeZap) top.closeZap();
+                    top.close();
+                    return;
+                }
+                onKeyDown({ keyCode: KEY.BACK, repeat: false, preventDefault: function () { } });
+            }
+            b.addEventListener('touchstart', function (e) {
+                var t = e.touches && e.touches[0]; sx = t ? t.clientX : 0; sy = t ? t.clientY : 0;
+                b.classList.add('down'); e.stopPropagation();
+            }, { passive: true });
+            b.addEventListener('touchcancel', function () { b.classList.remove('down'); });
+            b.addEventListener('touchend', function (e) {
+                b.classList.remove('down');
+                var t = e.changedTouches && e.changedTouches[0];
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+                if (t && (Math.abs(t.clientX - sx) > 40 || Math.abs(t.clientY - sy) > 40)) return;
+                lastTouch = Date.now();
+                goBack();
+            }, { passive: false });
+            b.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                if (Date.now() - lastTouch < 800) return;      // schon per Finger ausgelöst
+                goBack();
+            });
+            stage.appendChild(b);
+            this.node = b;
+            this.update();
+        },
+        update: function () {
+            if (!this.node) return;
+            var root = Nav.stack.length <= 1;
+            this.node.classList.toggle('hidden', root);
+        }
+    };
 
     function topbar(title, hint) {
         var bar = h('div');
@@ -4927,6 +5037,10 @@
             liveIt.querySelector('span').textContent = String(c);
             liveIt.classList.toggle('hidden', !c);
             liveIt.lastChild.textContent = c === 1 ? ' Spiel live' : ' Spiele live';
+            // Leiste ohne Inhalt (z. B. Demo ohne Abo-Datum) nicht als leere Pille zeigen
+            var any = false, k;
+            for (k = 0; k < bar.children.length; k++) if (!bar.children[k].classList.contains('hidden')) any = true;
+            bar.classList.toggle('hidden', !any);
         }
         setLive();
         Football.load(false).then(function () { if (Nav.top() instanceof HomeScreen) setLive(); }, function () { });
@@ -6663,7 +6777,7 @@
             });
             buttons.push({ label: 'Schließen', action: function () { } });
             var text = o.sure.length ? when
-                : when + ' · Kein Sender in deiner Liste zeigt dieses Spiel laut Sendername oder Programm.' + (o.guess.length ? '' : ' Voraussichtlich: ' + (Football.rights(m) || 'unbekannt') + '.');
+                : when + ' · Kein Sender in deiner Liste zeigt dieses Spiel laut Sendername oder Programm.' + (o.guess.length || STORE_BUILD ? '' : ' Voraussichtlich: ' + (Football.rights(m) || 'unbekannt') + '.');
             Modal.open(title, text, buttons);
             if (Modal.node) Modal.node.classList.add('modal-list');
         }
@@ -7723,7 +7837,29 @@
             v.textContent = Settings.liveExt.toUpperCase();
             toast(Settings.liveExt === 'ts' ? 'Live-Sender laufen jetzt als TS (meist am stabilsten)' : 'Live-Sender laufen jetzt als HLS (M3U8)');
         });
-        if (AB && AB.hasVlc && AB.getLiveEngine && AB.setLiveEngine && (function () { try { return AB.hasVlc(); } catch (e) { return false; } })()) {
+        if (AB && AB.getVodEngine && AB.setVodEngine && AB.getLiveEngine && AB.setLiveEngine) {
+            // iPhone: Apple-Player oder VLC wählbar – getrennt für Live TV und für Filme & Serien
+            var iosName = function (m) { return m === 'vlc' ? 'VLC' : m === 'apple' ? 'Apple-Player' : 'Automatisch'; };
+            var iosRow = function (key, title, get, set, what) {
+                row(key, 'play', title, iosName(get()), function (v) {
+                    function pick(m) {
+                        try { set(m); } catch (e) { /* egal */ }
+                        v.textContent = iosName(m);
+                        toast(what + ' läuft ab dem nächsten Start mit: ' + iosName(m), 4000);
+                    }
+                    var cur = get();
+                    Modal.open(title, 'Mit welchem Player soll ' + what + ' laufen?\nAutomatisch: Apple-Player, bei Problemen von selbst VLC.\n' +
+                        'Ruckelt oder startet etwas nicht, probiere den anderen Player aus.', [
+                        { label: 'Automatisch (empfohlen)', primary: cur !== 'apple' && cur !== 'vlc', action: function () { pick('exo'); } },
+                        { label: 'Apple-Player', primary: cur === 'apple', action: function () { pick('apple'); } },
+                        { label: 'VLC', primary: cur === 'vlc', action: function () { pick('vlc'); } },
+                        { label: 'Abbrechen' }
+                    ]);
+                });
+            };
+            iosRow('engine', 'Player Live TV', function () { try { return AB.getLiveEngine(); } catch (e) { return 'exo'; } }, function (m) { AB.setLiveEngine(m); }, 'Live TV');
+            iosRow('vodengine', 'Player Filme & Serien', function () { try { return AB.getVodEngine(); } catch (e) { return 'exo'; } }, function (m) { AB.setVodEngine(m); }, 'Filme & Serien');
+        } else if (AB && AB.hasVlc && AB.getLiveEngine && AB.setLiveEngine && (function () { try { return AB.hasVlc(); } catch (e) { return false; } })()) {
             var engName = function (m) { return m === 'vlc' ? 'VLC' : 'ImperumTV'; };
             var engGet = function () { try { return AB.getLiveEngine() === 'vlc' ? 'vlc' : 'exo'; } catch (e) { return 'exo'; } };
             row('engine', 'play', 'Player Live TV', engName(engGet()), function (v) {
@@ -7837,7 +7973,7 @@
             }
         }
         row('lists', 'list', 'Wiedergabelisten', 'Wechseln', function () { Nav.push(new PlaylistsScreen()); });
-        row('account', 'user', 'Konto', License.activated() ? 'Aktiviert' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
+        if (!STORE_BUILD) row('account', 'user', 'Konto', License.activated() ? 'Aktiviert' : (License.free() ? License.freeText() : License.text()), function () { Nav.push(new AccountScreen()); });
 
         // ---------- Unten: Aktionen ----------
         var acts = h('div', 'set6-acts');
@@ -8992,7 +9128,7 @@
         if (this.kind === 'live' && Rec.available()) {
             btn('pl-rec', '●', 'Aufnehmen', function () { self.recordNow(); });
         }
-        if (this.kind !== 'live' && this.resumable() && VodPlayer.available()) {
+        if (this.kind !== 'live' && this.resumable() && (VodPlayer.available() || (AB && AB.usingVlc))) {
             btn('pl-switch', '⇄', 'Anderer Player', function () { self.switchPlayer(); });
         }
         btn('pl-aspect', '▭', 'Bildformat', function () { self.aspectMenu(); });
@@ -9132,6 +9268,20 @@
     PlayerScreen.prototype.switchPlayer = function () {
         var self = this, list = VodPlayer.list();
         clearTimeout(this.hideTimer);
+        // iPhone: zwei eingebaute Player (Apple-Player und VLC), an derselben Stelle weiter
+        if (!VodPlayer.available() && AB && AB.usingVlc && AB.setNextEngine) {
+            var vlcNow = AB.usingVlc();
+            Modal.open('Anderer Player', 'Ab ' + fmtTime(Player.current()), [
+                { label: '▶  ' + (vlcNow ? 'Apple-Player' : 'VLC'), primary: true, action: function () {
+                    self.startAt = Player.current();
+                    AB.setNextEngine(vlcNow ? 'apple' : 'vlc');
+                    self.start();
+                } },
+                { label: 'Abbrechen', action: function () { self.showOverlay(); } }
+            ]);
+            if (Modal.node) Modal.node.classList.add('modal-list');
+            return;
+        }
         if (!list.length) {
             toast('Kein anderer Player installiert. Installiere z. B. VLC oder MX Player aus dem Store.', 6000);
             this.showOverlay();
@@ -9511,7 +9661,7 @@
         document.addEventListener('visibilitychange', function () { if (!AB) lifecycle(document.hidden); });
         window.__androidLifecycle = function (state) {
             lifecycle(state === 'hidden');
-            if (state !== 'hidden') Updater.recheck();
+            if (state !== 'hidden') { Updater.recheck(); if (Clock.node && Clock.mode() !== 'off') Clock.tick(); }
         };
 
         // Tasten, die die Android-App weiterreicht (Zurück, Medientasten, Farbtasten)
@@ -9554,6 +9704,8 @@
 
         // Bedienung per Finger (Handy/Tablet): Listen dürfen wischen
         if ('ontouchstart' in window) document.body.classList.add('touch');
+        // iPhone/iPad (App mit derselben Oberfläche): Zurück-Knopf oben links
+        if (AB && AB.deviceMacKey) { document.body.classList.add('ios'); IosBack.init(); }
         // Android/Fire TV: sparsamere Effekte (schwache Grafikchips)
         if (AB) document.body.classList.add('lowfx');
 

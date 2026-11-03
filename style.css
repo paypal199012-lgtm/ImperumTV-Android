@@ -1577,6 +1577,7 @@ body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 .hi-it.vpn.on { color: #7ee08a; } .hi-it.vpn.wait { color: #f4dc9e; } .hi-it.vpn.off { color: #b8bcc6; }
 .hi-it.live { color: #ff8a7a; font-weight: 700; } .hi-it.live span { margin: 0 6px; }
 .hi-it.hidden { display: none; }
+.home-info.hidden { display: none; }
 .home-head { top: 120px; }
 .home-head-btns { top: -94px; right: 250px; }
 .home-circles { top: 330px; }
@@ -1599,3 +1600,15 @@ body.lite .live-b .cat.focused { box-shadow: 0 0 0 3px #f4dc9e !important; }
 .col-cats .cat.xlong { font-size: 19px; line-height: 23px; }
 .live-b .cat.long, .live-b .cat.xlong { padding-top: 8px; padding-bottom: 8px; }
 .live-b .cat.with-n .cat-name, .live-b .cat:not(.with-n) { -webkit-line-clamp: 3; }
+
+/* iPhone/iPad: Zurück-Knopf oben links (es gibt keine Zurück-Taste) */
+.ios-back { position: absolute; left: 14px; top: 22px; width: 64px; height: 64px; border-radius: 50%; z-index: 60;
+    display: flex; align-items: center; justify-content: center; color: #f4dc9e;
+    background: rgba(20,20,24,.72); border: 2px solid rgba(244,220,158,.55); cursor: pointer; }
+.ios-back:active, .ios-back.down { background: rgba(217,176,102,.45); }
+.ios-back { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+.ios-back svg { pointer-events: none; }
+body.ios .screen-title { left: 96px; }
+/* Im Vollbild nur zusammen mit der eingeblendeten Leiste */
+body.video-mode:not(.osd) .ios-back { display: none; }
+.pl-head .vpn-badge.vpn-btn { margin-right: 210px; }   /* nicht unter die Uhr oben rechts */
