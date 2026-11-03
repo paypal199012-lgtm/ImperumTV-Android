@@ -111,6 +111,8 @@ class MainActivity : Activity() {
     private var lastFixAt = 0L
     /** Für dieses Standbild schon „frozen“ gemeldet */
     private var frozenSent = false
+    /** Ab wann ein stehendes Bild als Hänger gilt (Einstellung „Ersatzsender“, Standard 1,5 s) */
+    @Volatile private var stallMs = 1_500L
     /** Adresse des laufenden Senders/Films (für das Neu-Öffnen nach einem Hänger) */
     private var currentUrl = ""
     private var audioWarned = false
@@ -244,8 +246,8 @@ class MainActivity : Activity() {
             if (freezeFixes > 0 && now - lastFixAt > 90_000) freezeFixes = 0
             return
         }
-        // Bild steht seit 3 s (Ton evtl. auch): der Oberfläche melden – sie schaltet auf einen Ersatzsender, falls es einen gibt
-        if (now - frozenSince > 3_000 && !frozenSent && lastFrames >= 0) { frozenSent = true; emit("frozen", null) }
+        // Bild steht länger als eingestellt (Standard 1,5 s, Ton evtl. auch): der Oberfläche melden – sie schaltet auf einen Ersatzsender
+        if (now - frozenSince > stallMs && !frozenSent && lastFrames >= 0) { frozenSent = true; emit("frozen", null) }
         if (now - frozenSince > 8_000 && freezeFixes < 4 && currentUrl.isNotEmpty()) {
             freezeFixes++
             frozenSince = now
@@ -1742,6 +1744,10 @@ class MainActivity : Activity() {
         /** Ist VLC in dieser Version eingebaut? */
         @JavascriptInterface
         fun hasVlc(): Boolean = ::vlc.isInitialized && vlc.available
+
+        /** Wartezeit bis zum Ersatzsender, wenn das Bild steht (500–5000 ms) */
+        @JavascriptInterface
+        fun setStallMs(ms: Int) { stallMs = ms.coerceIn(500, 5_000).toLong() }
 
         @JavascriptInterface
         fun getBuffer(): String =
