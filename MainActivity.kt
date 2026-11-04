@@ -1296,9 +1296,11 @@ class MainActivity : Activity() {
 
     private fun thumbResponse(uri: Uri): WebResourceResponse {
         val src = uri.getQueryParameter("u")
-        val width = (uri.getQueryParameter("w")?.toIntOrNull() ?: 260).coerceIn(80, 800)
+        val width = (uri.getQueryParameter("w")?.toIntOrNull() ?: 260).coerceIn(80, 1280)
+        // Senderlogos: durchsichtig lassen (PNG), sonst JPEG
+        val png = uri.getQueryParameter("f") == "png"
         if (src.isNullOrBlank()) return notFound()
-        val name = Integer.toHexString(src.hashCode()) + "_" + Integer.toHexString(src.length) + "_" + width + ".jpg"
+        val name = Integer.toHexString(src.hashCode()) + "_" + Integer.toHexString(src.length) + "_" + width + (if (png) ".png" else ".jpg")
         val file = File(thumbDir, name)
         try {
             if (!file.exists() || file.length() == 0L) {
@@ -1310,21 +1312,21 @@ class MainActivity : Activity() {
                 while (bounds.outWidth / (sample * 2) >= width) sample *= 2
                 val opts = BitmapFactory.Options().apply {
                     inSampleSize = sample
-                    inPreferredConfig = Bitmap.Config.RGB_565
+                    inPreferredConfig = if (png) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565
                 }
                 val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return notFound()
                 val scaled = if (decoded.width > width * 5 / 4) {
                     Bitmap.createScaledBitmap(decoded, width, (decoded.height.toLong() * width / decoded.width).toInt().coerceAtLeast(1), true)
                 } else decoded
                 val tmp = File(thumbDir, "$name.tmp${Thread.currentThread().id}")
-                FileOutputStream(tmp).use { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }
+                FileOutputStream(tmp).use { if (png) scaled.compress(Bitmap.CompressFormat.PNG, 100, it) else scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }
                 if (scaled !== decoded) scaled.recycle()
                 decoded.recycle()
                 if (!tmp.renameTo(file)) tmp.delete()
             }
             if (!file.exists()) return notFound()
             val headers = mapOf("Cache-Control" to "max-age=2592000", "Access-Control-Allow-Origin" to "*")
-            return WebResourceResponse("image/jpeg", null, 200, "OK", headers, file.inputStream())
+            return WebResourceResponse(if (png) "image/png" else "image/jpeg", null, 200, "OK", headers, file.inputStream())
         } catch (e: Throwable) {
             return notFound()
         }
@@ -1749,6 +1751,14 @@ class MainActivity : Activity() {
         /** Wartezeit bis zum Ersatzsender, wenn das Bild steht (500–5000 ms) */
         @JavascriptInterface
         fun setStallMs(ms: Int) { stallMs = ms.coerceIn(500, 5_000).toLong() }
+
+        /** Arbeitsspeicher des Geräts in MB (für die leichte Darstellung auf schwachen Sticks) */
+        @JavascriptInterface
+        fun totalMemMb(): Int = try {
+            val am = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val mi = android.app.ActivityManager.MemoryInfo(); am.getMemoryInfo(mi)
+            (mi.totalMem / (1024 * 1024)).toInt()
+        } catch (e: Throwable) { 0 }
 
         @JavascriptInterface
         fun getBuffer(): String =
