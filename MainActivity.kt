@@ -112,7 +112,7 @@ class MainActivity : Activity() {
     /** Für dieses Standbild schon „frozen“ gemeldet */
     private var frozenSent = false
     /** Ab wann ein stehendes Bild als Hänger gilt (Einstellung „Ersatzsender“, Standard 1,5 s) */
-    @Volatile private var stallMs = 1_500L
+    @Volatile private var stallMs = 1_000L
     /** Adresse des laufenden Senders/Films (für das Neu-Öffnen nach einem Hänger) */
     private var currentUrl = ""
     private var audioWarned = false
