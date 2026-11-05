@@ -200,6 +200,10 @@ class MainActivity : Activity() {
     private var posAtReady = 0L
     private var audioAtReady = -1
     private var firstFrame = false
+    /** Kein Bild gemeldet (einmal pro Sender) und seit wann der Sender läuft (für die Prüfung „schwarzes Bild“) */
+    private var blankSent = false
+    private var blankSince = 0L
+    private var videoWarned = false
     private var tunnelChecked = false
     /** Hänger mit direkter Bildausgabe seit App-Start */
     private var tunnelFreezes = 0
@@ -226,6 +230,23 @@ class MainActivity : Activity() {
 
     private fun hasAudioTrack(): Boolean =
         player.currentTracks.groups.any { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
+
+    /**
+     * Schwarzes Bild: Der Sender läuft (Ton/Zeit), hat eine Videospur, aber nach 7 s ist kein einziges Bild gezeichnet
+     * (z. B. 4K/UHD, das dieses Gerät nicht darstellen kann). Der Oberfläche melden – sie schaltet auf eine andere Qualität.
+     * Mit direkter Bildausgabe prüft erst checkTunnel (die schaltet in den normalen Modus), danach diese Prüfung.
+     */
+    private fun checkBlank() {
+        if (blankSent || useVlc) return
+        if (player.playbackState != Player.STATE_READY || !player.isPlaying || player.videoFormat == null || firstFrame) { blankSince = 0L; return }
+        if (tunnelWanted() && !tunnelOffNow && !tunnelChecked) return       // erst die Prüfung der direkten Bildausgabe
+        val now = System.currentTimeMillis()
+        if (blankSince == 0L) { blankSince = now; return }
+        if (now - blankSince < 7_000) return
+        blankSent = true
+        val f = player.videoFormat
+        emit("blank", "kein Bild" + (f?.let { " (" + codecName(it.sampleMimeType ?: "") + (if (it.height > 0) " ${it.width}×${it.height}" else "") + ")" } ?: ""))
+    }
 
     /** Alle 500 ms: läuft der Sender seit 5 s ohne Hänger – stimmen Bild, Ton und Zeit? */
     private fun checkTunnel() {
@@ -335,6 +356,7 @@ class MainActivity : Activity() {
             val sendTime = !quiet || tickCount % 10 == 0
             if (!useVlc) {
                 try { checkTunnel() } catch (e: Throwable) { }
+                try { checkBlank() } catch (e: Throwable) { }
                 try { checkFrozen() } catch (e: Throwable) { }
             }
             updateCache()
@@ -458,6 +480,15 @@ class MainActivity : Activity() {
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                // Bild (z. B. 4K HEVC 10 Bit) kann dieses Gerät gar nicht abspielen: sofort melden
+                if (!videoWarned) {
+                    val video = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+                    if (video.isNotEmpty() && video.none { g -> (0 until g.length).any { g.isTrackSupported(it) } }) {
+                        videoWarned = true
+                        val f = video[0].getTrackFormat(0)
+                        emit("novideo", codecName(f.sampleMimeType ?: "") + (if (f.height > 0) " ${f.width}×${f.height}" else ""))
+                    }
+                }
                 if (langPickPending) pickPreferredAudio(tracks)
                 if (audioWarned) return
                 val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
@@ -474,6 +505,7 @@ class MainActivity : Activity() {
             }
 
             override fun onRenderedFirstFrame() {
+                if (!firstFrame) emit("frame", null)
                 firstFrame = true
             }
 
@@ -1791,6 +1823,15 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun hasVlc(): Boolean = ::vlc.isInitialized && vlc.available
 
+        /** Höchste Bildhöhe, die der Fernseher ausgeben kann (2160 = 4K). 0 = unbekannt */
+        @JavascriptInterface
+        fun maxVideoHeight(): Int = try {
+            @Suppress("DEPRECATION")
+            val d = windowManager.defaultDisplay
+            if (Build.VERSION.SDK_INT >= 23) d.supportedModes.maxOf { maxOf(it.physicalHeight, it.physicalWidth * 9 / 16) }
+            else { val m = android.util.DisplayMetrics(); d.getRealMetrics(m); maxOf(m.heightPixels, m.widthPixels * 9 / 16) }
+        } catch (e: Throwable) { 0 }
+
         /** Internet da? (Netzwerk mit Internet-Zugang vorhanden) */
         @JavascriptInterface
         fun isOnline(): Boolean = currentOnline()
@@ -1843,6 +1884,9 @@ class MainActivity : Activity() {
         fun open(url: String, x: Double, y: Double, w: Double, h: Double) {
             handler.post {
                 readySent = false
+                blankSent = false
+                blankSince = 0L
+                videoWarned = false
                 subtitleIndex = -1
                 // Untertitel zunächst aus, Tonspur automatisch (Ton bei jedem Sender wieder an)
                 audioOffRetry = false
