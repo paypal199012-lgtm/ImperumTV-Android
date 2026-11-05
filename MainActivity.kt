@@ -551,6 +551,9 @@ class MainActivity : Activity() {
 
     /** Zuletzt gemessene Datenrate (Bit/s) */
     @Volatile private var lastBitrate = 0L
+    /** Größe des App-Caches in MB (−1 = noch nicht gezählt) und wann zuletzt gezählt */
+    @Volatile private var cacheMb = -1L
+    @Volatile private var cacheCountAt = 0L
 
     private fun buildUi() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -1856,6 +1859,59 @@ class MainActivity : Activity() {
         /** Wartezeit bis zum Ersatzsender, wenn das Bild steht (500–5000 ms) */
         @JavascriptInterface
         fun setStallMs(ms: Int) { stallMs = ms.coerceIn(500, 5_000).toLong() }
+
+        /**
+         * Zustand des Sticks für die Admin-Seite: Speicher, Arbeitsspeicher, WLAN, Tempo, Laufzeit, Cache (JSON).
+         * Die Cache-Größe wird im Hintergrund gezählt (höchstens alle 30 Minuten) – hier steht der letzte Wert.
+         */
+        @JavascriptInterface
+        fun health(): String {
+            val o = org.json.JSONObject()
+            try {
+                val st = android.os.StatFs(filesDir.path)
+                o.put("stFree", st.availableBytes / 1048576L); o.put("stTotal", st.totalBytes / 1048576L)
+            } catch (e: Throwable) { }
+            try {
+                val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                val mi = android.app.ActivityManager.MemoryInfo(); am.getMemoryInfo(mi)
+                o.put("ramFree", mi.availMem / 1048576L); o.put("ramTotal", mi.totalMem / 1048576L); o.put("lowMem", mi.lowMemory)
+            } catch (e: Throwable) { }
+            try {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                val caps = if (Build.VERSION.SDK_INT >= 23) cm.getNetworkCapabilities(cm.activeNetwork) else null
+                val net = when {
+                    caps == null -> ""
+                    caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> "lan"
+                    caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wlan"
+                    caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobil"
+                    else -> "anders"
+                }
+                o.put("net", net)
+                if (net == "wlan") {
+                    @Suppress("DEPRECATION")
+                    val wi = (applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager).connectionInfo
+                    if (wi != null) {
+                        if (wi.rssi in -127..0) o.put("rssi", wi.rssi)
+                        if (wi.frequency > 0) o.put("mhz", wi.frequency)
+                        if (wi.linkSpeed > 0) o.put("link", wi.linkSpeed)
+                    }
+                }
+            } catch (e: Throwable) { }
+            o.put("kbps", lastBitrate / 1000)
+            o.put("up", android.os.SystemClock.elapsedRealtime() / 1000)
+            if (cacheMb >= 0) o.put("cache", cacheMb)
+            if (System.currentTimeMillis() - cacheCountAt > 30 * 60_000) {
+                cacheCountAt = System.currentTimeMillis()
+                Thread {
+                    try {
+                        var n = 0L
+                        listOfNotNull(cacheDir, externalCacheDir).forEach { d -> d.walkTopDown().forEach { f -> if (f.isFile) n += f.length() } }
+                        cacheMb = n / 1048576L
+                    } catch (e: Throwable) { }
+                }.start()
+            }
+            return o.toString()
+        }
 
         /** Arbeitsspeicher des Geräts in MB (für die leichte Darstellung auf schwachen Sticks) */
         @JavascriptInterface
