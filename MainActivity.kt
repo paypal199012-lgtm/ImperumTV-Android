@@ -103,9 +103,11 @@ class MainActivity : Activity() {
     private fun currentOnline(): Boolean = try {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
         if (Build.VERSION.SDK_INT >= 23) {
-            val n = cm.activeNetwork
-            val c = n?.let { cm.getNetworkCapabilities(it) }
-            c != null && c.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            // Irgendein Netz mit Internet (WLAN, LAN, VPN) – nicht nur das „aktive“: das fehlt auf manchen Sticks kurz nach dem Wiederverbinden
+            val active = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            (active != null && active.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) ||
+                cm.allNetworks.any { n -> cm.getNetworkCapabilities(n)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true } ||
+                cm.activeNetworkInfo?.isConnected == true
         } else cm.activeNetworkInfo?.isConnected == true
     } catch (e: Throwable) { true }
 
