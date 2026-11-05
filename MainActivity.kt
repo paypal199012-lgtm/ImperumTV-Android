@@ -95,6 +95,47 @@ class MainActivity : Activity() {
     /** Oberfläche schon aufgebaut? (Während der Fehlerbericht offen ist, noch nicht) */
     private val uiReady: Boolean get() = ::webView.isInitialized && ::player.isInitialized
 
+    // ---------- Internet da? (für die Meldung „Keine Internetverbindung“ und automatisches Weiterspielen) ----------
+    @Volatile private var netOnline = true
+    private var netCb: android.net.ConnectivityManager.NetworkCallback? = null
+
+    @Suppress("DEPRECATION")
+    private fun currentOnline(): Boolean = try {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        if (Build.VERSION.SDK_INT >= 23) {
+            val n = cm.activeNetwork
+            val c = n?.let { cm.getNetworkCapabilities(it) }
+            c != null && c.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } else cm.activeNetworkInfo?.isConnected == true
+    } catch (e: Throwable) { true }
+
+    /** Netz hat sich geändert: kurz warten (WLAN-Wechsel), dann der Oberfläche melden */
+    private fun netChanged() {
+        handler.removeCallbacks(netCheck)
+        handler.postDelayed(netCheck, 1_500)
+    }
+    private val netCheck = Runnable {
+        val on = currentOnline()
+        if (on != netOnline) {
+            netOnline = on
+            if (uiReady) webView.evaluateJavascript("window.__androidNet && window.__androidNet($on)", null)
+        }
+    }
+
+    private fun watchNetwork() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) { handler.post { netChanged() } }
+                override fun onLost(network: android.net.Network) { handler.post { netChanged() } }
+            }
+            val req = android.net.NetworkRequest.Builder().addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET).build()
+            cm.registerNetworkCallback(req, cb)
+            netCb = cb
+            netOnline = currentOnline()
+        } catch (e: Throwable) { }
+    }
+
     private val handler = Handler(Looper.getMainLooper())
 
     // Werte, die die Web-Seite jederzeit abfragen darf (werden auf dem Haupt-Thread aktualisiert)
@@ -580,6 +621,7 @@ class MainActivity : Activity() {
         webView.loadUrl("file:///android_asset/www/index.html")
         trimThumbs()
         epgLoadSaved()
+        watchNetwork()
 
         // OpenVPN mit eigener .ovpn-Datei: nur verbinden, wenn man „beim Start verbinden“ gewählt hat
         ImperumOVpn.listener = { s, e ->
@@ -1062,6 +1104,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        try { netCb?.let { (getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(it) } } catch (e: Throwable) { }
         try { if (::player.isInitialized) player.release() } catch (e: Throwable) { }
         try { if (::vlc.isInitialized) vlc.release() } catch (e: Throwable) { }
         try { webView.destroy() } catch (e: Throwable) { }
@@ -1747,6 +1790,10 @@ class MainActivity : Activity() {
         /** Ist VLC in dieser Version eingebaut? */
         @JavascriptInterface
         fun hasVlc(): Boolean = ::vlc.isInitialized && vlc.available
+
+        /** Internet da? (Netzwerk mit Internet-Zugang vorhanden) */
+        @JavascriptInterface
+        fun isOnline(): Boolean = currentOnline()
 
         /** Wartezeit bis zum Ersatzsender, wenn das Bild steht (500–5000 ms) */
         @JavascriptInterface
