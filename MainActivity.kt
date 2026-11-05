@@ -239,7 +239,7 @@ class MainActivity : Activity() {
     /**
      * Schwarzes Bild: Der Sender ist gestartet, hat (oder erwartet) eine Videospur, aber es wurde noch kein einziges Bild gezeichnet.
      *  – läuft (Ton/Zeit) und nach 2 s kein Bild → „blank“ (z. B. 4K/UHD, das dieses Gerät nicht darstellen kann)
-     *  – nach dem Start hängt er beim Laden fest und nach 4 s noch kein Bild → „stuck“ (Quelle liefert nichts)
+     *  – nach dem Start hängt er beim Laden fest und nach 2,5 s noch kein Bild → „stuck“ (Quelle liefert nichts)
      * Der Oberfläche melden – sie schaltet auf eine andere Qualität. Reine Radiosender (ohne Videospur) zählen nicht.
      * Mit direkter Bildausgabe prüft bei laufendem Sender erst checkTunnel (die schaltet in den normalen Modus), danach diese Prüfung.
      */
@@ -251,7 +251,9 @@ class MainActivity : Activity() {
         val playing = player.playbackState == Player.STATE_READY && player.isPlaying
         if (playing && tunnelWanted() && !tunnelOffNow && !tunnelChecked) return   // erst die Prüfung der direkten Bildausgabe
         val since = System.currentTimeMillis() - firstReadyAt
-        if (since < (if (playing) 2_000 else 4_000)) return
+        // läuft ohne Bild: 1,5 s (nach der Prüfung der direkten Bildausgabe) bzw. 2 s; hängt beim Laden: 2,5 s
+        val limit = if (!playing) 2_500L else if (tunnelOffNow) 1_500L else 2_000L
+        if (since < limit) return
         blankSent = true
         val f = player.videoFormat
         val info = f?.let { " (" + codecName(it.sampleMimeType ?: "") + (if (it.height > 0) " ${it.width}×${it.height}" else "") + ")" } ?: ""
@@ -267,8 +269,8 @@ class MainActivity : Activity() {
         if (readyAt == 0L) {
             readyAt = now; posAtReady = player.currentPosition; audioAtReady = audioCount(); return
         }
-        // Kein Bild fällt schon nach 2 s auf, Ton/Zeit werden nach 5 s geprüft
-        val earlyNoPic = now - readyAt >= 2_000 && player.videoFormat != null && !firstFrame
+        // Kein Bild fällt schon nach 1 s auf (dann schnell ohne direkte Bildausgabe neu prüfen), Ton/Zeit werden nach 5 s geprüft
+        val earlyNoPic = now - readyAt >= 1_000 && player.videoFormat != null && !firstFrame
         if (now - readyAt < 5_000 && !earlyNoPic) return
         tunnelChecked = true
         val noTime = Math.abs(player.currentPosition - posAtReady) < 1_500
