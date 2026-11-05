@@ -232,7 +232,7 @@ class MainActivity : Activity() {
         player.currentTracks.groups.any { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
 
     /**
-     * Schwarzes Bild: Der Sender läuft (Ton/Zeit), hat eine Videospur, aber nach 3 s ist kein einziges Bild gezeichnet
+     * Schwarzes Bild: Der Sender läuft (Ton/Zeit), hat eine Videospur, aber nach 2 s ist kein einziges Bild gezeichnet
      * (z. B. 4K/UHD, das dieses Gerät nicht darstellen kann). Der Oberfläche melden – sie schaltet auf eine andere Qualität.
      * Mit direkter Bildausgabe prüft erst checkTunnel (die schaltet in den normalen Modus), danach diese Prüfung.
      */
@@ -242,8 +242,8 @@ class MainActivity : Activity() {
         if (tunnelWanted() && !tunnelOffNow && !tunnelChecked) return       // erst die Prüfung der direkten Bildausgabe
         val now = System.currentTimeMillis()
         if (blankSince == 0L) { blankSince = now; return }
-        // 3 s nach dem Start ohne ein einziges Bild (nach dem Wechsel aus der direkten Bildausgabe 2,5 s)
-        if (now - blankSince < (if (tunnelOffNow) 2_500 else 3_000)) return
+        // 2 s nach dem Start ohne ein einziges Bild
+        if (now - blankSince < 2_000) return
         blankSent = true
         val f = player.videoFormat
         emit("blank", "kein Bild" + (f?.let { " (" + codecName(it.sampleMimeType ?: "") + (if (it.height > 0) " ${it.width}×${it.height}" else "") + ")" } ?: ""))
@@ -257,8 +257,8 @@ class MainActivity : Activity() {
         if (readyAt == 0L) {
             readyAt = now; posAtReady = player.currentPosition; audioAtReady = audioCount(); return
         }
-        // Kein Bild fällt schon nach 3 s auf, Ton/Zeit werden nach 5 s geprüft
-        val earlyNoPic = now - readyAt >= 3_000 && player.videoFormat != null && !firstFrame
+        // Kein Bild fällt schon nach 2 s auf, Ton/Zeit werden nach 5 s geprüft
+        val earlyNoPic = now - readyAt >= 2_000 && player.videoFormat != null && !firstFrame
         if (now - readyAt < 5_000 && !earlyNoPic) return
         tunnelChecked = true
         val noTime = Math.abs(player.currentPosition - posAtReady) < 1_500
