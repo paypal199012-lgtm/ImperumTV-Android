@@ -233,22 +233,30 @@ class MainActivity : Activity() {
     private fun hasAudioTrack(): Boolean =
         player.currentTracks.groups.any { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
 
+    /** Wann der Sender zum ersten Mal „bereit“ war (seit dem Öffnen bzw. dem Neustart ohne direkte Bildausgabe) */
+    private var firstReadyAt = 0L
+
     /**
-     * Schwarzes Bild: Der Sender läuft (Ton/Zeit), hat eine Videospur, aber nach 2 s ist kein einziges Bild gezeichnet
-     * (z. B. 4K/UHD, das dieses Gerät nicht darstellen kann). Der Oberfläche melden – sie schaltet auf eine andere Qualität.
-     * Mit direkter Bildausgabe prüft erst checkTunnel (die schaltet in den normalen Modus), danach diese Prüfung.
+     * Schwarzes Bild: Der Sender ist gestartet, hat (oder erwartet) eine Videospur, aber es wurde noch kein einziges Bild gezeichnet.
+     *  – läuft (Ton/Zeit) und nach 2 s kein Bild → „blank“ (z. B. 4K/UHD, das dieses Gerät nicht darstellen kann)
+     *  – nach dem Start hängt er beim Laden fest und nach 4 s noch kein Bild → „stuck“ (Quelle liefert nichts)
+     * Der Oberfläche melden – sie schaltet auf eine andere Qualität. Reine Radiosender (ohne Videospur) zählen nicht.
+     * Mit direkter Bildausgabe prüft bei laufendem Sender erst checkTunnel (die schaltet in den normalen Modus), danach diese Prüfung.
      */
     private fun checkBlank() {
-        if (blankSent || useVlc) return
-        if (player.playbackState != Player.STATE_READY || !player.isPlaying || player.videoFormat == null || firstFrame) { blankSince = 0L; return }
-        if (tunnelWanted() && !tunnelOffNow && !tunnelChecked) return       // erst die Prüfung der direkten Bildausgabe
-        val now = System.currentTimeMillis()
-        if (blankSince == 0L) { blankSince = now; return }
-        // 2 s nach dem Start ohne ein einziges Bild
-        if (now - blankSince < 2_000) return
+        if (blankSent || useVlc || firstFrame || firstReadyAt == 0L || !player.playWhenReady) return
+        val tracks = player.currentTracks
+        val hasVideo = player.videoFormat != null || tracks.groups.any { it.type == C.TRACK_TYPE_VIDEO }
+        if (!hasVideo && !tracks.isEmpty) return                               // Radio: nur Ton
+        val playing = player.playbackState == Player.STATE_READY && player.isPlaying
+        if (playing && tunnelWanted() && !tunnelOffNow && !tunnelChecked) return   // erst die Prüfung der direkten Bildausgabe
+        val since = System.currentTimeMillis() - firstReadyAt
+        if (since < (if (playing) 2_000 else 4_000)) return
         blankSent = true
         val f = player.videoFormat
-        emit("blank", "kein Bild" + (f?.let { " (" + codecName(it.sampleMimeType ?: "") + (if (it.height > 0) " ${it.width}×${it.height}" else "") + ")" } ?: ""))
+        val info = f?.let { " (" + codecName(it.sampleMimeType ?: "") + (if (it.height > 0) " ${it.width}×${it.height}" else "") + ")" } ?: ""
+        if (playing) emit("blank", "kein Bild$info")
+        else emit("stuck", "kein Bild, lädt nicht weiter$info")
     }
 
     /** Alle 500 ms: läuft der Sender seit 5 s ohne Hänger – stimmen Bild, Ton und Zeit? */
@@ -285,6 +293,7 @@ class MainActivity : Activity() {
             tunnelChecked = false
             readyAt = 0L
             firstFrame = false
+            firstReadyAt = 0L
             applyTunnel(false)
             player.stop()
             if (currentUrl.isNotEmpty()) player.setMediaItem(MediaItem.fromUri(currentUrl))
@@ -473,6 +482,7 @@ class MainActivity : Activity() {
                     Player.STATE_BUFFERING -> emit("buffer", true)
                     Player.STATE_READY -> {
                         emit("buffer", false)
+                        if (firstReadyAt == 0L) firstReadyAt = System.currentTimeMillis()
                         if (!readySent) {
                             readySent = true
                             emit("ready", null)
@@ -1906,6 +1916,7 @@ class MainActivity : Activity() {
                 tunnelChecked = false
                 readyAt = 0L
                 firstFrame = false
+                firstReadyAt = 0L
                 applyTunnel(tunnelWanted())
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .clearOverrides()
