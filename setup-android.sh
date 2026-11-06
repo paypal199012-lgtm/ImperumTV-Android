@@ -20,7 +20,6 @@ cp app.build.gradle.kts "$OUT/app/build.gradle.kts"
 cp AndroidManifest.xml "$OUT/app/src/main/AndroidManifest.xml"
 cp MainActivity.kt "$OUT/app/src/main/java/tv/imperum/app/MainActivity.kt"
 cp Recorder.kt "$OUT/app/src/main/java/tv/imperum/app/Recorder.kt"
-cp Downloader.kt "$OUT/app/src/main/java/tv/imperum/app/Downloader.kt"
 cp ListMapper.kt "$OUT/app/src/main/java/tv/imperum/app/ListMapper.kt"
 # Bilder in der richtigen Auflösung, damit sie auf dem Fernseher scharf und mittig sind
 # (Fire TV nimmt je nach Modell eine andere Größe, deshalb liegt das Logo in allen Ordnern)
