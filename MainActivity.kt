@@ -124,6 +124,57 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------- Fernseher aus, Stick läuft weiter: Wiedergabe anhalten ----------
+    // Zwei Zeichen: HDMI meldet „getrennt“ (Fernseher in Bereitschaft) oder der Bildschirm ist aus.
+    // Erst nach 8 s ohne Signal anhalten – beim Umschalten der Bildrate/Auflösung oder des Eingangs flackert HDMI kurz.
+    private var hdmiOff = false
+    private var displayOff = false
+    private var tvOn = true
+    private val tvOffRunnable = Runnable {
+        if (hdmiOff || displayOff) {
+            tvOn = false
+            if (uiReady) webView.evaluateJavascript("window.__androidTv && window.__androidTv(false)", null)
+        }
+    }
+    private val hdmiReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            if (isInitialStickyBroadcast) return                 // nur Änderungen zählen, nicht den Stand beim Start
+            val st = i.getIntExtra(android.media.AudioManager.EXTRA_AUDIO_PLUG_STATE, -1)
+            if (st < 0) return
+            hdmiOff = st == 0
+            tvSignalChanged()
+        }
+    }
+
+    private fun tvSignalChanged() {
+        handler.removeCallbacks(tvOffRunnable)
+        if (hdmiOff || displayOff) handler.postDelayed(tvOffRunnable, 8_000)
+        else if (!tvOn) {
+            tvOn = true
+            if (uiReady) webView.evaluateJavascript("window.__androidTv && window.__androidTv(true)", null)
+        }
+    }
+
+    private fun watchTv() {
+        try {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(hdmiReceiver, android.content.IntentFilter(android.media.AudioManager.ACTION_HDMI_AUDIO_PLUG))
+        } catch (e: Throwable) { }
+        try {
+            val dm = getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+            dm.registerDisplayListener(object : android.hardware.display.DisplayManager.DisplayListener {
+                override fun onDisplayAdded(id: Int) { }
+                override fun onDisplayRemoved(id: Int) { }
+                override fun onDisplayChanged(id: Int) {
+                    if (id != android.view.Display.DEFAULT_DISPLAY) return
+                    val st = dm.getDisplay(id)?.state ?: return
+                    val off = st == android.view.Display.STATE_OFF
+                    if (off != displayOff) { displayOff = off; tvSignalChanged() }
+                }
+            }, handler)
+        } catch (e: Throwable) { }
+    }
+
     private fun watchNetwork() {
         try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -729,6 +780,7 @@ class MainActivity : Activity() {
         trimThumbs()
         epgLoadSaved()
         watchNetwork()
+        watchTv()
 
         // OpenVPN mit eigener .ovpn-Datei: nur verbinden, wenn man „beim Start verbinden“ gewählt hat
         ImperumOVpn.listener = { s, e ->
@@ -1212,6 +1264,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         try { mediaSession?.release() } catch (e: Throwable) { }
+        try { unregisterReceiver(hdmiReceiver) } catch (e: Throwable) { }
         try { netCb?.let { (getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(it) } } catch (e: Throwable) { }
         try { if (::player.isInitialized) player.release() } catch (e: Throwable) { }
         try { if (::vlc.isInitialized) vlc.release() } catch (e: Throwable) { }
