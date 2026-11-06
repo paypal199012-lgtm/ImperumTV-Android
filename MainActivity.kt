@@ -549,27 +549,7 @@ class MainActivity : Activity() {
             .setEnableDecoderFallback(true)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         // Standard-Einstellungen für TS-Sender (Sonder-Flags ließen auf manchen Fire-TV-Chips das Bild hängen)
-        // TS-Sender: eigener Zeitstempel-Umrechner, damit die App den echten Zeitstempel (PTS) des gezeigten Bildes kennt
-        // (für „Gemeinsam schauen“: alle Geräte desselben Senders zeigen dann genau dasselbe Bild)
-        val baseExtractors = DefaultExtractorsFactory()
-        val extractors = object : androidx.media3.extractor.ExtractorsFactory {
-            private fun wrap(list: Array<androidx.media3.extractor.Extractor>): Array<androidx.media3.extractor.Extractor> =
-                Array(list.size) { i ->
-                    val e = list[i]
-                    if (e is androidx.media3.extractor.ts.TsExtractor) {
-                        val adj = androidx.media3.common.util.TimestampAdjuster(0)
-                        tsAdjuster = adj
-                        androidx.media3.extractor.ts.TsExtractor(
-                            androidx.media3.extractor.ts.TsExtractor.MODE_SINGLE_PMT, 0,
-                            androidx.media3.extractor.text.DefaultSubtitleParserFactory(), adj,
-                            androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory(0),
-                            androidx.media3.extractor.ts.TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES)
-                    } else e
-                }
-            override fun createExtractors(): Array<androidx.media3.extractor.Extractor> = wrap(baseExtractors.createExtractors())
-            override fun createExtractors(uri: android.net.Uri, responseHeaders: Map<String, List<String>>): Array<androidx.media3.extractor.Extractor> =
-                wrap(baseExtractors.createExtractors(uri, responseHeaders))
-        }
+        val extractors = DefaultExtractorsFactory()
         // Schneller Start: schon nach 1 s Video loslegen (Standard 2,5 s), nach einem Hänger nach 2 s (Standard 5 s).
         // Der große Vorrat (bis 50 s) bleibt, damit es danach nicht öfter nachlädt.
         // Puffer aus den Einstellungen: klein = schnellster Start, groß = weniger Ruckler bei schwachem Internet
@@ -1338,9 +1318,6 @@ class MainActivity : Activity() {
             cachedPosition = vlc.position()
             cachedDuration = vlc.duration()
             cachedLiveSeekable = false
-            cachedAhead = -1L
-            cachedPtsMs = -1.0
-            cachedRunning = false
             trackBehind(vlc.playingNow(), (cachedPosition * 1000).toLong())
             return
         }
@@ -1350,16 +1327,6 @@ class MainActivity : Activity() {
         val d = player.duration
         cachedDuration = if (d == C.TIME_UNSET || d <= 0 || player.isCurrentMediaItemLive) 0.0 else d / 1000.0
         cachedLiveSeekable = player.isCurrentMediaItemLive && player.isCurrentMediaItemSeekable
-        // Bild im Puffer vor der Abspielstelle: bei Live ≈ wie weit hinter dem neuesten Bild vom Anbieter
-        cachedAhead = try { player.totalBufferedDuration } catch (e: Throwable) { -1L }
-        // Zeitstempel des gezeigten Bildes aus dem Sender-Signal (90-kHz-PTS, in ms) – nur bei TS
-        cachedPtsMs = try {
-            val off = tsAdjuster?.timestampOffsetUs ?: C.TIME_UNSET
-            if (off == C.TIME_UNSET || player.playbackState == Player.STATE_IDLE) -1.0
-            else (player.currentPosition * 1000L - off) / 1000.0
-        } catch (e: Throwable) { -1.0 }
-        cachedPtsAt = android.os.SystemClock.elapsedRealtime()
-        cachedRunning = try { player.isPlaying } catch (e: Throwable) { false }
         trackBehind(player.isPlaying || player.playbackState == Player.STATE_BUFFERING, player.currentPosition)
     }
 
@@ -1367,11 +1334,6 @@ class MainActivity : Activity() {
     // Seit dem Start vergangene Zeit minus abgespielte Zeit: jeder Hänger (Nachladen) lässt den Sender weiter
     // hinter das echte Live-Bild rutschen. Springt die Position zurück (Sender neu geöffnet), beginnt die Messung neu.
     @Volatile private var cachedBehind = 0L
-    @Volatile private var cachedAhead = -1L
-    @Volatile private var tsAdjuster: androidx.media3.common.util.TimestampAdjuster? = null
-    @Volatile private var cachedPtsMs = -1.0
-    @Volatile private var cachedPtsAt = 0L
-    @Volatile private var cachedRunning = false
     @Volatile private var cachedLiveSeekable = false
     private var behindWall = 0L
     private var behindPos = 0L
@@ -2086,27 +2048,6 @@ class MainActivity : Activity() {
         /** Wie weit liegt der laufende Live-Sender hinter dem echten Live-Bild (ms, 0 = unbekannt/aktuell) */
         @JavascriptInterface
         fun liveBehindMs(): Long = cachedBehind
-
-        /** Abspielgeschwindigkeit (0,9–1,1) für „Gemeinsam schauen“: sanft angleichen statt anhalten. false = geht nicht (VLC) */
-        @JavascriptInterface
-        fun setSpeed(speed: Double): Boolean {
-            if (useVlc) return false
-            val s = speed.coerceIn(0.9, 1.1).toFloat()
-            handler.post { try { if (!useVlc) player.setPlaybackSpeed(s) } catch (e: Throwable) { } }
-            return true
-        }
-
-        /** Zeitstempel (ms) des gerade gezeigten Bildes aus dem Sender-Signal, -1 = unbekannt. Für „Gemeinsam schauen“ */
-        @JavascriptInterface
-        fun streamPtsMs(): Double {
-            val p = cachedPtsMs
-            if (p < 0) return -1.0
-            return if (cachedRunning) p + (android.os.SystemClock.elapsedRealtime() - cachedPtsAt) else p
-        }
-
-        /** Millisekunden Bild im Puffer vor der Abspielstelle (-1 = unbekannt, z. B. VLC). Für „Gemeinsam schauen“ */
-        @JavascriptInterface
-        fun bufferAheadMs(): Long = cachedAhead
 
         /**
          * Zum Live-Bild aufholen. Bei Sendern mit Zeitfenster (HLS) wird gesprungen (true).
