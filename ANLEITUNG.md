@@ -60,8 +60,7 @@ und mit langem Druck auf OK zu den Favoriten hinzufügen.
 3. Name und Zugangsdaten eintragen → **Hinzufügen**.
 4. Nach ein paar Sekunden erscheint die Liste in der App. Anklicken und los geht's.
 
-Jedes Gerät kann ImperumTV 7 Tage kostenlos testen. Danach erscheint ein Hinweis mit QR-Code:
-auf der Website für 9,99 € einmalig aktivieren, dann geht es von selbst weiter.
+ImperumTV ist kostenlos, ohne Testphase und ohne Aktivierung.
    Beim nächsten Start verbindet sich die App automatisch mit der zuletzt genutzten Liste.
 
 Wiedergabeliste wechseln: Startseite → **LISTEN**, oder **Konto → Wiedergabelisten**.
