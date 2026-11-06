@@ -379,6 +379,7 @@ class MainActivity : Activity() {
             if (!sendTime) {
                 // nichts melden
             } else if (useVlc) {
+                updateMediaSession(vlc.playingNow())
                 if (vlc.playingNow()) emit("time", cachedPosition)
                 try { lastBitrate = vlc.bitrate() } catch (e: Throwable) { }
             } else if (player.playbackState == Player.STATE_READY && player.isPlaying) {
@@ -397,7 +398,60 @@ class MainActivity : Activity() {
         val report = takeCrashReport()
         // Gab es beim letzten Start einen Absturz: erst den Bericht zeigen, dann die App aufbauen
         if (report != null) showCrashReport(report) { buildUi() } else buildUi()
+        setupMediaSession()
     }
+
+    // ---------- Alexa / Sprachsteuerung (Fire TV): „Alexa, Pause“, „Alexa, weiter“, „Alexa, vorspulen“, „Alexa, nächster“ ----------
+    // Amazon schickt diese Befehle an die Media Session der App. Sie werden wie Tasten der Fernbedienung behandelt:
+    // nächster/vorheriger = Kanal hoch/runter. Sender per Namen („Alexa, schalte auf …“) geht nur mit einem Amazon-Video-Skill (Appstore).
+
+    private var mediaSession: android.media.session.MediaSession? = null
+    private var msState = -1
+
+    private fun setupMediaSession() {
+        try {
+            val ms = android.media.session.MediaSession(this, "ImperumTV")
+            ms.setCallback(object : android.media.session.MediaSession.Callback() {
+                override fun onPlay() { voiceKey(415) }
+                override fun onPause() { voiceKey(19) }
+                override fun onStop() { voiceKey(19) }
+                override fun onFastForward() { voiceKey(417) }
+                override fun onRewind() { voiceKey(412) }
+                override fun onSkipToNext() { voiceKey(427) }
+                override fun onSkipToPrevious() { voiceKey(428) }
+                override fun onSeekTo(pos: Long) {
+                    handler.post { try { if (!useVlc && ::player.isInitialized && player.isCurrentMediaItemSeekable) player.seekTo(pos) } catch (e: Throwable) { } }
+                }
+            })
+            @Suppress("DEPRECATION")
+            ms.setFlags(android.media.session.MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or android.media.session.MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+            ms.isActive = true
+            mediaSession = ms
+            updateMediaSession(false)
+        } catch (e: Throwable) { }
+    }
+
+    private fun voiceKey(code: Int) { handler.post { try { if (uiReady) sendKey(code) } catch (e: Throwable) { } } }
+
+    /** Alexa muss wissen, ob gerade etwas läuft (sonst landen „Pause“/„Weiter“ nicht bei dieser App) */
+    private fun updateMediaSession(playing: Boolean) {
+        val ms = mediaSession ?: return
+        val st = if (playing) android.media.session.PlaybackState.STATE_PLAYING else android.media.session.PlaybackState.STATE_PAUSED
+        if (st == msState) return
+        msState = st
+        val actions = android.media.session.PlaybackState.ACTION_PLAY or android.media.session.PlaybackState.ACTION_PAUSE or
+            android.media.session.PlaybackState.ACTION_PLAY_PAUSE or android.media.session.PlaybackState.ACTION_STOP or
+            android.media.session.PlaybackState.ACTION_FAST_FORWARD or android.media.session.PlaybackState.ACTION_REWIND or
+            android.media.session.PlaybackState.ACTION_SEEK_TO or android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT or
+            android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS
+        try {
+            ms.setPlaybackState(android.media.session.PlaybackState.Builder()
+                .setActions(actions)
+                .setState(st, (cachedPosition * 1000).toLong(), if (playing) 1f else 0f)
+                .build())
+        } catch (e: Throwable) { }
+    }
+
 
     /**
      * Fire TV merkt sich das Bild der App-Kachel. Nach einem Update zeigt es oft nur eine graue Kachel,
@@ -519,6 +573,7 @@ class MainActivity : Activity() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateCache()
+                updateMediaSession(isPlaying)
             }
 
             override fun onRenderedFirstFrame() {
@@ -1156,6 +1211,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        try { mediaSession?.release() } catch (e: Throwable) { }
         try { netCb?.let { (getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(it) } } catch (e: Throwable) { }
         try { if (::player.isInitialized) player.release() } catch (e: Throwable) { }
         try { if (::vlc.isInitialized) vlc.release() } catch (e: Throwable) { }
