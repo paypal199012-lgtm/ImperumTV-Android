@@ -2556,6 +2556,29 @@ class MainActivity : Activity() {
             return if (path.isBlank()) "" else Uri.fromFile(java.io.File(path)).toString()
         }
 
+        // ---------- Downloads (offline schauen) ----------
+
+        /** Film/Folge laden. Rückgabe: Nummer oder "!Fehlertext" */
+        @JavascriptInterface
+        fun dlStart(json: String): String =
+            try { Downloader.start(this@MainActivity, json) } catch (e: Exception) { "!" + (e.message ?: "Fehler") }
+
+        @JavascriptInterface
+        fun dlList(): String = try { Downloader.all(this@MainActivity).toString() } catch (e: Exception) { "[]" }
+
+        /** Download abbrechen bzw. samt Datei löschen */
+        @JavascriptInterface
+        fun dlDelete(id: String) { try { Downloader.delete(this@MainActivity, id) } catch (e: Exception) { } }
+
+        @JavascriptInterface
+        fun dlRetry(id: String) { try { Downloader.retry(this@MainActivity, id) } catch (e: Exception) { } }
+
+        @JavascriptInterface
+        fun dlFileUrl(id: String): String = try { Downloader.fileUrl(this@MainActivity, id) } catch (e: Exception) { "" }
+
+        @JavascriptInterface
+        fun dlStorage(): String = Downloader.storageJson(this@MainActivity)
+
         @JavascriptInterface
         fun exit() {
             handler.post { finish() }
