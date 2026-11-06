@@ -1318,6 +1318,7 @@ class MainActivity : Activity() {
             cachedPosition = vlc.position()
             cachedDuration = vlc.duration()
             cachedLiveSeekable = false
+            cachedAhead = -1L
             trackBehind(vlc.playingNow(), (cachedPosition * 1000).toLong())
             return
         }
@@ -1327,6 +1328,8 @@ class MainActivity : Activity() {
         val d = player.duration
         cachedDuration = if (d == C.TIME_UNSET || d <= 0 || player.isCurrentMediaItemLive) 0.0 else d / 1000.0
         cachedLiveSeekable = player.isCurrentMediaItemLive && player.isCurrentMediaItemSeekable
+        // Bild im Puffer vor der Abspielstelle: bei Live ≈ wie weit hinter dem neuesten Bild vom Anbieter
+        cachedAhead = try { player.totalBufferedDuration } catch (e: Throwable) { -1L }
         trackBehind(player.isPlaying || player.playbackState == Player.STATE_BUFFERING, player.currentPosition)
     }
 
@@ -1334,6 +1337,7 @@ class MainActivity : Activity() {
     // Seit dem Start vergangene Zeit minus abgespielte Zeit: jeder Hänger (Nachladen) lässt den Sender weiter
     // hinter das echte Live-Bild rutschen. Springt die Position zurück (Sender neu geöffnet), beginnt die Messung neu.
     @Volatile private var cachedBehind = 0L
+    @Volatile private var cachedAhead = -1L
     @Volatile private var cachedLiveSeekable = false
     private var behindWall = 0L
     private var behindPos = 0L
@@ -2048,6 +2052,10 @@ class MainActivity : Activity() {
         /** Wie weit liegt der laufende Live-Sender hinter dem echten Live-Bild (ms, 0 = unbekannt/aktuell) */
         @JavascriptInterface
         fun liveBehindMs(): Long = cachedBehind
+
+        /** Millisekunden Bild im Puffer vor der Abspielstelle (-1 = unbekannt, z. B. VLC). Für „Gemeinsam schauen“ */
+        @JavascriptInterface
+        fun bufferAheadMs(): Long = cachedAhead
 
         /**
          * Zum Live-Bild aufholen. Bei Sendern mit Zeitfenster (HLS) wird gesprungen (true).
