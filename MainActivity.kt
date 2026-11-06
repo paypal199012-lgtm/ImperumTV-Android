@@ -2053,6 +2053,15 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun liveBehindMs(): Long = cachedBehind
 
+        /** Abspielgeschwindigkeit (0,9–1,1) für „Gemeinsam schauen“: sanft angleichen statt anhalten. false = geht nicht (VLC) */
+        @JavascriptInterface
+        fun setSpeed(speed: Double): Boolean {
+            if (useVlc) return false
+            val s = speed.coerceIn(0.9, 1.1).toFloat()
+            handler.post { try { if (!useVlc) player.setPlaybackSpeed(s) } catch (e: Throwable) { } }
+            return true
+        }
+
         /** Millisekunden Bild im Puffer vor der Abspielstelle (-1 = unbekannt, z. B. VLC). Für „Gemeinsam schauen“ */
         @JavascriptInterface
         fun bufferAheadMs(): Long = cachedAhead
