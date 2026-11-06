@@ -1264,6 +1264,8 @@ class MainActivity : Activity() {
             cachedPlaying = vlc.isPlaying()
             cachedPosition = vlc.position()
             cachedDuration = vlc.duration()
+            cachedLiveSeekable = false
+            trackBehind(vlc.playingNow(), (cachedPosition * 1000).toLong())
             return
         }
         cachedPlaying = player.playWhenReady && player.playbackState != Player.STATE_ENDED &&
@@ -1271,6 +1273,27 @@ class MainActivity : Activity() {
         cachedPosition = player.currentPosition / 1000.0
         val d = player.duration
         cachedDuration = if (d == C.TIME_UNSET || d <= 0 || player.isCurrentMediaItemLive) 0.0 else d / 1000.0
+        cachedLiveSeekable = player.isCurrentMediaItemLive && player.isCurrentMediaItemSeekable
+        trackBehind(player.isPlaying || player.playbackState == Player.STATE_BUFFERING, player.currentPosition)
+    }
+
+    // ---------- Rückstand zum Live-Bild ----------
+    // Seit dem Start vergangene Zeit minus abgespielte Zeit: jeder Hänger (Nachladen) lässt den Sender weiter
+    // hinter das echte Live-Bild rutschen. Springt die Position zurück (Sender neu geöffnet), beginnt die Messung neu.
+    @Volatile private var cachedBehind = 0L
+    @Volatile private var cachedLiveSeekable = false
+    private var behindWall = 0L
+    private var behindPos = 0L
+
+    private fun trackBehind(running: Boolean, posMs: Long) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (behindWall != 0L && posMs < behindPos - 1_000) behindWall = 0L          // neu geöffnet
+        if (behindWall == 0L) {
+            cachedBehind = 0L
+            if (running && posMs > 0) { behindWall = now; behindPos = posMs }
+            return
+        }
+        cachedBehind = ((now - behindWall) - (posMs - behindPos)).coerceAtLeast(0L)
     }
 
     // ---------- Poster verkleinern und auf dem Gerät aufheben ----------
@@ -1969,6 +1992,23 @@ class MainActivity : Activity() {
             return o.toString()
         }
 
+        /** Wie weit liegt der laufende Live-Sender hinter dem echten Live-Bild (ms, 0 = unbekannt/aktuell) */
+        @JavascriptInterface
+        fun liveBehindMs(): Long = cachedBehind
+
+        /**
+         * Zum Live-Bild aufholen. Bei Sendern mit Zeitfenster (HLS) wird gesprungen (true).
+         * Bei normalen Streams false – dann öffnet die Oberfläche den Sender neu (beginnt beim aktuellen Bild).
+         */
+        @JavascriptInterface
+        fun liveCatchUp(): Boolean {
+            if (useVlc || !cachedLiveSeekable) return false
+            handler.post {
+                try { player.seekToDefaultPosition(); behindWall = 0L; cachedBehind = 0L } catch (e: Throwable) { }
+            }
+            return true
+        }
+
         /** Arbeitsspeicher des Geräts in MB (für die leichte Darstellung auf schwachen Sticks) */
         @JavascriptInterface
         fun totalMemMb(): Int = try {
@@ -2031,6 +2071,7 @@ class MainActivity : Activity() {
                 readyAt = 0L
                 firstFrame = false
                 firstReadyAt = 0L
+                behindWall = 0L; cachedBehind = 0L
                 applyTunnel(tunnelWanted())
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .clearOverrides()
