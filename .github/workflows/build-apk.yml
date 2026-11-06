@@ -33,6 +33,8 @@ jobs:
             openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in imperum.keystore.enc -out imperum.keystore -pass env:K
           fi
           test -f imperum.keystore
+          # Sicherheitsprüfung: immer exakt derselbe Schlüssel (sonst ließen sich Updates nicht installieren)
+          echo "6bda81a81ff6255b447af3c062eb452bd5d37de4a4f688b229ad0c92ddcdfa14  imperum.keystore" | sha256sum -c -
 
       - name: Projekt zusammenbauen
         run: sh setup-android.sh
