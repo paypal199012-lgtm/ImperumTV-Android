@@ -23,6 +23,17 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      # Signatur-Schlüssel: liegt verschlüsselt im Repo, entschlüsselt mit dem Secret KEYSTORE_SCHLUESSEL
+      - name: Signatur-Schlüssel entschlüsseln
+        env:
+          K: ${{ secrets.KEYSTORE_SCHLUESSEL }}
+        run: |
+          if [ -f imperum.keystore.enc ]; then
+            if [ -z "$K" ]; then echo "::error::Secret KEYSTORE_SCHLUESSEL fehlt"; exit 1; fi
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in imperum.keystore.enc -out imperum.keystore -pass env:K
+          fi
+          test -f imperum.keystore
+
       - name: Projekt zusammenbauen
         run: sh setup-android.sh
 
