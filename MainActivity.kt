@@ -2389,6 +2389,20 @@ class MainActivity : Activity() {
 
         /** Versionsnummer der installierten App (= Nummer des GitHub-Builds) */
         @JavascriptInterface
+        fun signature(): String = try {
+            // Fingerabdruck (SHA-256) des Schlüssels, mit dem diese App signiert ist – zeigt nachgebaute Apps
+            val cert: ByteArray? = if (Build.VERSION.SDK_INT >= 28) {
+                val si = packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES).signingInfo
+                val arr = if (si == null) null else if (si.hasMultipleSigners()) si.apkContentsSigners else si.signingCertificateHistory
+                arr?.lastOrNull()?.toByteArray()
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES).signatures?.firstOrNull()?.toByteArray()
+            }
+            if (cert == null) "" else java.security.MessageDigest.getInstance("SHA-256").digest(cert).joinToString("") { "%02x".format(it) }
+        } catch (e: Throwable) { "" }
+
+        @JavascriptInterface
         fun appVersion(): Int {
             return try {
                 val info = packageManager.getPackageInfo(packageName, 0)
