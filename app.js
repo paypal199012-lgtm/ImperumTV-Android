@@ -10474,6 +10474,8 @@
         void it;
         Resume.record(this.kind, this.items, this.index, pos, dur, ended);
     };
+    /** Sender-IDs, die bis zum App-Neustart mit VLC laufen (eingebauter Player stürzte dort ab) */
+    PlayerScreen.vlcSids = {};
     PlayerScreen.prototype.start = function () {
         var self = this;
         this.rdy = false;                  // erst nach dem Start zählen kurze Hänger (nicht das Laden beim Umschalten)
@@ -10579,6 +10581,10 @@
             }
             try { Watch.set(Watch.of('live', this.item().name)); } catch (e) { /* egal */ }                    // Bild läuft schon: nur auf Vollbild vergrößert
         } else {
+            // Sender, bei dem der eingebaute Player schon einmal abgestürzt ist: gleich mit VLC öffnen
+            if (this.kind === 'live' && AB && AB.setNextEngine && PlayerScreen.vlcSids[(this.item() || {}).id]) {
+                try { AB.setNextEngine('vlc'); } catch (e) { /* egal */ }
+            }
             Player.open(this.url(), null);
             this.watchStart();
         }
@@ -10891,6 +10897,19 @@
             toast(this.kind === 'live' ? 'Dieses Bild kann der Player auf diesem Gerät nicht abspielen. Tipp: einen anderen Sender wählen oder unter Einstellungen das Live-Format wechseln.' : 'Dieses Bild kann der eingebaute Player auf diesem Gerät nicht abspielen. Tipp: im Player mit ⇄ einen anderen Player wie VLC wählen.', 8000);
             Report.player(it, msg);
             this.showOverlay();
+            return;
+        }
+        // Der eingebaute Player stürzt beim Lesen dieses Senders ab (PARSER_CRASH, z. B. bei manchen HEVC-Sendern):
+        // Neu verbinden hilft nicht, also gleich mit VLC weiter – und diesen Sender bis zum App-Neustart immer mit VLC öffnen
+        if (this.kind === 'live' && /PARSER_CRASH/.test(msg || '') && this.vlcFor !== this.index &&
+            AB && AB.setNextEngine && AB.hasVlc && (function () { try { return AB.hasVlc(); } catch (e) { return false; } })()) {
+            this.vlcFor = this.index;
+            PlayerScreen.vlcSids[it.id] = 1;
+            if (!this.altName) this.altUrl = '';
+            try { AB.setNextEngine('vlc'); } catch (e) { /* egal */ }
+            Report.stall(it, 'Player-Absturz beim Lesen des Senders (' + msg + ') – automatisch auf VLC gewechselt', this.openedAt);
+            toast('Sender wird mit VLC weitergespielt …', 3000);
+            this.start();
             return;
         }
         // Live: Verbindung weg (Netz, Anbieter-Server kurz überlastet …): bis zu 3× nach kurzer Pause neu verbinden

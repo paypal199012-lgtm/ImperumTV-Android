@@ -65,10 +65,10 @@ android {
 
 dependencies {
     implementation("androidx.core:core:1.13.1")
-    implementation("androidx.media3:media3-exoplayer:1.5.0")
-    implementation("androidx.media3:media3-exoplayer-hls:1.5.0")
-    implementation("androidx.media3:media3-ui:1.5.0")
-    implementation("androidx.media3:media3-extractor:1.5.0")
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
+    implementation("androidx.media3:media3-ui:1.8.0")
+    implementation("androidx.media3:media3-extractor:1.8.0")
     // FFMPEG_DECODER (setup-android.sh trägt hier den FFmpeg-Ton-Decoder ein, wenn er bei Maven Central zu finden ist)
     // VLC_PLAYER (setup-android.sh trägt hier libVLC ein, den zweiten Player für Live TV)
     // OPENVPN (setup-android.sh trägt hier die OpenVPN-Bibliothek ein, wenn sie gebaut werden soll)

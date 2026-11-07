@@ -51,6 +51,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.Loader
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -640,6 +641,12 @@ class MainActivity : Activity() {
                     return
                 }
                 if (handleCodecError(error)) return
+                // Programmfehler beim Lesen des Stroms (z. B. ArrayIndexOutOfBounds im HEVC-Leser): kein Netzfehler.
+                // Eigener Name, damit die Oberfläche den Sender gleich mit VLC öffnet statt nur neu zu verbinden.
+                if (error.cause is Loader.UnexpectedLoaderException) {
+                    emit("error", "PARSER_CRASH" + formatInfo(error))
+                    return
+                }
                 emit("error", error.errorCodeName + formatInfo(error))
             }
         })
@@ -1648,7 +1655,19 @@ class MainActivity : Activity() {
         }
         val msg = (error.cause?.message ?: error.message ?: "").take(120)
         if (msg.isNotBlank()) parts.add(msg)
+        // Programmfehler: die obersten Stellen im Code mitschicken (zeigt im Fehlerbericht, welcher Teil abstürzt)
+        val where = crashFrames(error)
+        if (where.isNotBlank()) parts.add("bei $where")
         return if (parts.isEmpty()) "" else " · " + parts.joinToString(" · ")
+    }
+
+    /** Bei unerwarteten Programmfehlern: die obersten 4 Stellen, z. B. "H265Reader.parse:210 < TsExtractor.read:401" */
+    private fun crashFrames(error: PlaybackException): String {
+        var c: Throwable? = error.cause
+        if (c !is Loader.UnexpectedLoaderException && c !is RuntimeException) return ""
+        while (c?.cause != null && c.cause !== c) c = c.cause
+        val frames = c?.stackTrace ?: return ""
+        return frames.take(4).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
     }
 
     private fun codecName(mime: String): String = when {
