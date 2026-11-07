@@ -17,7 +17,7 @@ import java.io.Writer
  * (je Zeile ein JSON-Feld mit bis zu [CHUNK] Einträgen), die die Oberfläche häppchenweise einliest.
  *
  * Die Umrechnung entspricht genau mapList() in app.js:
- *   live:   [id, num, name, logo, catId, epg]
+ *   live:   [id, num, name, logo, catId, epg] oder [id, num, name, logo, catId, epg, "weitere,catIds"]
  *   movie:  [id, name, logo, catId, ext, year|null, rating, added, genre]
  *   series: [id, name, logo, catId, year|null, rating, added, genre]
  */
@@ -26,7 +26,7 @@ object ListMapper {
 
     class NotJson(val prefix: String) : Exception("not json")
 
-    private val LIVE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "epg_channel_id")
+    private val LIVE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "epg_channel_id", "category_ids")
     private val MOVIE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "container_extension",
         "year", "release_date", "releaseDate", "rating", "rating_5based", "added", "genre")
     private val SERIES_KEYS = setOf("series_id", "name", "cover", "category_id", "releaseDate", "release_date",
@@ -69,7 +69,8 @@ object ListMapper {
                 reader.beginObject()
                 while (reader.hasNext()) {
                     val name = reader.nextName()
-                    if (name in keys) fields[name] = readValue(reader) else reader.skipValue()
+                    if (name == "category_ids" && name in keys) fields[name] = readIdList(reader)
+                    else if (name in keys) fields[name] = readValue(reader) else reader.skipValue()
                 }
                 reader.endObject()
                 if (!writeItem(out, kind, fields, index, inLine == 0)) continue
@@ -91,6 +92,19 @@ object ListMapper {
         JsonToken.BOOLEAN -> r.nextBoolean().toString()
         JsonToken.NULL -> { r.nextNull(); null }
         else -> { r.skipValue(); null }
+    }
+
+    /** category_ids: [12, 45] → "12,45" (Sender in mehreren Kategorien) */
+    private fun readIdList(r: JsonReader): String? {
+        if (r.peek() != JsonToken.BEGIN_ARRAY) { r.skipValue(); return null }
+        val sb = StringBuilder()
+        r.beginArray()
+        while (r.hasNext()) {
+            val v = readValue(r)
+            if (!v.isNullOrBlank() && sb.length < 200) { if (sb.isNotEmpty()) sb.append(','); sb.append(v.trim()) }
+        }
+        r.endArray()
+        return if (sb.isEmpty()) null else sb.toString()
     }
 
     private fun str(v: String?): String {
@@ -152,6 +166,9 @@ object ListMapper {
                 out.write(","); quote(out, str(f["stream_icon"]))
                 out.write(","); quote(out, cat)
                 out.write(","); quote(out, str(f["epg_channel_id"]))
+                // Weitere Kategorien (nur wenn es mehr als die eine gibt)
+                val ids = f["category_ids"]
+                if (ids != null && ids.contains(',')) { out.write(","); quote(out, ids) }
             }
             "movie" -> {
                 val name = str(f["name"]).ifEmpty { "Film $idText" }
