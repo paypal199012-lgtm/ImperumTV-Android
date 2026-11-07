@@ -3314,7 +3314,22 @@
                 });
             });
             if (!out.length && team.x && team.x.length >= 3) out.push(this.fold(team.x));
-            return out.slice(0, 3);
+            out = out.slice(0, 3);
+            // Kürzel, unter denen Event-Sender den Verein oft nennen („Live | PSG vs. Troyes“)
+            var full = this.fold((team.n || '') + ' ' + (team.s || ''));
+            for (var k in this.ALIAS) if (this.ALIAS.hasOwnProperty(k) && full.indexOf(k) >= 0) this.ALIAS[k].forEach(function (a) { if (out.indexOf(a) < 0) out.push(a); });
+            // Offizielles Drei-Buchstaben-Kürzel (z. B. PSG): zählt nur zusammen mit dem Gegner (beide Vereine im Namen)
+            [team.x, team.s].forEach(function (k) {
+                if (k && /^[a-z0-9]{3}$/i.test(k)) { var x = me.fold(k); if (out.indexOf(x) < 0) out.push(x); }
+            });
+            return out;
+        },
+        ALIAS: {
+            'paris saint': ['psg', 'paris sg'], 'paris sg': ['psg'], 'borussia dortmund': ['bvb'], 'hamburger sv': ['hsv'],
+            'manchester united': ['man utd', 'man united'], 'manchester city': ['man city'], 'internazionale': ['inter'],
+            'inter milan': ['inter'], 'fc internazionale': ['inter'], 'atletico': ['atleti'], 'tottenham': ['spurs'],
+            'wolverhampton': ['wolves'], 'monchengladbach': ['gladbach'], 'bayer 04': ['leverkusen'], 'olympique de marseille': ['marseille'],
+            'olympique lyonnais': ['lyon']
         },
         /** Wer zeigt es in Deutschland? (Rechtelage, ohne Gewähr) */
         rights: function (m) {
@@ -3384,7 +3399,7 @@
                     var n = c.name || '';
                     if (/#{2,}|^\s*[-=*#]|[-=*]{3,}/.test(n)) return;
                     var f = me.fold(n);
-                    if (/(^|\|)\s*(ended|ende|beendet|finished|vorbei)([^a-z]|$)/.test(f)) return;   // beendete Events
+                    if (/(^|\|)\s*(end|ended|ende|beendet|finished|vorbei)([^a-z]|$)/.test(f) || EventOver.over(c, Date.now())) return;   // beendete Events
                     me._names.push({ c: c, f: f, y: youth.test(f) });
                 });
                 this._namesOf = Data.channels;
@@ -6779,6 +6794,15 @@
         /** Anstoß aus dem Namen (ms) oder 0 */
         startOf: function (name) {
             var n = String(name || ''), m, mon, d, hh, mm, y, t, now = new Date();
+            // „07-11-2026 | 20:30 (GMT)“ oder „07.11.2026 20:30“
+            m = /\b(\d{1,2})[-.\/](\d{1,2})[-.\/](20\d\d)\s*\|?\s*(\d{1,2})[:.](\d{2})(?:\s*([ap]m))?(?:\s*\(?([a-z]{2,4})\)?)?/i.exec(n);
+            if (m) {
+                d = +m[1]; mon = +m[2] - 1; hh = +m[4]; mm = +m[5];
+                if (mon < 0 || mon > 11 || d < 1 || d > 31 || hh > 23 || mm > 59) return 0;
+                if (m[6]) { var pm2 = /pm/i.test(m[6]); if (hh === 12) hh = pm2 ? 12 : 0; else if (pm2) hh += 12; }
+                var z2 = m[7] ? this.ZONE[m[7].toLowerCase()] : undefined;
+                return z2 !== undefined ? Date.UTC(+m[3], mon, d, hh, mm) - z2 * 3600000 : new Date(+m[3], mon, d, hh, mm).getTime();
+            }
             // „Sat 07 Nov 20:15 CET“
             m = /\b(\d{1,2})\s+([a-zäö]{3})[a-z]*\.?\s+(\d{1,2})[:.](\d{2})(?:\s*([ap]m))?(?:\s+([a-z]{2,4})\b)?/i.exec(n);
             if (m) { d = +m[1]; mon = this.MON[m[2].toLowerCase()]; hh = +m[3]; mm = +m[4]; }
@@ -6803,7 +6827,7 @@
         over: function (c, now) {
             var n = c && c.name;
             if (!n || n.indexOf('|') < 0 && n.indexOf('@') < 0) return false;
-            if (/^\s*(ended|ende|beendet|finished|vorbei)\s*[|:-]/i.test(n)) return true;
+            if (/^\s*(end|ended|ende|beendet|finished|vorbei)\s*[|:-]/i.test(n)) return true;
             if (!/[|@]/.test(n) || NameTidy.isSep(n)) return false;
             var t = this.startOf(n);
             return t > 0 && now - t > (this.LONG.test(n) ? 5 : this.HOURS) * 3600000;
