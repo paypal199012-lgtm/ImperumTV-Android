@@ -70,6 +70,12 @@ object ListMapper {
                 while (reader.hasNext()) {
                     val name = reader.nextName()
                     if (name == "category_ids" && name in keys) fields[name] = readIdList(reader)
+                    else if (name == "category_id" && reader.peek() == JsonToken.BEGIN_ARRAY) {
+                        // Manche Server liefern category_id als Liste: erste = Kategorie, alle = weitere Kategorien
+                        val ids = readIdList(reader)
+                        fields[name] = ids?.substringBefore(',')
+                        if (kind == "live" && fields["category_ids"] == null) fields["category_ids"] = ids
+                    }
                     else if (name in keys) fields[name] = readValue(reader) else reader.skipValue()
                 }
                 reader.endObject()
@@ -168,7 +174,7 @@ object ListMapper {
                 out.write(","); quote(out, str(f["epg_channel_id"]))
                 // Weitere Kategorien (nur wenn es mehr als die eine gibt)
                 val ids = f["category_ids"]
-                if (ids != null && ids.contains(',')) { out.write(","); quote(out, ids) }
+                if (ids != null && (ids.contains(',') || cat.isEmpty())) { out.write(","); quote(out, ids) }
             }
             "movie" -> {
                 val name = str(f["name"]).ifEmpty { "Film $idText" }
