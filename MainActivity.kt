@@ -1691,6 +1691,44 @@ class MainActivity : Activity() {
         placeView(playerView, x, y, w, h)
     }
 
+    // ---------- Fernhilfe: Videobild ----------
+    private var frameBusy = false
+    private fun frameDone(b64: String) {
+        frameBusy = false
+        if (uiReady) webView.evaluateJavascript("window.__helpFrame && window.__helpFrame(${JSONObject.quote(b64)})", null)
+    }
+    /** Sichtbare Bildfläche (ExoPlayer oder VLC) suchen – die WebView selbst nicht */
+    private fun findVideoSurface(v: View): android.view.SurfaceView? {
+        if (v === webView || !v.isShown || v.width <= 1 || v.height <= 1) return null
+        if (v is android.view.SurfaceView) return if (v.holder.surface?.isValid == true) v else null
+        if (v is ViewGroup) for (i in 0 until v.childCount) findVideoSurface(v.getChildAt(i))?.let { return it }
+        return null
+    }
+    private fun grabVideoFrame(maxW: Int, quality: Int) {
+        if (frameBusy) return
+        if (Build.VERSION.SDK_INT < 24) { frameDone(""); return }
+        val sv = try { findVideoSurface(root) } catch (e: Throwable) { null }
+        if (sv == null) { frameDone(""); return }
+        val w = minOf(maxW.coerceIn(80, 960), sv.width)
+        val h = (sv.height.toLong() * w / sv.width).toInt().coerceAtLeast(1)
+        val bmp = try { Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) } catch (e: Throwable) { frameDone(""); return }
+        frameBusy = true
+        try {
+            android.view.PixelCopy.request(sv, bmp, { res ->
+                var out = ""
+                if (res == android.view.PixelCopy.SUCCESS) {
+                    try {
+                        val bo = java.io.ByteArrayOutputStream()
+                        bmp.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(30, 85), bo)
+                        out = android.util.Base64.encodeToString(bo.toByteArray(), android.util.Base64.NO_WRAP)
+                    } catch (e: Throwable) { }
+                }
+                bmp.recycle()
+                frameDone(out)
+            }, handler)
+        } catch (e: Throwable) { bmp.recycle(); frameDone("") }
+    }
+
     private fun placeView(view: View, x: Double, y: Double, w: Double, h: Double) {
         val width = root.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         val height = root.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
@@ -2404,6 +2442,12 @@ class MainActivity : Activity() {
                     webView.evaluateJavascript("window.__androidExternal && window.__androidExternal(-1, -1, false, true)", null)
                 }
             }
+        }
+
+        /** Fernhilfe: aktuelles Videobild klein als JPEG holen. Kommt über window.__helpFrame('Base64' oder '') zurück. */
+        @JavascriptInterface
+        fun videoFrame(maxW: Int, quality: Int) {
+            handler.post { grabVideoFrame(maxW, quality) }
         }
 
         /** Versionsnummer der installierten App (= Nummer des GitHub-Builds) */
