@@ -127,11 +127,18 @@ object ImperumOVpn {
     fun user(c: Context): String = prefs(c).getString("user", "") ?: ""
     fun autoStart(c: Context): Boolean = prefs(c).getBoolean("auto", false)
 
-    /** Eigene .ovpn-Datei + Zugangsdaten übernehmen ("" = entfernen). Läuft gerade ein VPN, wird es getrennt. */
+    /** Eigene .ovpn-Datei + Zugangsdaten übernehmen ("" = entfernen).
+     *  Datei entfernt: VPN trennen. Datei geändert (z. B. anderer Server) und VPN war an/im Aufbau:
+     *  trennen und gleich mit der neuen Datei wieder verbinden – man muss nichts selbst aus- und einschalten. */
     fun setProfile(a: Activity, conf: String, user: String, pass: String) {
-        val changed = conf.trim() != config(a) || user != user(a)
+        val changed = conf.trim() != config(a) || user != user(a) || pass != (prefs(a).getString("pass", "") ?: "")
         prefs(a).edit().putString("conf", conf.trim()).putString("user", user).putString("pass", pass).apply()
-        if ((conf.isBlank() || changed) && state != "aus") disconnect(a)
+        if (state == "aus") return
+        if (conf.isBlank()) { disconnect(a); return }
+        if (!changed) return
+        val wasOn = state == "an" || state == "verbindet"
+        disconnect(a)
+        if (wasOn) main.postDelayed({ try { if (state == "aus") connect(a) } catch (e: Throwable) { } }, 2000)
     }
 
     fun setAutoStart(c: Context, on: Boolean) { prefs(c).edit().putBoolean("auto", on).apply() }
