@@ -1729,6 +1729,58 @@ class MainActivity : Activity() {
         } catch (e: Throwable) { bmp.recycle(); frameDone("") }
     }
 
+    // ---------- Schwarzbild/Standbild erkennen ----------
+    private var probeBusy = false
+    private var probeAt = 0L
+    private var probePrev: IntArray? = null
+    private fun probeDone(json: String) {
+        probeBusy = false
+        if (uiReady) webView.evaluateJavascript("window.__videoProbe && window.__videoProbe($json)", null)
+    }
+    /** 32×18 Pixel vom Video: mittlere Helligkeit, Kontrast (Streuung) und Änderung zum letzten Bild (0–255) */
+    private fun probeVideo() {
+        if (probeBusy && System.currentTimeMillis() - probeAt < 4000) return
+        if (Build.VERSION.SDK_INT < 24) { probeDone("{\"ok\":false}"); return }
+        val sv = try { findVideoSurface(root) } catch (e: Throwable) { null }
+        if (sv == null) { probeDone("{\"ok\":false}"); return }
+        val bmp = try { Bitmap.createBitmap(32, 18, Bitmap.Config.ARGB_8888) } catch (e: Throwable) { probeDone("{\"ok\":false}"); return }
+        probeBusy = true; probeAt = System.currentTimeMillis()
+        try {
+            android.view.PixelCopy.request(sv, bmp, { res ->
+                if (res != android.view.PixelCopy.SUCCESS) {
+                    bmp.recycle(); probeDone("{\"ok\":false,\"err\":$res}")
+                } else {
+                    var out = "{\"ok\":false}"
+                    try {
+                        val px = IntArray(32 * 18)
+                        bmp.getPixels(px, 0, 32, 0, 0, 32, 18)
+                        val lum = IntArray(px.size)
+                        var sum = 0L
+                        for (i in px.indices) {
+                            val c = px[i]
+                            val l = (((c shr 16) and 255) * 299 + ((c shr 8) and 255) * 587 + (c and 255) * 114) / 1000
+                            lum[i] = l; sum += l
+                        }
+                        val mean = sum.toDouble() / lum.size
+                        var v = 0.0
+                        for (l in lum) { val d = l - mean; v += d * d }
+                        val sd = Math.sqrt(v / lum.size)
+                        val prev = probePrev
+                        var diff = -1.0
+                        if (prev != null && prev.size == lum.size) {
+                            var s = 0L
+                            for (i in lum.indices) s += Math.abs(lum[i] - prev[i])
+                            diff = s.toDouble() / lum.size
+                        }
+                        probePrev = lum
+                        out = String.format(Locale.US, "{\"ok\":true,\"mean\":%.1f,\"sd\":%.1f,\"diff\":%.2f}", mean, sd, diff)
+                    } catch (e: Throwable) { }
+                    bmp.recycle(); probeDone(out)
+                }
+            }, handler)
+        } catch (e: Throwable) { bmp.recycle(); probeDone("{\"ok\":false}") }
+    }
+
     private fun placeView(view: View, x: Double, y: Double, w: Double, h: Double) {
         val width = root.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         val height = root.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
@@ -2448,6 +2500,12 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun videoFrame(maxW: Int, quality: Int) {
             handler.post { grabVideoFrame(maxW, quality) }
+        }
+
+        /** Schwarzbild/Standbild-Erkennung: winziges Videobild prüfen. Antwort über window.__videoProbe({ok,mean,sd,diff}) */
+        @JavascriptInterface
+        fun videoProbe(reset: Boolean) {
+            handler.post { if (reset) probePrev = null; probeVideo() }
         }
 
         /** Versionsnummer der installierten App (= Nummer des GitHub-Builds) */
