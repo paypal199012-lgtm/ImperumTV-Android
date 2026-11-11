@@ -750,7 +750,7 @@ class MainActivity : Activity() {
                     try { (view.parent as? ViewGroup)?.removeView(view) } catch (e: Throwable) { }
                     try { view.destroy() } catch (e: Throwable) { }
                     val why = if (detail.didCrash()) "Oberfläche abgestürzt" else "Oberfläche wegen Speichermangel beendet"
-                    saveCrashReport("$why (${count}x in 1 Min.)\nWebView: ${webViewVersion()}")
+                    saveCrashReport("$why (${count}x in 1 Min.)\nApp im Vordergrund: ${if (inFront) "ja" else "nein (im Hintergrund vom System freigegeben)"}\nWebView: ${webViewVersion()}")
                     // Achtung: hier wäre „handler“ der Handler der (schon zerstörten) WebView → null. Darum der der Activity.
                     this@MainActivity.handler.post {
                         // Dreimal in einer Minute: aufgeben statt endlos neu zu starten
@@ -921,15 +921,26 @@ class MainActivity : Activity() {
 
     // ---------- Lebenszyklus ----------
 
+    /** App gerade sichtbar? (für den Bericht, falls das System die Oberfläche beendet) */
+    @Volatile private var inFront = false
+
     override fun onStart() {
         super.onStart()
+        inFront = true
         hideSystemBars()
         if (!uiReady) return
         webView.onResume()
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('visible')", null)
     }
 
+    /** Das System braucht Speicher: der Oberfläche Bescheid geben, damit sie Zwischenspeicher freigibt */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        try { if (uiReady) webView.evaluateJavascript("window.__androidTrim && window.__androidTrim($level)", null) } catch (e: Throwable) { }
+    }
+
     override fun onStop() {
+        inFront = false
         if (!uiReady) { super.onStop(); return }
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('hidden')", null)
         player.pause()

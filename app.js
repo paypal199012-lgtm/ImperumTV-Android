@@ -834,6 +834,44 @@
             var end = Math.min(items.length, shown + size);
             for (var i = shown; i < end; i++) container.appendChild(build(i));
             shown = end;
+            if (opt && opt.trim && shown - first > 420) trimTop();
+        }
+        /** Echte Zeilenhöhen messen (zwei Zeilen hintereinander; Eintrag mit Überschrift) */
+        var measured = false;
+        function measure() {
+            if (measured) return;
+            try {
+                var kids = container.children, p0 = 0, e0 = 0, b0 = spacer ? 1 : 0;
+                for (var i = b0; i + 1 < kids.length && !(p0 && e0); i++) {
+                    var a = kids[i], n = kids[i + 1], plainA = a.classList.contains('focusable'), plainN = n.classList.contains('focusable');
+                    if (!p0 && plainA && plainN) p0 = n.offsetTop - a.offsetTop;
+                    // Eintrag mit Überschrift: was er mehr braucht als eine normale Zeile (Abstände davor und danach eingerechnet)
+                    if (!e0 && p0 && plainA && !plainN && kids[i + 2]) e0 = (kids[i + 2].offsetTop - a.offsetTop) - 2 * p0;
+                }
+                if (p0 > 20) { pitch = p0; measured = true; }
+                if (e0 > 0) extraH = e0;
+            } catch (e) { /* Schätzung bleibt */ }
+        }
+        /**
+         * Sehr lange Listen (Handy: mit dem Finger durch Tausende Sender): Zeilen weit oberhalb wieder abbauen,
+         * ihr Platz bleibt frei – blättert man zurück, werden sie neu gebaut. Hält den Speicherbedarf klein.
+         */
+        function trimTop() {
+            try {
+                if (!sc) return;
+                var n = 150, kids = container.children, b0 = spacer ? 1 : 0;
+                if (kids.length - b0 < n + 120) return;
+                var firstKid = kids[b0], cut = kids[b0 + n];
+                if (cut.offsetTop > sc.scrollTop - 1500) return;                                   // nur, was weit über dem Bild liegt
+                var fc = Focus.cur;
+                if (fc && container.contains(fc) && (cut.compareDocumentPosition(fc) & 2)) return;    // markierter Eintrag liegt davor: nichts abbauen
+                measure();
+                var hgt = cut.offsetTop - firstKid.offsetTop;
+                if (!spacer) { spacer = h('div', 'batch-gap'); spacer.style.height = '0px'; container.insertBefore(spacer, container.firstChild); }
+                for (var i = 0; i < n; i++) container.removeChild(spacer.nextSibling);
+                first += n;
+                spacer.style.height = ((parseFloat(spacer.style.height) || 0) + hgt) + 'px';
+            } catch (e) { /* dann bleibt alles stehen */ }
         }
         /** Einträge oberhalb des Fensters nachbauen (der frei gehaltene Platz schrumpft entsprechend – nichts springt) */
         function moreUp() {
@@ -871,18 +909,8 @@
             /** Nach dem Einhängen ins Dokument: echte Zeilenhöhen messen und den frei gehaltenen Platz genau setzen */
             fix: function () {
                 if (!spacer) return;
-                try {
-                    var kids = container.children, p0 = 0, e0 = 0;
-                    for (var i = 1; i + 1 < kids.length && !(p0 && e0); i++) {
-                        var a = kids[i], n = kids[i + 1], plainA = a.classList.contains('focusable'), plainN = n.classList.contains('focusable');
-                        if (!p0 && plainA && plainN) p0 = n.offsetTop - a.offsetTop;
-                        // Eintrag mit Überschrift: was er mehr braucht als eine normale Zeile (Abstände davor und danach eingerechnet)
-                        if (!e0 && p0 && plainA && !plainN && kids[i + 2]) e0 = (kids[i + 2].offsetTop - a.offsetTop) - 2 * p0;
-                    }
-                    if (p0 > 20) pitch = p0;
-                    if (e0 > 0) extraH = e0;
-                    spacer.style.height = est(first) + 'px';
-                } catch (e) { /* Schätzung bleibt */ }
+                measure();
+                spacer.style.height = est(first) + 'px';
             },
             /** Eintrag index ins Bild holen (wenn der Fokus woanders liegt, soll die Liste nicht auf der leeren Fläche stehen) */
             reveal: function (index) {
@@ -1290,6 +1318,93 @@
     };
 
     /** Was hat die App zuletzt Großes gemacht? (für den Bericht „Taste verspätet“) */
+    /**
+     * Kennzahlen zur Geschwindigkeit, einmal am Tag je Gerät an die eigene Datenbank (nur Zahlen, nichts Persönliches):
+     * Startzeit, wie lange Bildschirme zum Aufbauen brauchen, verspätete Tasten, Speicher, Zahl der Elemente, Animationsstufe.
+     * Damit sieht man je Gerätetyp, wo es hakt – auch auf Geräten, die man nicht selbst hat.
+     */
+    var Metrics = {
+        d: null, startDone: false, saveAt: 0,
+        fresh: function () { return { since: Date.now(), s: 0, start: { n: 0, sum: 0, max: 0 }, scr: {}, key: { n: 0, slow: 0, max: 0 }, heap: 0, el: 0 }; },
+        get: function () {
+            if (!this.d) { var x = Storage.rawGet('met', null); this.d = x && x.scr && x.key && x.start ? x : this.fresh(); }
+            return this.d;
+        },
+        /** Bildschirm wurde aufgebaut (ms = Dauer). Der erste Start-Bildschirm zählt als Startzeit der App. */
+        screen: function (name, ms) {
+            try {
+                var d = this.get(), now = Date.now();
+                name = String(name || '?').replace(/Screen$/, '');
+                var e = d.scr[name] || (d.scr[name] = { n: 0, sum: 0, max: 0, first: 0 });
+                e.n++; e.sum += ms; if (ms > e.max) e.max = ms;
+                if (!this['f_' + name]) { this['f_' + name] = 1; e.first = e.first ? Math.round((e.first + ms) / 2) : ms; }     // erstes Öffnen je Start (gemittelt)
+                if (!this.startDone && name === 'Home') {
+                    this.startDone = true; d.s++;
+                    var t0 = window.performance && performance.timing && performance.timing.navigationStart;
+                    if (t0) { var st = now - t0; if (st > 0 && st < 300000) { d.start.n++; d.start.sum += st; if (st > d.start.max) d.start.max = st; } }
+                }
+                this.sample(name);
+                if (now - this.saveAt > 60000) this.save(name);
+            } catch (e2) { /* nur Messung */ }
+        },
+        key: function (ms) {
+            try { var k = this.get().key; k.n++; if (ms > 300) k.slow++; if (ms > k.max) k.max = ms; } catch (e) { /* nur Messung */ }
+        },
+        sample: function () {
+            var d = this.get(), el = document.getElementsByTagName('*').length;
+            if (el > d.el) d.el = el;
+            try { var hp = window.performance && performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0; if (hp > d.heap) d.heap = hp; } catch (e) { /* gibt es nicht überall */ }
+        },
+        save: function (name) {
+            this.saveAt = Date.now();
+            Storage.rawSet('met', this.d);
+            // letzter Stand – wird einem Absturzbericht beigelegt (was lief, wie viel Speicher)
+            var hp = 0; try { hp = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0; } catch (e) { hp = 0; }
+            Storage.rawSet('metSnap', { at: Date.now(), scr: name || '', el: document.getElementsByTagName('*').length, heap: hp });
+        },
+        snapText: function () {
+            var x = Storage.rawGet('metSnap', null);
+            if (!x || !x.at) return '';
+            return 'Letzter Stand der Oberfläche: Bildschirm ' + (x.scr || '?') + ' · ' + x.el + ' Elemente' + (x.heap ? ' · ' + x.heap + ' MB Programmspeicher' : '') +
+                ' · Arbeitsspeicher des Geräts ' + (Math.round(Lite.mem()) || '?') + ' MB';
+        },
+        /** Beim Start: gesammelte Werte der letzten Sitzungen abschicken (höchstens einmal in 20 Stunden) */
+        send: function () {
+            try {
+                var d = this.get(), last = Storage.rawGet('metSent', 0);
+                if (!d.s || Date.now() - last < 20 * 3600000) return;
+                if (!Device.validMac(Device.mac) || !Device.validKey(Device.key)) return;
+                var self = this, out = { s: d.s, start: d.start, scr: d.scr, key: d.key, heap: d.heap, el: d.el, mem: Math.round(Lite.mem()), tier: Lite.tier(), auto: Lite.auto() || '',
+                    ch: Data.channels ? Data.channels.length : 0, mv: Data.movies ? Data.movies.length : 0, se: Data.series ? Data.series.length : 0 };
+                Remote.rpc('device_metrics', { p_mac: Device.mac, p_key: Device.key, p_version: Report.version(), p_device: Report.platform(), p_data: out }).then(function (ok) {
+                    if (ok !== true) return;
+                    Storage.rawSet('metSent', Date.now());
+                    var keep = self.d; self.d = self.fresh();
+                    self.d.s = 0; if (keep && self.startDone) self.d.s = 1;
+                    Storage.rawSet('met', self.d);
+                }, function () { /* egal */ });
+            } catch (e) { /* nur Messung */ }
+        }
+    };
+
+    /** Speicher freigeben, wenn das System knapp wird oder die App in den Hintergrund geht (Handys beenden sonst die Oberfläche) */
+    var Free = {
+        run: function (hard) {
+            try {
+                // aufgehobene Bildschirme (fertig gebaute Film-/Serienlisten mit Bildern) – werden bei „Zurück“ neu gebaut
+                for (var i = 0; i < Nav.stack.length - 1; i++) Nav.stack[i]._dom = null;
+                Merge._g = null;
+                Epg.nowFullCache = null; Epg.nowCache = null;
+                if (hard) {
+                    Merge._gBig = null; Merge._cnt = null;
+                    var sh = MoviesScreen.shared;
+                    for (var k in sh) if (sh.hasOwnProperty(k) && sh[k]) { sh[k].memo = null; sh[k].gcount = null; sh[k].cc = null; }
+                    try { VodWarm.done = {}; } catch (e0) { /* egal */ }
+                }
+            } catch (e) { /* nur Aufräumen */ }
+        }
+    };
+
     var Busy = {
         l: '', at: 0, detail: '',
         mark: function (label) { this.l = label; this.at = Date.now(); this.detail = ''; },
@@ -2500,7 +2615,8 @@
             var r;
             try { r = JSON.parse(raw); } catch (e2) { return; }
             var when = r.at ? new Date(r.at).toLocaleString('de-DE') : '';
-            this.send('absturz', r.text + '\n\nZeit: ' + when + '\nWebView: ' + (r.webview || '?')).then(function (ok) {
+            var snap = ''; try { snap = Metrics.snapText(); } catch (eS) { snap = ''; }
+            this.send('absturz', r.text + '\n\nZeit: ' + when + '\nWebView: ' + (r.webview || '?') + (snap ? '\n' + snap : '')).then(function (ok) {
                 if (ok) { try { AB.clearPendingCrash(); } catch (e3) { /* egal */ } }
             });
         },
@@ -4981,11 +5097,14 @@
         anim: null,          // „in“ (neuer Bildschirm) oder „back“ (zurück) – für den kurzen Übergang
         /** Startseite: aufsteigende goldene Funken (Animation) */
         sparks: function (screen, app) {
-            if (typeof HomeScreen === 'undefined' || !(screen instanceof HomeScreen) || app.querySelector('.home-sparks')) return;
-            var sp = document.createElement('div'); sp.className = 'home-sparks';
-            for (var si = 0; si < 14; si++) {
+            // Startseite: 14 Funken · Filme und Serien: wandernde Lichtstrahlen und ein paar Funken im Hintergrund
+            var isHome = typeof HomeScreen !== 'undefined' && screen instanceof HomeScreen;
+            var isVod = typeof MoviesScreen !== 'undefined' && screen instanceof MoviesScreen;
+            if ((!isHome && !isVod) || app.querySelector('.home-sparks')) return;
+            var sp = document.createElement('div'); sp.className = 'home-sparks' + (isVod ? ' vod-sparks' : '');
+            for (var si = 0; si < (isVod ? 7 : 14); si++) {
                 var dot = document.createElement('i');
-                dot.style.left = (4 + si * 6.8 + (si * 37 % 5)) + '%';
+                dot.style.left = (4 + si * (isVod ? 13.6 : 6.8) + (si * 37 % 5)) + '%';
                 dot.style.animationDelay = dot.style.webkitAnimationDelay = (-(si * 1.37 % 9)).toFixed(2) + 's';
                 dot.style.animationDuration = dot.style.webkitAnimationDuration = (8 + si * 0.53 % 5).toFixed(2) + 's';
                 sp.appendChild(dot);
@@ -4995,7 +5114,7 @@
         /** Alte Übergangs-Klassen weg, bevor neu gezeichnet wird (sonst misst der neue Bildschirm verschobene Kästen) */
         animReset: function (app) {
             clearTimeout(this.animT);
-            app.classList.remove('anim-in', 'anim-back', 'anim-home');
+            app.classList.remove('anim-in', 'anim-back', 'anim-home', 'anim-live');
             this.sxClear();
         },
         /** Einfache Stufe: Übergangs-Klassen von den zuletzt bewegten Bereichen nehmen (auch wenn sie gerade aufgehoben sind) */
@@ -5059,7 +5178,15 @@
             if (Lite.tier() === 'simple') { this.sxStart(app, a); return; }
             // Bildschirme mit Vorschaubild (Live TV, Programm): nicht bewegen – das Video und der Rahmen darum
             // werden nach der Position des Kastens gelegt und würden sonst verrutschen
-            if (app.querySelector('.preview-box, .eg-preview')) return;
+            if (app.querySelector('.preview-box, .eg-preview')) {
+                // Live TV: Listen, Zeilen und Knöpfe kommen herein – das Vorschaubild selbst bleibt unbewegt
+                if (app.querySelector('.live-b')) {
+                    app.classList.remove('anim-live'); void app.offsetWidth; app.classList.add('anim-live');
+                    clearTimeout(this.animT);
+                    this.animT = setTimeout(function () { app.classList.remove('anim-live'); }, 1300);
+                }
+                return;
+            }
             app.classList.remove('anim-in', 'anim-back', 'anim-home');
             void app.offsetWidth;                                   // Animation neu starten
             app.classList.add('anim-' + a);
@@ -5092,6 +5219,7 @@
             if (saved) this.restoreScroll(screen, saved);
             // Für den Bericht „Taste verspätet“: wo ging die Zeit hin?
             try { Busy.detail = 'Aufbau ' + (tR1 - tR0) + ' ms' + (screen._laps ? ' [' + screen._laps + ']' : '') + ' · Fokus/Anordnen ' + (Date.now() - tR1) + ' ms'; } catch (eB) { /* egal */ }
+            Metrics.screen(screen && screen.constructor && screen.constructor.name, Date.now() - tR0);
             this.animate(screen);
         },
 
@@ -6059,7 +6187,12 @@
             Remote.rpc('device_flags', { p_mac: Device.mac, p_key: Device.key, p_version: Report.version() }).then(function (r) {
                 if (r && r.cmd) RemoteCmd.run(r.cmd);
                 if (r && r.lic) License.remoteRev(r.lic);
-                if (!r || !r.force || self.forced) return;
+                if (!r || !r.force) return;
+                if (self.forced) {
+                    // Pflicht-Update steht aus, aber beim letzten Nachsehen kam nichts: alle 10 Minuten erneut versuchen
+                    if (!self.latest && Date.now() - self.lastCheck > 10 * 60000) self.check(false);
+                    return;
+                }
                 self.forced = true;
                 self.dismissed = 0;
                 self.check(false);
@@ -8002,7 +8135,7 @@
             wrap.appendChild(h('div', 'sec-head', heads[i]));
             wrap.appendChild(row);
             return wrap;
-        }, 36, { from: winFrom, extras: headIdx });      // erst 36 Sender zeichnen (öffnet schneller), der Rest kommt beim Blättern
+        }, 36, { from: winFrom, extras: headIdx, trim: true });      // erst 36 Sender zeichnen (öffnet schneller), der Rest kommt beim Blättern
         this.listBatch = batch; this.listAnchor = winFrom > 0 ? anchor : -1;
 
         // Gemerkten Sender wieder sichtbar machen (nur wenn er in der Nähe des Fensters liegt – sonst würden wieder Hunderte Zeilen gebaut)
@@ -13065,6 +13198,7 @@
         Updater.autoCheck();                               // gleich beim Start nach neuer Version suchen
         applyStallWait();
         setTimeout(function () { GenreScan.start(); }, 30000);
+        setTimeout(function () { try { Metrics.send(); } catch (eM) { /* nur Messung */ } }, 45000);
         // Live TV vorbereiten (Sender zusammenfassen, zählen), damit das erste Öffnen schnell geht
         whenQuiet(function () {
             try { if (Data.channels && Data.channels.length && !(Nav.top() instanceof LiveScreen)) { var ls = new LiveScreen(0); ls.filter(); Merge.counts(EventOver.apply(Hidden.apply(Parental.visible('live', Data.channels)))); } } catch (eW) { /* egal */ }
@@ -13122,7 +13256,10 @@
             lifecycle(false);
             if (Nav.top() instanceof PlayerScreen) toast('Fernseher wieder an – weiter geht\'s', 3000);
         };
+        // Android meldet „Speicher wird knapp“ (15 = kritisch, ab 40 = App im Hintergrund und Speicher gebraucht)
+        window.__androidTrim = function (level) { try { Free.run(level === 15 || level >= 40); } catch (e) { /* egal */ } };
         window.__androidLifecycle = function (state) {
+            if (state === 'hidden') { try { Metrics.save(''); Free.run(false); } catch (eF) { /* egal */ } }
             lifecycle(state === 'hidden');
             if (state !== 'hidden') { Updater.recheck(); if (Clock.node && Clock.mode() !== 'off') Clock.tick(); }
         };
@@ -13154,6 +13291,7 @@
             try { if (Lite.onKey) Lite.onKey(); if (code === KEY.ENTER && !repeat && window.__pressFx) window.__pressFx(); } catch (eLk) { /* nur Messung/Kosmetik */ }
             onKeyDown({ keyCode: code, repeat: !!repeat, preventDefault: function () { } });
             // Messung: kam die Taste verspätet in der Oberfläche an? (einmal pro Start melden)
+            if (sentAt) Metrics.key(Date.now() - sentAt);
             if (sentAt && !window.__lagReported) {
                 var wait = t0 - sentAt, work = Date.now() - t0;
                 if (wait + work > 1200) {
@@ -13349,7 +13487,7 @@
     }
     window.__pressFx = pressFx;                 // Android reicht Tasten direkt weiter (kein keydown)
     document.addEventListener('keydown', function (e) { if ((e.keyCode || e.which) === 13) pressFx(); }, true);
-    window.ImperumTV = { Football: Football, VodPlayer: VodPlayer, OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License, Clock: Clock, NetTestScreen: NetTestScreen, Lite: Lite, Glide: Glide, Busy: Busy };
+    window.ImperumTV = { Football: Football, VodPlayer: VodPlayer, OVpn: OVpn, NewEps: NewEps, Seen: Seen, Report: Report, Epg: Epg, Parser: Parser, Sync: Sync, Resume: Resume, Parental: Parental, Updater: Updater,  Nav: Nav, Focus: Focus, Data: Data, Player: Player, KEY: KEY, Device: Device, Remote: Remote, License: License, Clock: Clock, NetTestScreen: NetTestScreen, Lite: Lite, Glide: Glide, Busy: Busy, Metrics: Metrics, Free: Free };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
     else boot();
