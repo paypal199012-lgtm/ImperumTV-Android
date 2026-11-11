@@ -742,6 +742,14 @@ class MainActivity : Activity() {
                 // sondern neu aufbauen. Die Oberfläche startet dann im Sparmodus.
                 @android.annotation.TargetApi(26)
                 override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                    // Im Hintergrund vom System weggeräumt (kein Absturz): ganz normal bei Handys und Sticks.
+                    // Kein Fehlerbericht, kein Sparmodus – nur still neu aufbauen.
+                    if (!inFront && !detail.didCrash()) {
+                        try { (view.parent as? ViewGroup)?.removeView(view) } catch (e: Throwable) { }
+                        try { view.destroy() } catch (e: Throwable) { }
+                        this@MainActivity.handler.post { recreate() }
+                        return true
+                    }
                     val prefs = getSharedPreferences("imptv_native", Context.MODE_PRIVATE)
                     val now = System.currentTimeMillis()
                     val last = prefs.getLong("renderGone", 0L)
