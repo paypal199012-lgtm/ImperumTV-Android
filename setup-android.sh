@@ -35,10 +35,9 @@ cat > "$RES/xml/update_paths.xml" <<'XML'
 XML
 # Fire TV / Android TV: Banner in Standard-Größe (320x180 dp) je Dichte, App-Symbol als mipmap.
 # Manche Fire-TV-Versionen zeigen bei selbst installierten Apps sonst nur ein graues Bild.
-for d in mdpi hdpi xhdpi; do cp "icons/banner-$d.png" "$RES/drawable-$d/banner.png"; done
-cp icons/banner-xhdpi.png "$RES/drawable-xxhdpi/banner.png"
-cp icons/banner-xhdpi.png "$RES/drawable-xxxhdpi/banner.png"
-cp icons/banner-mdpi.png "$RES/drawable/banner.png"
+# Vorgabe für Fernseher: 320x180 Pixel bei xhdpi (= 160x90 dp). Alle Dichten haben dieselbe dp-Größe –
+# vorher war das Banner je nach Ordner 2- bis 4-mal zu groß, Fire TV zeigte dann einen vergrößerten Ausschnitt.
+for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do cp "icons/banner-$d.png" "$RES/drawable-$d/banner.png"; done
 for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
   mkdir -p "$RES/mipmap-$d"
   cp "icons/icon-$d.png" "$RES/mipmap-$d/ic_launcher.png"
