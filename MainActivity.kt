@@ -1437,6 +1437,13 @@ class MainActivity : Activity() {
      *  599 = bitte auf den alten Weg ausweichen (die Oberfläche lädt dann selbst). */
     private fun listResponse(uri: Uri): WebResourceResponse {
         val src = uri.getQueryParameter("u") ?: return plainResponse(400, "Adresse fehlt")
+        // Einfache M3U/M3U8-Liste: nur durchreichen (am Browser vorbei, sonst sperrt CORS fremde Server)
+        if (uri.path == "/raw") {
+            val scheme = Uri.parse(src).scheme ?: ""
+            if (scheme != "http" && scheme != "https") return plainResponse(400, "Ungültige Adresse")
+            return (try { providerResponse(src) } catch (e: Throwable) { null })
+                ?: plainResponse(502, "Die Liste ist nicht erreichbar. Prüfe den Link und die Internetverbindung.")
+        }
         val kind = uri.getQueryParameter("kind") ?: "live"
         val res = (try { providerResponse(src) } catch (e: Throwable) { null })
             ?: return plainResponse(502, "Der Server ist nicht erreichbar. Prüfe die Adresse und die Internetverbindung.")
