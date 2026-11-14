@@ -178,7 +178,8 @@ object ListMapper {
                 val ids = f["category_ids"]
                 val moreCats = ids != null && (ids.contains(',') || cat.isEmpty())
                 // Nachschauen (Catch-up): Tage, die der Anbieter aufzeichnet (Feld 8; Feld 7 dann leer, wenn keine weiteren Kategorien)
-                val arch = if (str(f["tv_archive"]) == "1") (jsInt(f["tv_archive_duration"]) ?: 0L) else 0L
+                val ta = str(f["tv_archive"])
+                val arch = if (ta == "1" || ta == "true") (jsInt(f["tv_archive_duration"]) ?: 0L) else 0L
                 if (moreCats || arch > 0) { out.write(","); quote(out, if (moreCats) ids!! else "") }
                 if (arch > 0) { out.write(","); out.write(arch.toString()) }
             }
