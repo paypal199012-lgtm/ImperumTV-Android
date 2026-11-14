@@ -38,9 +38,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.BaseAudioProcessor
-import java.nio.ByteBuffer
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -250,8 +247,6 @@ class MainActivity : Activity() {
     // Automatisch an. Kommt nach dem Start kein Ton, kein Bild oder läuft die Zeit nicht weiter, wird für diesen Sender
     // auf normal umgeschaltet. Läuft es dann, kann das Gerät es nicht → dauerhaft aus (merkt sich die App).
     private lateinit var trackSelector: DefaultTrackSelector
-    /** „Ton ausgleichen“: off | light | strong (liest der Ton-Ausgleich bei jedem Block) */
-    @Volatile private var dynMode: String = "off"
     /** Dieser Sender läuft wegen eines Problems ohne Tunneling (Prüfung, ob es daran lag) */
     private var tunnelOffNow = false
     private var tunnelProbe = false
@@ -448,7 +443,6 @@ class MainActivity : Activity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
-        dynMode = try { getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("dynamics", "off") ?: "off" } catch (e: Throwable) { "off" }
         super.onCreate(savedInstanceState)
         refreshLauncherTileAfterUpdate()
         // Absturz-Bericht: Fehler merken und beim nächsten Start anzeigen (zum Abfotografieren)
@@ -548,8 +542,6 @@ class MainActivity : Activity() {
                 @Suppress("DEPRECATION")
                 return DefaultAudioSink.Builder(context)
                     .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
-                    // „Ton ausgleichen“: leise Stimmen lauter, laute Musik/Effekte leiser (Einstellung live umschaltbar)
-                    .setAudioProcessors(arrayOf<AudioProcessor>(DialogLeveler { dynMode }))
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                     .build()
@@ -2213,17 +2205,6 @@ class MainActivity : Activity() {
             (mi.totalMem / (1024 * 1024)).toInt()
         } catch (e: Throwable) { 0 }
 
-        /** Ton ausgleichen: "off" | "light" | "strong" (gilt sofort, VLC ab der nächsten Wiedergabe) */
-        @JavascriptInterface
-        fun setDynamics(mode: String) {
-            val m = if (mode == "light" || mode == "strong") mode else "off"
-            dynMode = m
-            getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putString("dynamics", m).apply()
-        }
-
-        @JavascriptInterface
-        fun getDynamics(): String = dynMode
-
         @JavascriptInterface
         fun getBuffer(): String =
             getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("buffer", "normal") ?: "normal"
@@ -2727,74 +2708,4 @@ class MainActivity : Activity() {
             handler.post { finish() }
         }
     }
-}
-
-/**
- * Ton ausgleichen (Dynamik-Kompressor): Musik und Effekte werden leiser, leise Stimmen lauter.
- * Alle Kanäle gemeinsam (keine Verschiebung im Raum), weicher Begrenzer gegen Übersteuern.
- * Stille und Rauschen werden nicht hochgezogen. „off“ = Ton unverändert durchreichen.
- */
-@UnstableApi
-class DialogLeveler(private val modeOf: () -> String) : BaseAudioProcessor() {
-    private var env = 0f
-
-    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT && inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT) {
-            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
-        }
-        return inputAudioFormat
-    }
-
-    override fun queueInput(inputBuffer: ByteBuffer) {
-        val remaining = inputBuffer.remaining()
-        if (remaining == 0) return
-        val out = replaceOutputBuffer(remaining)
-        val mode = modeOf()
-        if (mode != "light" && mode != "strong") {
-            out.put(inputBuffer)
-            out.flip()
-            return
-        }
-        val fmt = inputAudioFormat
-        val ch = maxOf(1, fmt.channelCount)
-        val sr = maxOf(8000, fmt.sampleRate).toFloat()
-        val strong = mode == "strong"
-        val thr = if (strong) -28f else -22f          // ab hier wird leiser gemacht (dB)
-        val ratio = if (strong) 6f else 3f
-        val makeup = if (strong) 11f else 6f           // alles etwas lauter, damit Stimmen gewinnen
-        val att = kotlin.math.exp(-1f / (0.004f * sr))
-        val rel = kotlin.math.exp(-1f / (0.30f * sr))
-        val isFloat = fmt.encoding == C.ENCODING_PCM_FLOAT
-        val frameBytes = ch * (if (isFloat) 4 else 2)
-        val frames = remaining / frameBytes
-        val tmp = FloatArray(ch)
-        for (f in 0 until frames) {
-            var peak = 0f
-            for (c in 0 until ch) {
-                val v = if (isFloat) inputBuffer.getFloat() else inputBuffer.getShort() / 32768f
-                tmp[c] = v
-                val a = if (v < 0f) -v else v
-                if (a > peak) peak = a
-            }
-            env = if (peak > env) att * env + (1f - att) * peak else rel * env + (1f - rel) * peak
-            val lvl = 20f * kotlin.math.log10(maxOf(env, 1e-6f))
-            val over = lvl - thr
-            // Stille/Rauschen (unter -60 dB) nicht anheben, zwischen -60 und -45 dB sanft übergehen
-            val gate = ((lvl + 60f) / 15f).coerceIn(0f, 1f)
-            val gainDb = (if (over > 0f) -over * (1f - 1f / ratio) else 0f) + makeup * gate
-            val g = Math.pow(10.0, (gainDb / 20f).toDouble()).toFloat()
-            for (c in 0 until ch) {
-                var y = tmp[c] * g
-                if (y > 0.9f) y = 0.9f + 0.1f * kotlin.math.tanh((y - 0.9f) / 0.1f)
-                else if (y < -0.9f) y = -0.9f - 0.1f * kotlin.math.tanh((-y - 0.9f) / 0.1f)
-                if (isFloat) out.putFloat(y)
-                else out.putShort(Math.round(y * 32767f).coerceIn(-32768, 32767).toShort())
-            }
-        }
-        while (inputBuffer.hasRemaining()) out.put(inputBuffer.get())   // unvollständiger Rest unverändert
-        out.flip()
-    }
-
-    override fun onFlush() { env = 0f }
-    override fun onReset() { env = 0f }
 }
