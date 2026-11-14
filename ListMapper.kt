@@ -17,7 +17,7 @@ import java.io.Writer
  * (je Zeile ein JSON-Feld mit bis zu [CHUNK] Einträgen), die die Oberfläche häppchenweise einliest.
  *
  * Die Umrechnung entspricht genau mapList() in app.js:
- *   live:   [id, num, name, logo, catId, epg] oder [id, num, name, logo, catId, epg, "weitere,catIds"]
+ *   live:   [id, num, name, logo, catId, epg] oder [id, num, name, logo, catId, epg, "weitere,catIds"] (+ Archiv-Tage, wenn Nachschauen geht)
  *   movie:  [id, name, logo, catId, ext, year|null, rating, added, genre]
  *   series: [id, name, logo, catId, year|null, rating, added, genre]
  */
@@ -26,7 +26,7 @@ object ListMapper {
 
     class NotJson(val prefix: String) : Exception("not json")
 
-    private val LIVE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "epg_channel_id", "category_ids")
+    private val LIVE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "epg_channel_id", "category_ids", "tv_archive", "tv_archive_duration")
     private val MOVIE_KEYS = setOf("stream_id", "name", "stream_icon", "category_id", "container_extension",
         "year", "release_date", "releaseDate", "rating", "rating_5based", "added", "genre")
     private val SERIES_KEYS = setOf("series_id", "name", "cover", "category_id", "releaseDate", "release_date",
@@ -176,7 +176,11 @@ object ListMapper {
                 out.write(","); quote(out, str(f["epg_channel_id"]))
                 // Weitere Kategorien (nur wenn es mehr als die eine gibt)
                 val ids = f["category_ids"]
-                if (ids != null && (ids.contains(',') || cat.isEmpty())) { out.write(","); quote(out, ids) }
+                val moreCats = ids != null && (ids.contains(',') || cat.isEmpty())
+                // Nachschauen (Catch-up): Tage, die der Anbieter aufzeichnet (Feld 8; Feld 7 dann leer, wenn keine weiteren Kategorien)
+                val arch = if (str(f["tv_archive"]) == "1") (jsInt(f["tv_archive_duration"]) ?: 0L) else 0L
+                if (moreCats || arch > 0) { out.write(","); quote(out, if (moreCats) ids!! else "") }
+                if (arch > 0) { out.write(","); out.write(arch.toString()) }
             }
             "movie" -> {
                 val name = str(f["name"]).ifEmpty { "Film $idText" }
