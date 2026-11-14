@@ -34,6 +34,8 @@ object ListMapper {
 
     private val YEAR = Regex("(19|20)\\d{2}")
     private val HORROR = Regex("(zombie|vampir|werw[oö]lf|werewol|d[äa]mon|demon|exorz|exorcis|spuk|besessen|possess|untote|undead|poltergeist|okkult|occult|haunt|horror)", RegexOption.IGNORE_CASE)
+    // Anime: in der Beschreibung „Anime“ oder „Manga“ (wie mapList in app.js)
+    private val ANIME = Regex("(^|[^a-z])(anime|manga)([^a-z]|$)", RegexOption.IGNORE_CASE)
     private val YEAR_BRACKET = Regex("[(\\[](19|20)\\d{2}[)\\]]")
     private val YEAR_END = Regex("[ ._-](19|20)\\d{2}\\z")
     private val INT_FLOAT = Regex("^-?\\d+\\.0+$")
@@ -198,8 +200,10 @@ object ListMapper {
                 out.write(","); out.write(num(rating(f["rating"], f["rating_5based"])))
                 out.write(","); out.write((jsInt(f["last_modified"]) ?: 0L).toString())
                 // Horror steht bei Serien selten im Genre: an der Beschreibung erkennen (wie mapList in app.js)
-                val horror = HORROR.containsMatchIn(str(f["plot"]))
-                out.write(","); quote(out, str(f["genre"]).take(80) + (if (horror) " horror" else ""))
+                val plot = str(f["plot"])
+                val horror = HORROR.containsMatchIn(plot)
+                val anime = ANIME.containsMatchIn(plot)
+                out.write(","); quote(out, str(f["genre"]).take(80) + (if (horror) " horror" else "") + (if (anime) " anime" else ""))
             }
         }
         out.write("]")
