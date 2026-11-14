@@ -61,6 +61,12 @@ class VlcEngine(private val ctx: Context, private val emit: (String, Any?) -> Un
         return l
     }
 
+    /** „Ton ausgleichen“ (Einstellung der App): off | light | strong */
+    private var libDyn = "off"
+    private fun dynMode(): String = try {
+        ctx.getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getString("dynamics", "off") ?: "off"
+    } catch (e: Throwable) { "off" }
+
     private fun player(): MediaPlayer {
         mp?.let { return it }
         val options = arrayListOf(
@@ -69,6 +75,15 @@ class VlcEngine(private val ctx: Context, private val emit: (String, Any?) -> Un
             "--audio-time-stretch",
             "--avcodec-skiploopfilter=1"
         )
+        libDyn = dynMode()
+        if (libDyn == "light" || libDyn == "strong") {
+            val strong = libDyn == "strong"
+            options.addAll(listOf("--audio-filter=compressor", "--compressor-rms-peak=0.2", "--compressor-attack=10",
+                "--compressor-release=250", "--compressor-knee=5",
+                "--compressor-threshold=" + (if (strong) "-28" else "-22"),
+                "--compressor-ratio=" + (if (strong) "6" else "3"),
+                "--compressor-makeup-gain=" + (if (strong) "11" else "6")))
+        }
         val l = LibVLC(ctx, options)
         lib = l
         val p = MediaPlayer(l)
@@ -137,6 +152,15 @@ class VlcEngine(private val ctx: Context, private val emit: (String, Any?) -> Un
     }
 
     fun open(u: String, isLive: Boolean, bufferMode: String) {
+        // Ton-Ausgleich geändert: VLC mit den neuen Einstellungen neu aufbauen
+        if (lib != null && dynMode() != libDyn) {
+            try { if (attached) mp?.detachViews() } catch (e: Throwable) { }
+            attached = false
+            try { mp?.release() } catch (e: Throwable) { }
+            try { lib?.release() } catch (e: Throwable) { }
+            mp = null
+            lib = null
+        }
         url = u
         live = isLive
         cacheMs = when (bufferMode) { "small" -> 1000; "large" -> 5000; else -> 2500 }
