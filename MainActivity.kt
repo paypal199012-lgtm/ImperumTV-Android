@@ -1258,6 +1258,8 @@ class MainActivity : Activity() {
 
     /** Abweichung der Geräte-Uhr in ms (von der Oberfläche gemeldet, siehe TimeFix in app.js) */
     @Volatile private var clockOff = 0L
+    /** Verschiebung des Anbieter-Programms in ms (siehe EpgShift in app.js) */
+    @Volatile private var epgShift = 0L
 
     private fun saveCrashReport(text: String) {
         getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit()
@@ -1969,6 +1971,10 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun setClockOffset(ms: String) { clockOff = ms.toLongOrNull()?.coerceIn(-400L * 86_400_000L, 400L * 86_400_000L) ?: 0L }
 
+        /** Programm des Anbieters um ganze Stunden verschoben: so viele ms rechnet die Oberfläche dazu */
+        @JavascriptInterface
+        fun setEpgShift(ms: String) { epgShift = ms.toLongOrNull()?.coerceIn(-3L * 3_600_000L, 3L * 3_600_000L) ?: 0L }
+
         /** Programm eines Senders: [[start,ende,"Titel","Text"],…] oder "" */
         @JavascriptInterface
         fun epgFor(id: String): String = epgMap[id] ?: ""
@@ -1978,7 +1984,7 @@ class MainActivity : Activity() {
         fun epgNow(ids: String): String {
             val out = JSONObject()
             try {
-                val now = System.currentTimeMillis() + clockOff
+                val now = System.currentTimeMillis() + clockOff - epgShift
                 val a = JSONArray(ids)
                 val map = epgMap
                 for (i in 0 until a.length()) {
@@ -2012,7 +2018,7 @@ class MainActivity : Activity() {
         fun epgNowFull(ids: String): String {
             val out = JSONObject()
             try {
-                val now = System.currentTimeMillis() + clockOff
+                val now = System.currentTimeMillis() + clockOff - epgShift
                 val a = JSONArray(ids)
                 val map = epgMap
                 for (i in 0 until a.length()) {
