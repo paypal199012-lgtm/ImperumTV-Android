@@ -85,3 +85,17 @@ jobs:
           name: ImperumTV 1.0.${{ github.run_number }}
           files: ImperumTV.apk
           make_latest: true
+
+      # Test-Build: als „test“ bereitstellen (Vorabversion, nie „latest“ – Kunden bekommen sie nicht).
+      # Download für den Betreiber: imperumtv.xyz/test
+      - name: Test-Version bereitstellen
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.test }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: test
+          name: Test-Version (nur zum Ausprobieren)
+          body: Nur zum Testen. Kunden bekommen diese Version nicht.
+          files: ImperumTV.apk
+          prerelease: true
+          make_latest: false
+          target_commitish: ${{ github.sha }}
