@@ -1,0 +1,28 @@
+name: Veröffentlichte Version festlegen
+
+# Legt fest, welche Version Kunden als Update bekommen (z. B. versehentliche Version zurücknehmen).
+on:
+  workflow_dispatch:
+    inputs:
+      latest:
+        description: 'Diese Version gilt als aktuell (z. B. v1.0.354)'
+        required: true
+      zurueck:
+        description: 'Diese Version als Vorabversion markieren (Kunden bekommen sie nicht), leer = keine'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  set:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Version festlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -n "${{ inputs.zurueck }}" ]; then gh release edit "${{ inputs.zurueck }}" -R "$REPO" --prerelease --latest=false; fi
+          gh release edit "${{ inputs.latest }}" -R "$REPO" --prerelease=false --latest
+          echo "::notice::Aktuell ist jetzt $(gh api repos/$REPO/releases/latest -q .tag_name)"

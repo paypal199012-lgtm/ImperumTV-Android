@@ -3,6 +3,7 @@ name: Android APK bauen
 
 on:
   push:
+    branches: [main]      # nur main veröffentlicht – andere Zweige bauen nur über „Run workflow“ (Test)
   workflow_dispatch:
     inputs:
       test:
