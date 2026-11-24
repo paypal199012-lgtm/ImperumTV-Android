@@ -2132,6 +2132,29 @@ class MainActivity : Activity() {
             else { val m = android.util.DisplayMetrics(); d.getRealMetrics(m); maxOf(m.heightPixels, m.widthPixels * 9 / 16) }
         } catch (e: Throwable) { 0 }
 
+        /** Geräte-Check: welche Bild- und Tonformate der Stick selbst entschlüsseln kann (JSON für die Oberfläche) */
+        @JavascriptInterface
+        fun codecCaps(): String = try {
+            val list = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder }
+            fun has(mime: String) = list.any { ci -> ci.supportedTypes.any { it.equals(mime, true) } }
+            fun caps(mime: String) = list.mapNotNull { ci -> if (ci.supportedTypes.any { it.equals(mime, true) }) try { ci.getCapabilitiesForType(mime) } catch (e: Throwable) { null } else null }
+            val hevc = caps("video/hevc")
+            val hevc4k = hevc.any { it.videoCapabilities?.isSizeSupported(3840, 2160) == true }
+            val hevc10 = hevc.any { c -> c.profileLevels.any { it.profile == android.media.MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10 } }
+            var hdr = false
+            try {
+                @Suppress("DEPRECATION")
+                val d = windowManager.defaultDisplay
+                if (Build.VERSION.SDK_INT >= 24) hdr = (d.hdrCapabilities?.supportedHdrTypes?.size ?: 0) > 0
+            } catch (e: Throwable) { }
+            val o = org.json.JSONObject()
+            o.put("avc", has("video/avc")); o.put("hevc", hevc.isNotEmpty()); o.put("hevc4k", hevc4k); o.put("hevc10", hevc10)
+            o.put("vp9", has("video/x-vnd.on2.vp9")); o.put("av1", has("video/av01"))
+            o.put("ac3", has("audio/ac3")); o.put("eac3", has("audio/eac3")); o.put("dts", has("audio/vnd.dts"))
+            o.put("hdr", hdr); o.put("maxH", maxVideoHeight()); o.put("ram", totalMemMb())
+            o.toString()
+        } catch (e: Throwable) { "" }
+
         /** Internet da? (Netzwerk mit Internet-Zugang vorhanden) */
         @JavascriptInterface
         fun isOnline(): Boolean = currentOnline()
