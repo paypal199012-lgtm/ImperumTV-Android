@@ -444,6 +444,7 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent?.getBooleanExtra(ChatPush.EXTRA_OPEN_CHAT, false) == true) { openChatPending = true; intent.removeExtra(ChatPush.EXTRA_OPEN_CHAT) }
         refreshLauncherTileAfterUpdate()
         // Absturz-Bericht: Fehler merken und beim nächsten Start anzeigen (zum Abfotografieren)
         installCrashReporter()
@@ -929,12 +930,28 @@ class MainActivity : Activity() {
 
     // ---------- Lebenszyklus ----------
 
+    /** Support-Chat im Hintergrund eingeschaltet? (merkt sich die App, sobald die Oberfläche ihn einrichtet) */
+    private fun chatPushOn() = getSharedPreferences("imptv_native", Context.MODE_PRIVATE).getBoolean("chatPush", false)
+
+    /** Benachrichtigung „Neue Nachricht vom Support“ angetippt: Chat öffnen */
+    @Volatile private var openChatPending = false
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(ChatPush.EXTRA_OPEN_CHAT, false)) {
+            intent.removeExtra(ChatPush.EXTRA_OPEN_CHAT)
+            if (uiReady) webView.evaluateJavascript("window.__openChat ? window.__openChat() : 0", null) else openChatPending = true
+        }
+    }
+
     /** App gerade sichtbar? (für den Bericht, falls das System die Oberfläche beendet) */
     @Volatile private var inFront = false
 
     override fun onStart() {
         super.onStart()
         inFront = true
+        if (chatPushOn()) ChatPush.visible(this, true)
         hideSystemBars()
         if (!uiReady) return
         webView.onResume()
@@ -949,6 +966,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         inFront = false
+        if (chatPushOn()) ChatPush.visible(this, false)
         if (!uiReady) { super.onStop(); return }
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('hidden')", null)
         player.pause()
@@ -1876,6 +1894,26 @@ class MainActivity : Activity() {
     // ---------- Schnittstelle für die Web-Seite ----------
 
     inner class Bridge {
+
+        /** Support-Chat im Hintergrund einrichten: {"url","apikey","mac","key","seen","tTitle","tChannel","tBg","on"} */
+        @JavascriptInterface
+        fun chatPush(cfg: String) {
+            try {
+                val c = JSONObject(cfg)
+                val on = c.optBoolean("on", true)
+                getSharedPreferences("imptv_native", Context.MODE_PRIVATE).edit().putBoolean("chatPush", on).apply()
+                if (on) ChatPush.configure(this@MainActivity, c)
+                else ChatPush.startService(this@MainActivity, Intent(this@MainActivity, ChatPushService::class.java).setAction("config").putExtra("cfg", cfg), quiet = true)
+            } catch (e: Throwable) { }
+        }
+
+        /** Nachrichten bis zu dieser Nummer hat der Kunde in der App gesehen (keine Benachrichtigung mehr dafür) */
+        @JavascriptInterface
+        fun chatSeen(id: Long) { try { ChatPush.seen(this@MainActivity, id) } catch (e: Throwable) { } }
+
+        /** Wurde die App über die Benachrichtigung „Neue Nachricht“ geöffnet? (einmalig true) */
+        @JavascriptInterface
+        fun takeOpenChat(): Boolean { val v = openChatPending; openChatPending = false; return v }
 
         /** Noch nicht gesendeter Absturzbericht: {"text":"…","at":…,"device":"…","android":"…"} oder "" */
         @JavascriptInterface
