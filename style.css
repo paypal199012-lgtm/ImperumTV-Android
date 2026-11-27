@@ -2203,3 +2203,7 @@ body.mv-mode #app::before { display: none; }
 .mv-cell.mv-limit .mv-st { color: #f4dc9e; font-size: 26px; line-height: 1.35; }
 .mv-p-warn { margin: 6px 6px 12px; padding: 14px 18px; border-radius: 10px; background: rgba(217,176,102,.16); border: 1px solid rgba(217,176,102,.5); color: #f4dc9e; font-size: 22px; line-height: 1.35; }
 .mv-cell.mv-limit { background: #101215; }
+/* Multi-View: keine Uhrzeit, kein Rahmen um das gewählte Fenster (das Lautsprecher-Symbol zeigt es) */
+body.mv-mode #clock, body.mv-mode #sleepbadge { display: none !important; }
+body .mv-cell.focused, body.lite .mv-cell.focused { box-shadow: none !important; }
+body .mv-cell.press, body .mv-cell.focused.press { -webkit-animation: none !important; animation: none !important; -webkit-transform: none !important; transform: none !important; }
