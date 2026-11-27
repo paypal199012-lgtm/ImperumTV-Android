@@ -10933,7 +10933,7 @@
         node.appendChild(lab);
         node.appendChild(h('div', 'mv-st'));
         focusable(node, 'mv-' + i, function () { self.action(i); }, 'mv');
-        node._onFocus = function () { if (!self.pick) self.setAudio(i); };
+        node._onFocus = function () { if (!self.pick) { self.setAudio(i); self.flashName(i); } };
         node._onLong = function () { if (self.cells[i]) self.clear(i); else self.openPick(i); };
         this.nodes[i] = node;
         this.label(i);
@@ -10945,6 +10945,16 @@
         node.classList.toggle('empty', !c);
         var pl = c && c.pid !== MV.curId() ? MV.plName(c.pid) : '';
         node.querySelector('.mv-name').textContent = c ? MV.name(c.ch) + (pl ? '  ·  ' + pl : '') : '';
+    };
+    /** Sendername unten im Fenster kurz zeigen (beim Draufgehen oder Umschalten), dann wieder ausblenden */
+    MultiViewScreen.prototype.flashName = function (i) {
+        var self = this, node = this.nodes[i];
+        if (!node || !this.cells[i]) return;
+        this.nameT = this.nameT || [];
+        for (var k = 0; k < this.nodes.length; k++) if (k !== i && this.nodes[k]) this.nodes[k].classList.remove('mv-show');
+        node.classList.add('mv-show');
+        clearTimeout(this.nameT[i]);
+        this.nameT[i] = setTimeout(function () { node.classList.remove('mv-show'); }, 4000);
     };
     MultiViewScreen.prototype.play = function (i) {
         clearTimeout(this.timers[i]);
@@ -11059,6 +11069,7 @@
         this.play(i);
         try { if (String(pid) === MV.curId()) RecentLive.add(ch); } catch (e) { /* egal */ }
         if (before && before.pid !== String(pid)) this.unblock();      // alte Liste hat wieder eine Verbindung frei
+        if (Focus.cur === this.nodes[i] || this.audio === i) this.flashName(i);
     };
     MultiViewScreen.prototype.clear = function (i) {
         this.cells[i] = null;

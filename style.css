@@ -2207,3 +2207,9 @@ body.mv-mode #app::before { display: none; }
 body.mv-mode #clock, body.mv-mode #sleepbadge { display: none !important; }
 body .mv-cell.focused, body.lite .mv-cell.focused { box-shadow: none !important; }
 body .mv-cell.press, body .mv-cell.focused.press { -webkit-animation: none !important; animation: none !important; -webkit-transform: none !important; transform: none !important; }
+/* Multi-View: Sendername nur kurz beim Draufgehen/Umschalten */
+.mv-cell.mv-show .mv-lab { display: flex; padding: 8px 16px; }
+.mv-cell.mv-show .mv-name { display: inline; }
+.mv-cell.mv-show.mv-audio .mv-snd { margin-right: 10px; }
+.mv-cell.mv-show:not(.mv-audio) .mv-snd { display: none; }
+.mv-cell.empty .mv-lab { display: none; }
