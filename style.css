@@ -2186,3 +2186,9 @@ body.mv-mode #app::before { display: none; }
 .mv-p-search { display: flex; align-items: center; }
 .mv-p-search svg { flex: none; margin-right: 12px; }
 .mv-p-search span { overflow: hidden; text-overflow: ellipsis; }
+/* Multi-View: kein Sendername unten im Fenster – nur das Lautsprecher-Symbol beim Fenster mit Ton */
+.mv-name { display: none; }
+.mv-lab { display: none; padding: 8px 10px; }
+.mv-snd { margin-right: 0; }
+.mv-cell.mv-audio .mv-lab { display: flex; }
+.mv-cell.empty .mv-lab { display: none; }
