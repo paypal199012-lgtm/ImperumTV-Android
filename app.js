@@ -10743,6 +10743,26 @@
             if (!a || a.m3u || a.demo) return '';
             return a.server + '/live/' + encodeURIComponent(a.username) + '/' + encodeURIComponent(a.password) + '/' + ch.id + '.' + Settings.liveExt;
         },
+        /** Erlaubte Verbindungen je Wiedergabeliste (pid → { max } oder Promise; max 0 = unbekannt) */
+        info: {},
+        limit: function (pid) { var x = this.info[pid]; return x && !x.then ? x.max : 0; },
+        limitText: function (m) { return m === 1 ? T("1 Verbindung") : Tf("{0} Verbindungen", [m]); },
+        /** Beim Anbieter nachfragen, wie viele Sender die Liste gleichzeitig abspielen darf (user_info.max_connections) */
+        loadInfo: function (pid) {
+            var self = this, have = this.info[pid];
+            if (have) return have.then ? have : Promise.resolve(have);
+            var a = this.acc(pid);
+            if (!a || a.m3u || a.demo) { this.info[pid] = { max: 0 }; return Promise.resolve(this.info[pid]); }
+            var url = a.server + '/player_api.php?username=' + encodeURIComponent(a.username) + '&password=' + encodeURIComponent(a.password);
+            var p = Api.fetchText(url).then(function (t) {
+                var j = null;
+                try { j = JSON.parse(t); } catch (e) { /* unbekannt */ }
+                var u = j && j.user_info, m = u ? parseInt(u.max_connections, 10) : 0;
+                return (self.info[pid] = { max: m > 0 ? m : 0 });
+            }, function () { delete self.info[pid]; return { max: 0 }; });
+            this.info[pid] = p;
+            return p;
+        },
         /** Senderliste einer anderen Wiedergabeliste holen (bleibt bis zum Neustart gemerkt) */
         load: function (pid) {
             var self = this, have = this.lists[pid];
@@ -10849,6 +10869,7 @@
             else if (k >= 2) this.play(k);                       // Fenster 3 und 4 wieder da
         }
         this.place();                                            // Fenster 1 und 2 liegen jetzt anders
+        if (n === 2) this.unblock();
         if (this.audio >= n) this.setAudio(0);
         var fi = this.focusIdx();
         if (fi < 0 || fi >= n) { if (!Modal.node) Focus.set(this.nodes[this.audio < n ? this.audio : 0]); }
@@ -10884,6 +10905,15 @@
             for (var k = 0; k < 4; k++) self.play(k);
             if (self.audio >= self.n) self.audio = 0;
             self.setAudio(self.audio, true);
+            MV.playlists().forEach(function (p) {
+                MV.loadInfo(String(p.id)).then(function (inf) {
+                    if (Nav.top() !== self) return;
+                    self.enforce();
+                    // Auswahl offen: Zahl gleich beim Namen der Liste zeigen
+                    var chip = self.pickLayer && self.pickLayer.querySelector('.focusable[data-key="mvp-pl-' + p.id + '"]');
+                    if (chip && inf && inf.max) chip.textContent = p.name + ' · ' + MV.limitText(inf.max);
+                });
+            });
             // Beim ersten Mal fragen, wie viele Fenster (danach gemerkt, umstellbar mit OK auf einem Fenster oder Grün)
             if (!Storage.get('mvLayout', 0) && !Modal.node) {
                 Modal.open(T("Multi-View"), T("Wie viele Fenster möchtest du sehen? Umstellen kannst du das jederzeit mit OK auf einem Fenster oder der grünen Taste."), [
@@ -10920,9 +10950,48 @@
         clearTimeout(this.timers[i]);
         var c = this.cells[i], node = this.nodes[i];
         if (!c || !node || i >= this.n) { if (AB && AB.mvClose) AB.mvClose(i); this.setState(i, ''); return; }
+        if (!c.force && this.busy(c.pid, i).length >= (MV.limit(c.pid) || 99)) { this.setLimit(i); return; }
         var fr = Player.fractions(stageRect(node));
         AB.mvOpen(i, c.url, fr.x, fr.y, fr.w, fr.h);
         this.setState(i, 'load');
+    };
+    /** Andere sichtbare Fenster, in denen gerade ein Sender derselben Wiedergabeliste läuft */
+    MultiViewScreen.prototype.busy = function (pid, i) {
+        var out = [];
+        for (var k = 0; k < this.n; k++) {
+            var c = this.cells[k];
+            if (k !== i && c && c.pid === String(pid) && this.state[k] !== 'limit') out.push(k);
+        }
+        return out;
+    };
+    /** Fenster bleibt leer: Liste erlaubt nicht mehr Verbindungen */
+    MultiViewScreen.prototype.setLimit = function (i) {
+        var c = this.cells[i];
+        clearTimeout(this.timers[i]);
+        if (AB && AB.mvClose) AB.mvClose(i);
+        var max = MV.limit(c.pid), on = this.busy(c.pid, i).map(function (k) { return k + 1; }).join(', ');
+        this.setState(i, 'limit', Tf("„{0}“ erlaubt nur {1} gleichzeitig – läuft schon in Fenster {2}. Wähle für dieses Fenster eine andere Wiedergabeliste.",
+            [MV.plName(c.pid) || T("Diese Liste"), MV.limitText(max), on]));
+    };
+    /** Limits nachträglich bekannt: überzählige Fenster derselben Liste anhalten (das zuerst belegte läuft weiter) */
+    MultiViewScreen.prototype.enforce = function () {
+        var cnt = {};
+        for (var k = 0; k < this.n; k++) {
+            var c = this.cells[k];
+            if (!c || this.state[k] === 'limit') continue;
+            cnt[c.pid] = (cnt[c.pid] || 0) + 1;
+            var max = MV.limit(c.pid);
+            if (max && cnt[c.pid] > max && !c.force) this.setLimit(k);
+        }
+    };
+    /** Ein Fenster wurde frei: angehaltene Fenster nochmal versuchen (kurz warten, bis der Anbieter die Verbindung freigibt) */
+    MultiViewScreen.prototype.unblock = function () {
+        var self = this;
+        clearTimeout(this.unblockT);
+        this.unblockT = setTimeout(function () {
+            if (Nav.top() !== self) return;
+            for (var k = 0; k < self.n; k++) if (self.state[k] === 'limit') self.play(k);
+        }, 1500);
     };
     /** Bildflächen neu anlegen (z. B. nach dem Drehen des Handys) */
     MultiViewScreen.prototype.place = function () {
@@ -10938,10 +11007,11 @@
         if (!node) return;
         node.querySelector('.mv-st').textContent = text || (st === 'load' || st === 'buf' ? T("Lädt …") : '');
         node.classList.toggle('mv-err', st === 'err');
+        node.classList.toggle('mv-limit', st === 'limit');
     };
     MultiViewScreen.prototype.onEvent = function (o) {
         var i = o.i, self = this;
-        if (!(i >= 0 && i < this.n) || !this.cells[i]) return;
+        if (!(i >= 0 && i < this.n) || !this.cells[i] || this.state[i] === 'limit') return;
         if (o.ev === 'frame' || o.ev === 'ready') {
             if (o.ev === 'frame') this.tries[i] = 0;
             if (this.state[i] !== 'err') this.setState(i, 'ok');
@@ -10954,7 +11024,9 @@
                 clearTimeout(this.timers[i]);
                 this.timers[i] = setTimeout(function () { if (Nav.top() === self) self.play(i); }, 2500 * n);
             } else {
-                this.setState(i, 'err', T("Sender lädt nicht. Vielleicht erlaubt dein Abo nicht so viele Sender gleichzeitig."));
+                var lim = MV.limit(this.cells[i].pid);
+                this.setState(i, 'err', lim ? Tf("Sender lädt nicht. „{0}“ erlaubt {1} gleichzeitig – vielleicht schaut gerade ein anderes Gerät damit.", [MV.plName(this.cells[i].pid) || T("Diese Liste"), MV.limitText(lim)])
+                    : T("Sender lädt nicht. Vielleicht erlaubt dein Abo nicht so viele Sender gleichzeitig."));
             }
         }
     };
@@ -10975,21 +11047,52 @@
             { label: T("Abbrechen") }
         ]);
     };
-    MultiViewScreen.prototype.set = function (i, pid, ch, list) {
+    MultiViewScreen.prototype.set = function (i, pid, ch, list, force) {
         var url = MV.url(pid, ch);
         if (!url) { toast(T("Dieser Sender lässt sich hier nicht öffnen."), 4000); return; }
-        this.cells[i] = { pid: String(pid), ch: ch, url: url, list: list || null };
+        var before = this.cells[i];
+        if (this.state[i] === 'limit') this.state[i] = '';
+        this.cells[i] = { pid: String(pid), ch: ch, url: url, list: list || null, force: !!(force || (before && before.force && before.pid === String(pid))) };
         this.tries[i] = 0;
         this.label(i);
         MV.save(this.cells);
         this.play(i);
         try { if (String(pid) === MV.curId()) RecentLive.add(ch); } catch (e) { /* egal */ }
+        if (before && before.pid !== String(pid)) this.unblock();      // alte Liste hat wieder eine Verbindung frei
     };
     MultiViewScreen.prototype.clear = function (i) {
         this.cells[i] = null;
         this.label(i);
         MV.save(this.cells);
         this.play(i);
+        this.unblock();
+    };
+    /** Sender aus der Auswahl übernehmen – vorher prüfen, ob die Liste noch eine Verbindung frei hat */
+    MultiViewScreen.prototype.choose = function (pk, ch, items) {
+        var self = this, i = pk.i, pid = pk.pid;
+        MV.loadInfo(pid).then(function () {
+            if (self.pick !== pk || Nav.top() !== self) return;
+            var max = MV.limit(pid), used = self.busy(pid, i);
+            if (!max || used.length < max) { self.set(i, pid, ch, items); self.closePick(); return; }
+            var btns = [];
+            used.forEach(function (k) {
+                btns.push({ label: Tf("Fenster {0} leeren und hier abspielen", [k + 1]), primary: !btns.length, action: function () {
+                    self.closePick();
+                    self.clear(k);
+                    self.setState(i, 'load', T("Verbindung wird frei …"));
+                    setTimeout(function () { if (Nav.top() === self) self.set(i, pid, ch, items); }, 1400);   // vor den anderen angehaltenen Fenstern
+                } });
+            });
+            if (MV.playlists().length > 1) btns.push({ label: T("Andere Wiedergabeliste wählen"), action: function () {
+                var chip = self.pickLayer.querySelector('.mv-p-pl:not(.on)');
+                if (chip) setTimeout(function () { Focus.set(chip); }, 0);
+            } });
+            btns.push({ label: T("Trotzdem versuchen"), action: function () { self.set(i, pid, ch, items, true); self.closePick(); } });
+            btns.push({ label: T("Abbrechen") });
+            Modal.open(Tf("Nur {0} gleichzeitig", [MV.limitText(max)]),
+                Tf("„{0}“ erlaubt nur {1} gleichzeitig und läuft schon in Fenster {2}. Ein weiterer Sender dieser Liste bleibt sonst schwarz.",
+                    [MV.plName(pid) || T("Diese Liste"), MV.limitText(max), used.map(function (k) { return k + 1; }).join(', ')]), btns);
+        });
     };
     MultiViewScreen.prototype.zap = function (i, dir) {
         var c = this.cells[i];
@@ -11048,7 +11151,8 @@
         if (pls.length > 1) {
             var bar = h('div', 'mv-p-pls hscroll');
             pls.forEach(function (p) {
-                var chip = h('div', 'mv-p-pl' + (String(p.id) === pk.pid ? ' on' : ''), p.name);
+                var pm = MV.limit(String(p.id));
+                var chip = h('div', 'mv-p-pl' + (String(p.id) === pk.pid ? ' on' : ''), p.name + (pm ? ' · ' + MV.limitText(pm) : ''));
                 bar.appendChild(focusable(chip, 'mvp-pl-' + p.id, function () {
                     if (String(p.id) === pk.pid) { var f = L.querySelector('.mv-p-row'); if (f) Focus.set(f); return; }
                     pk.pid = String(p.id); pk.cat = -1; self.lastPid = pk.pid;
@@ -11087,6 +11191,11 @@
             var n = h('div', 'mv-p-cat' + (k === pk.cat && !pk.query ? ' on' : ''), name);
             return focusable(n, 'mvp-cat-' + k, function () { pk.cat = k; pk.query = ''; self.drawPick('list'); }, 'mvcats');
         }, 60);
+        var pmax = MV.limit(pk.pid), pused = this.busy(pk.pid, pk.i);
+        if (pmax && pused.length >= pmax) {
+            ls.appendChild(h('div', 'mv-p-warn', Tf("Diese Liste erlaubt nur {0} gleichzeitig und läuft schon in Fenster {1}.",
+                [MV.limitText(pmax), pused.map(function (k) { return k + 1; }).join(', ')])));
+        }
         if (!items.length) ls.appendChild(h('div', 'mv-p-note', pk.query ? Tf("Keine Treffer für „{0}“ in dieser Wiedergabeliste.", [pk.query]) : T("Keine Sender in dieser Kategorie.")));
         batchRender(ls, items, function (ch, k) {
             var row = h('div', 'mv-p-row');
@@ -11095,11 +11204,7 @@
             lg.onerror = function () { lg.style.visibility = 'hidden'; };
             row.appendChild(lg);
             row.appendChild(h('div', 'mv-p-name', MV.name(ch)));
-            return focusable(row, 'mvp-ch-' + k, function () {
-                var i = pk.i;
-                self.set(i, pk.pid, ch, items);
-                self.closePick();
-            }, 'mvch');
+            return focusable(row, 'mvp-ch-' + k, function () { self.choose(pk, ch, items); }, 'mvch');
         }, 40);
         var tgt = focusOn === 'pl' ? L.querySelector('.mv-p-pl.on') : null;
         if (!tgt && !items.length) tgt = L.querySelector('.mv-p-cat.on');
@@ -11136,6 +11241,7 @@
     MultiViewScreen.prototype.hide = function () {
         clearTimeout(this.hintT);
         for (var i = 0; i < 4; i++) clearTimeout(this.timers[i]);
+        clearTimeout(this.unblockT);
         this.pick = null;
         if (AB && AB.mvCloseAll) AB.mvCloseAll();
         document.body.classList.remove('mv-mode');

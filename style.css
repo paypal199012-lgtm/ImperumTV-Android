@@ -2199,3 +2199,7 @@ body.mv-mode #app::before { display: none; }
 .mv-two::before, .mv-two::after { content: ""; position: absolute; left: 0; right: 0; height: 25%; background: #000; }
 .mv-two::before { top: 0; }
 .mv-two::after { bottom: 0; }
+/* Multi-View: Verbindungs-Limit */
+.mv-cell.mv-limit .mv-st { color: #f4dc9e; font-size: 26px; line-height: 1.35; }
+.mv-p-warn { margin: 6px 6px 12px; padding: 14px 18px; border-radius: 10px; background: rgba(217,176,102,.16); border: 1px solid rgba(217,176,102,.5); color: #f4dc9e; font-size: 22px; line-height: 1.35; }
+.mv-cell.mv-limit { background: #101215; }
