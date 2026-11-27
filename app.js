@@ -10995,6 +10995,8 @@
     // ---------- Senderauswahl für ein Fenster: Wiedergabeliste → Kategorie → Sender ----------
     MultiViewScreen.prototype.openPick = function (i) {
         var c = this.cells[i];
+        var hint = document.querySelector('#app .mv-hint');
+        if (hint) hint.classList.add('off');                    // Hinweis oben nicht durch die Auswahl scheinen lassen
         this.pick = { i: i, pid: c ? c.pid : (this.lastPid || MV.curId()), cat: -1, query: '' };
         for (var k = 0; k < this.nodes.length; k++) this.nodes[k].classList.remove('focusable');
         this.drawPick();
@@ -11061,7 +11063,7 @@
         batchRender(ls, items, function (ch, k) {
             var row = h('div', 'mv-p-row');
             var lg = h('img', 'mv-p-logo');
-            if (ch.logo) LazyImg.set(lg, logoUrl(ch.logo));
+            if (ch.logo) LazyImg.set(lg, logoUrl(ch.logo)); else lg.style.visibility = 'hidden';
             lg.onerror = function () { lg.style.visibility = 'hidden'; };
             row.appendChild(lg);
             row.appendChild(h('div', 'mv-p-name', MV.name(ch)));
