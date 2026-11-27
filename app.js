@@ -492,6 +492,8 @@
         globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/>',
         eyeoff: '<path d="M3 3l18 18"/><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c5.5 0 9 7 9 7a15.6 15.6 0 0 1-2.9 3.9M6.3 6.3C3.9 8 2.9 12 2.9 12s3.6 7 9.1 7a9 9 0 0 0 4.4-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
         tv: '<rect x="2.5" y="4.5" width="19" height="13" rx="2"/><path d="M8 21h8M12 17.5V21"/>',
+        grid: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>',
+        sound: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
         film: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4"/>',
         series: '<rect x="2.5" y="6" width="15" height="12" rx="2"/><path d="M8.5 9.5l4 2.5-4 2.5z"/><path d="M6 3.5h14.5a1 1 0 0 1 1 1V15"/>',
         star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
@@ -7667,9 +7669,11 @@
         );                                               // Suche: Lupe oben rechts (keine eigene Kachel mehr)
         if (Rec.available()) tileList.push(['recs', 'rec', T("AUFNAHMEN"), function () { Nav.push(new RecordingsScreen()); }]);
         if (!Profiles.isKids()) tileList.push(           // Kinder-Profil: keine Einstellungen, keine Listen
-            ['football', 'ball', T("SPORT"), function () { Nav.push(new FootballScreen()); }],
-            ['settings', 'gear', T("EINSTELLUNGEN"), function () { Nav.push(new SettingsScreen()); }]
-        );                                               // Listen: nur noch unter Einstellungen
+            ['football', 'ball', T("SPORT"), function () { Nav.push(new FootballScreen()); }]
+        );
+        // Multi-View (Beta): 4 Sender gleichzeitig (nur Android, nicht im Kinder-Profil)
+        if (!Profiles.isKids() && MV.available()) tileList.push(['multiview', 'grid', 'MULTI-VIEW', function () { Nav.push(new MultiViewScreen()); }]);
+        if (!Profiles.isKids()) tileList.push(['settings', 'gear', T("EINSTELLUNGEN"), function () { Nav.push(new SettingsScreen()); }]);                                               // Listen: nur noch unter Einstellungen
         tileList.forEach(function (t) {
             var node = h('div', 'tile');
             node.innerHTML = '<div class="icon">' + icon(t[1], 46) + '</div><div class="label">' + t[2] + '</div>';
@@ -10696,6 +10700,396 @@
         }
         return false;
     };
+
+    // =====================================================================
+    // Multi-View (Beta): bis zu 4 Live-Sender gleichzeitig – jedes Fenster auch aus einer anderen Wiedergabeliste
+    // =====================================================================
+
+    var MV = {
+        /** Senderlisten anderer Wiedergabelisten (id → { cats, chans } oder Promise beim Laden) */
+        lists: {},
+        available: function () { return !!(AB && AB.mvAvailable); },
+        curId: function () { return String(Storage.get('playlistId', '')); },
+        /** Alle Wiedergabelisten des Geräts; die gerade verbundene steht immer drin */
+        playlists: function () {
+            var cur = this.curId(), out = [], seen = {}, hasCur = false;
+            (Remote.lists || []).forEach(function (p) {
+                if (!p || seen[p.id]) return;
+                seen[p.id] = 1; out.push(p);
+                if (String(p.id) === cur) hasCur = true;
+            });
+            if (!hasCur) out.unshift({ id: cur, name: T("Aktuelle Liste") });
+            return out;
+        },
+        plName: function (pid) {
+            var ps = this.playlists();
+            for (var i = 0; i < ps.length; i++) if (String(ps[i].id) === String(pid)) return ps[i].name;
+            return '';
+        },
+        acc: function (pid) {
+            if (String(pid) === this.curId()) return Api.acc;
+            var ps = Remote.lists || [];
+            for (var i = 0; i < ps.length; i++) if (String(ps[i].id) === String(pid)) return playlistAccount(ps[i]);
+            return null;
+        },
+        name: function (ch) {
+            try { if (ch._mv && ch._mname) return ch._mname; return NameTidy.of(ch).name || ch.name; } catch (e) { return ch.name || ''; }
+        },
+        /** Adresse des Senders in genau dieser Wiedergabeliste */
+        url: function (pid, ch) {
+            if (ch.url) return ch.url;
+            if (String(pid) === this.curId()) return Api.acc ? Api.liveUrl(ch.id) : '';
+            var a = this.acc(pid);
+            if (!a || a.m3u || a.demo) return '';
+            return a.server + '/live/' + encodeURIComponent(a.username) + '/' + encodeURIComponent(a.password) + '/' + ch.id + '.' + Settings.liveExt;
+        },
+        /** Senderliste einer anderen Wiedergabeliste holen (bleibt bis zum Neustart gemerkt) */
+        load: function (pid) {
+            var self = this, have = this.lists[pid];
+            if (have) return have.then ? have : Promise.resolve(have);
+            var a = this.acc(pid);
+            if (!a) return Promise.reject(new Error(T("Diese Wiedergabeliste wurde nicht gefunden.")));
+            if (a.m3u || a.demo) return Promise.reject(new Error(T("M3U-Listen gehen im Multi-View (Beta) noch nicht – nur Listen mit Server, Benutzername und Passwort.")));
+            var base = a.server + '/player_api.php?username=' + encodeURIComponent(a.username) + '&password=' + encodeURIComponent(a.password) + '&action=';
+            function get(action) {
+                return Api.fetchText(base + action).then(function (t) {
+                    try { return JSON.parse(t); } catch (e) { throw new Error(T("Unerwartete Antwort vom Server.")); }
+                });
+            }
+            var p = Promise.all([get('get_live_categories'), get('get_live_streams')]).then(function (r) {
+                var map = Data.catMap(r[0]), seen = {}, chans = [], cats = [];
+                (Array.isArray(r[1]) ? r[1] : []).forEach(function (s) {
+                    if (!s || s.stream_id == null) return;
+                    var cat = map[String(s.category_id)] || T("Ohne Kategorie");
+                    seen[cat] = 1;
+                    chans.push({ id: Number(s.stream_id), name: str(s.name), logo: str(s.stream_icon), cat: cat, type: 'live' });
+                });
+                // Kategorien in der Reihenfolge des Anbieters
+                (Array.isArray(r[0]) ? r[0] : []).forEach(function (c) { var n = map[String(c.category_id)]; if (n && seen[n] === 1) { seen[n] = 2; cats.push(n); } });
+                for (var n in seen) if (seen.hasOwnProperty(n) && seen[n] === 1) cats.push(n);
+                try { chans = Parental.visible('live', chans); } catch (eP) { /* egal */ }
+                if (!chans.length) throw new Error(T("Diese Wiedergabeliste liefert keine Live-Sender."));
+                var res = { cats: cats, chans: chans };
+                self.lists[pid] = res;
+                return res;
+            });
+            this.lists[pid] = p;
+            p.then(null, function () { if (self.lists[pid] === p) delete self.lists[pid]; });
+            return p;
+        },
+        /** Kategorien und Sender einer Wiedergabeliste für die Auswahl (null = muss erst geladen werden) */
+        source: function (pid) {
+            var sep = function (c) { return !NameTidy.isSep(c.name || ''); };
+            if (String(pid) === this.curId()) {
+                var raw = LiveScreen.prototype.categories.call(new LiveScreen(0));
+                var list = function (k) { return new LiveScreen(k).filter().filter(sep); };
+                return {
+                    cats: raw.map(function (c, i) { return i === 0 ? T("☰  Alle") : i <= 2 ? c : NameTidy.cat(c); }),
+                    list: list,
+                    def: list(1).length ? 1 : 0
+                };
+            }
+            var d = this.lists[pid];
+            if (!d || d.then) return null;
+            return {
+                cats: [T("☰  Alle")].concat(d.cats),
+                list: function (k) { if (!k) return d.chans; var c = d.cats[k - 1]; return d.chans.filter(function (x) { return x.cat === c; }); },
+                def: 0
+            };
+        },
+        /** Liste rund um den Sender (für CH+/CH−), wenn gerade keine gemerkt ist */
+        around: function (pid, ch) {
+            var all = String(pid) === this.curId() ? Data.channels : (this.lists[pid] && !this.lists[pid].then ? this.lists[pid].chans : null);
+            if (!all) return null;
+            return all.filter(function (x) { return x.cat === ch.cat && !NameTidy.isSep(x.name || ''); });
+        },
+        save: function (cells) {
+            Storage.set('mvCells', cells.map(function (c) { return c ? { pid: c.pid, id: c.ch.id, n: c.ch.name, logo: c.ch.logo || '', cat: c.ch.cat || '', url: c.url } : null; }));
+        },
+        restore: function () {
+            var l = Storage.get('mvCells', null), self = this;
+            if (!Array.isArray(l) || l.length !== 4) return [null, null, null, null];
+            return l.map(function (s) {
+                if (!s || s.id == null) return null;
+                var cur = String(s.pid) === self.curId(), ch = null;
+                if (cur) for (var i = 0; i < Data.channels.length; i++) if (Data.channels[i].id === s.id) { ch = Data.channels[i]; break; }
+                if (!ch && cur && Data.channels.length) return null;            // gibt es in der Liste nicht mehr
+                if (!ch) ch = { id: s.id, name: s.n || '', logo: s.logo || '', cat: s.cat || '', type: 'live' };
+                var url = self.url(s.pid, ch) || s.url;
+                return url ? { pid: String(s.pid), ch: ch, url: url, list: null } : null;
+            });
+        }
+    };
+
+    function MultiViewScreen() {
+        this.cells = MV.restore();
+        this.nodes = [];
+        this.audio = 0;
+        this.state = ['', '', '', ''];
+        this.tries = [0, 0, 0, 0];
+        this.timers = [null, null, null, null];
+        this.pick = null;            // offene Senderauswahl: { i, pid, cat }
+        this.lastPid = null;
+        this.focusKey = 'mv-0';
+    }
+    MultiViewScreen.prototype.render = function (root) {
+        var self = this;
+        Player.stop();
+        document.body.classList.add('preview-mode', 'mv-mode');
+        // Kein Übergang beim Öffnen: die Bildflächen werden nach der Lage der Fenster gelegt
+        root.appendChild(h('div', 'eg-preview mv-noanim'));
+        var grid = h('div', 'mv-grid');
+        this.nodes = [];
+        for (var i = 0; i < 4; i++) grid.appendChild(this.cellNode(i));
+        root.appendChild(grid);
+        var hint = h('div', 'mv-hint');
+        hint.innerHTML = '<b>Multi-View</b><span class="mv-beta">BETA</span><span></span>';
+        hint.lastChild.textContent = T("OK: Sender wählen · Pfeile: Fenster & Ton · CH+/CH−: Sender wechseln · Zurück: Beenden");
+        root.appendChild(hint);
+        clearTimeout(this.hintT);
+        this.hintT = setTimeout(function () { hint.classList.add('off'); }, 7000);
+        this.pick = null;
+        this.pickLayer = h('div', 'mv-pick hidden');
+        // Wiedergabelisten des Geräts noch nicht geholt (Schnellstart mit gemerkter Liste): jetzt nachholen
+        if (!Remote.lists) {
+            try { Remote.load().then(function () { if (self.pick && Nav.top() === self) self.drawPick(); }, function () { /* offline: nur die aktuelle Liste */ }); } catch (eR) { /* egal */ }
+        }
+        root.appendChild(this.pickLayer);
+        // erst nach dem Zeichnen messen und starten
+        setTimeout(function () {
+            if (Nav.top() !== self) return;
+            for (var k = 0; k < 4; k++) self.play(k);
+            self.setAudio(self.audio, true);
+        }, 40);
+    };
+    MultiViewScreen.prototype.cellNode = function (i) {
+        var self = this;
+        var node = h('div', 'mv-cell');
+        node.appendChild(h('div', 'mv-plus', '+'));
+        node.appendChild(h('div', 'mv-empty-t', T("Sender wählen")));
+        var lab = h('div', 'mv-lab');
+        lab.innerHTML = '<span class="mv-snd">' + icon('sound', 26) + '</span><span class="mv-name"></span>';
+        node.appendChild(lab);
+        node.appendChild(h('div', 'mv-st'));
+        focusable(node, 'mv-' + i, function () { self.action(i); }, 'mv');
+        node._onFocus = function () { if (!self.pick) self.setAudio(i); };
+        node._onLong = function () { if (self.cells[i]) self.clear(i); else self.openPick(i); };
+        this.nodes[i] = node;
+        this.label(i);
+        return node;
+    };
+    MultiViewScreen.prototype.label = function (i) {
+        var node = this.nodes[i], c = this.cells[i];
+        if (!node) return;
+        node.classList.toggle('empty', !c);
+        var pl = c && c.pid !== MV.curId() ? MV.plName(c.pid) : '';
+        node.querySelector('.mv-name').textContent = c ? MV.name(c.ch) + (pl ? '  ·  ' + pl : '') : '';
+    };
+    MultiViewScreen.prototype.play = function (i) {
+        clearTimeout(this.timers[i]);
+        var c = this.cells[i], node = this.nodes[i];
+        if (!c || !node) { if (AB && AB.mvClose) AB.mvClose(i); this.setState(i, ''); return; }
+        var fr = Player.fractions(stageRect(node));
+        AB.mvOpen(i, c.url, fr.x, fr.y, fr.w, fr.h);
+        this.setState(i, 'load');
+    };
+    /** Bildflächen neu anlegen (z. B. nach dem Drehen des Handys) */
+    MultiViewScreen.prototype.place = function () {
+        for (var i = 0; i < 4; i++) {
+            if (!this.cells[i] || !this.nodes[i]) continue;
+            var fr = Player.fractions(stageRect(this.nodes[i]));
+            AB.mvRect(i, fr.x, fr.y, fr.w, fr.h);
+        }
+    };
+    MultiViewScreen.prototype.setState = function (i, st, text) {
+        this.state[i] = st;
+        var node = this.nodes[i];
+        if (!node) return;
+        node.querySelector('.mv-st').textContent = text || (st === 'load' || st === 'buf' ? T("Lädt …") : '');
+        node.classList.toggle('mv-err', st === 'err');
+    };
+    MultiViewScreen.prototype.onEvent = function (o) {
+        var i = o.i, self = this;
+        if (!(i >= 0 && i < 4) || !this.cells[i]) return;
+        if (o.ev === 'frame' || o.ev === 'ready') {
+            if (o.ev === 'frame') this.tries[i] = 0;
+            if (this.state[i] !== 'err') this.setState(i, 'ok');
+        } else if (o.ev === 'buffer') {
+            if (this.state[i] === 'ok') this.setState(i, 'buf');
+        } else if (o.ev === 'error' || o.ev === 'end') {
+            var n = ++this.tries[i];
+            if (n <= 3) {
+                this.setState(i, 'err', T("Sender lädt nicht – neuer Versuch …"));
+                clearTimeout(this.timers[i]);
+                this.timers[i] = setTimeout(function () { if (Nav.top() === self) self.play(i); }, 2500 * n);
+            } else {
+                this.setState(i, 'err', T("Sender lädt nicht. Vielleicht erlaubt dein Abo nicht so viele Sender gleichzeitig."));
+            }
+        }
+    };
+    MultiViewScreen.prototype.setAudio = function (i, force) {
+        if (this.audio === i && !force) return;
+        this.audio = i;
+        if (AB && AB.mvAudio) AB.mvAudio(i);
+        for (var k = 0; k < this.nodes.length; k++) if (this.nodes[k]) this.nodes[k].classList.toggle('mv-audio', k === i);
+    };
+    MultiViewScreen.prototype.action = function (i) {
+        var self = this, c = this.cells[i];
+        if (!c) { this.openPick(i); return; }
+        Modal.open(MV.name(c.ch), c.pid !== MV.curId() ? MV.plName(c.pid) : '', [
+            { label: T("Sender wechseln"), primary: true, action: function () { self.openPick(i); } },
+            { label: T("Im Vollbild schauen"), action: function () { self.full(i); } },
+            { label: T("Fenster leeren"), action: function () { self.clear(i); } },
+            { label: T("Abbrechen") }
+        ]);
+    };
+    MultiViewScreen.prototype.set = function (i, pid, ch, list) {
+        var url = MV.url(pid, ch);
+        if (!url) { toast(T("Dieser Sender lässt sich hier nicht öffnen."), 4000); return; }
+        this.cells[i] = { pid: String(pid), ch: ch, url: url, list: list || null };
+        this.tries[i] = 0;
+        this.label(i);
+        MV.save(this.cells);
+        this.play(i);
+        try { if (String(pid) === MV.curId()) RecentLive.add(ch); } catch (e) { /* egal */ }
+    };
+    MultiViewScreen.prototype.clear = function (i) {
+        this.cells[i] = null;
+        this.label(i);
+        MV.save(this.cells);
+        this.play(i);
+    };
+    MultiViewScreen.prototype.zap = function (i, dir) {
+        var c = this.cells[i];
+        if (!c) return;
+        var list = c.list || MV.around(c.pid, c.ch);
+        if (!list || list.length < 2) return;
+        var idx = -1;
+        for (var k = 0; k < list.length; k++) if (list[k].id === c.ch.id) { idx = k; break; }
+        var next = list[((idx < 0 ? 0 : idx + dir) + list.length) % list.length];
+        this.set(i, c.pid, next, list);
+    };
+    MultiViewScreen.prototype.full = function (i) {
+        var c = this.cells[i];
+        if (!c) return;
+        var items, idx = 0;
+        if (c.pid === MV.curId() && !c.ch.url) {
+            items = c.list || [c.ch];
+            for (var k = 0; k < items.length; k++) if (items[k].id === c.ch.id) { idx = k; break; }
+            if (items[idx] !== c.ch && items[idx].id !== c.ch.id) { items = [c.ch]; idx = 0; }
+        } else {
+            // Sender aus einer anderen Wiedergabeliste: mit seiner eigenen Adresse abspielen
+            var copy = {};
+            for (var key in c.ch) if (c.ch.hasOwnProperty(key)) copy[key] = c.ch[key];
+            copy.url = c.url;
+            items = [copy];
+        }
+        Nav.push(new PlayerScreen(items, idx, 'live'));
+    };
+    MultiViewScreen.prototype.focusIdx = function () { return this.nodes.indexOf(Focus.cur); };
+
+    // ---------- Senderauswahl für ein Fenster: Wiedergabeliste → Kategorie → Sender ----------
+    MultiViewScreen.prototype.openPick = function (i) {
+        var c = this.cells[i];
+        this.pick = { i: i, pid: c ? c.pid : (this.lastPid || MV.curId()), cat: -1 };
+        for (var k = 0; k < this.nodes.length; k++) this.nodes[k].classList.remove('focusable');
+        this.drawPick();
+    };
+    MultiViewScreen.prototype.closePick = function () {
+        var i = this.pick ? this.pick.i : 0;
+        this.pick = null;
+        this.pickLayer.classList.add('hidden');
+        this.pickLayer.innerHTML = '';
+        for (var k = 0; k < this.nodes.length; k++) this.nodes[k].classList.add('focusable');
+        Focus.set(this.nodes[i]);
+        this.setAudio(i);
+    };
+    MultiViewScreen.prototype.drawPick = function (focusOn) {
+        var self = this, pk = this.pick, L = this.pickLayer;
+        L.innerHTML = '';
+        L.classList.remove('hidden');
+        L.classList.toggle('right', pk.i % 2 === 0);          // Fenster links → Auswahl rechts (das Fenster bleibt sichtbar)
+        L.appendChild(h('div', 'mv-p-head', Tf("Sender für Fenster {0}", [pk.i + 1])));
+        var pls = MV.playlists();
+        if (pls.length > 1) {
+            var bar = h('div', 'mv-p-pls hscroll');
+            pls.forEach(function (p) {
+                var chip = h('div', 'mv-p-pl' + (String(p.id) === pk.pid ? ' on' : ''), p.name);
+                bar.appendChild(focusable(chip, 'mvp-pl-' + p.id, function () {
+                    if (String(p.id) === pk.pid) { var f = L.querySelector('.mv-p-row'); if (f) Focus.set(f); return; }
+                    pk.pid = String(p.id); pk.cat = -1; self.lastPid = pk.pid;
+                    self.drawPick('pl');
+                }, 'mvpl'));
+            });
+            L.appendChild(bar);
+        }
+        var body = h('div', 'mv-p-body' + (pls.length > 1 ? '' : ' nopl'));
+        var cc = h('div', 'mv-p-cats'), cs = h('div', 'scroll'), cl = h('div', 'mv-p-chs'), ls = h('div', 'scroll');
+        cc.appendChild(cs); cl.appendChild(ls);
+        body.appendChild(cc); body.appendChild(cl);
+        L.appendChild(body);
+        var data = MV.source(pk.pid);
+        if (!data) {
+            ls.appendChild(h('div', 'mv-p-note', T("Wiedergabeliste wird geladen …")));
+            MV.load(pk.pid).then(function () {
+                if (self.pick === pk && Nav.top() === self) self.drawPick(focusOn);
+            }, function (e) {
+                if (self.pick !== pk) return;
+                ls.innerHTML = '';
+                ls.appendChild(h('div', 'mv-p-note', (e && e.message) || String(e)));
+            });
+            var chipOn = L.querySelector('.mv-p-pl.on');
+            if (chipOn) Focus.set(chipOn);
+            return;
+        }
+        if (pk.cat < 0 || pk.cat >= data.cats.length) pk.cat = data.def;
+        var items = data.list(pk.cat);
+        batchRender(cs, data.cats, function (name, k) {
+            var n = h('div', 'mv-p-cat' + (k === pk.cat ? ' on' : ''), name);
+            return focusable(n, 'mvp-cat-' + k, function () { pk.cat = k; self.drawPick('list'); }, 'mvcats');
+        }, 60);
+        if (!items.length) ls.appendChild(h('div', 'mv-p-note', T("Keine Sender in dieser Kategorie.")));
+        batchRender(ls, items, function (ch, k) {
+            var row = h('div', 'mv-p-row');
+            var lg = h('img', 'mv-p-logo');
+            if (ch.logo) LazyImg.set(lg, logoUrl(ch.logo));
+            lg.onerror = function () { lg.style.visibility = 'hidden'; };
+            row.appendChild(lg);
+            row.appendChild(h('div', 'mv-p-name', MV.name(ch)));
+            return focusable(row, 'mvp-ch-' + k, function () {
+                var i = pk.i;
+                self.set(i, pk.pid, ch, items);
+                self.closePick();
+            }, 'mvch');
+        }, 40);
+        var tgt = focusOn === 'pl' ? L.querySelector('.mv-p-pl.on') : null;
+        if (!tgt && !items.length) tgt = L.querySelector('.mv-p-cat.on');
+        Focus.set(tgt || L.querySelector('.mv-p-row') || L.querySelector('.mv-p-cat.on') || L.querySelector('.focusable'));
+    };
+    MultiViewScreen.prototype.onKey = function (k) {
+        if (this.pick) {
+            if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { this.closePick(); return true; }
+            return false;
+        }
+        if (k === KEY.CH_UP || k === KEY.CH_DOWN) {
+            var i = this.focusIdx();
+            if (i >= 0) this.zap(i, k === KEY.CH_UP ? -1 : 1);
+            return true;
+        }
+        return false;
+    };
+    MultiViewScreen.prototype.hide = function () {
+        clearTimeout(this.hintT);
+        for (var i = 0; i < 4; i++) clearTimeout(this.timers[i]);
+        this.pick = null;
+        if (AB && AB.mvCloseAll) AB.mvCloseAll();
+        document.body.classList.remove('mv-mode');
+    };
+    window.__androidMv = function (o) { var s = Nav.top(); if (o && s instanceof MultiViewScreen) s.onEvent(o); };
+    window.addEventListener('resize', function () {
+        var s = Nav.top();
+        if (s instanceof MultiViewScreen) setTimeout(function () { if (Nav.top() === s) s.place(); }, 350);
+    });
 
     // =====================================================================
     // Weiter ansehen

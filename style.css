@@ -2135,3 +2135,51 @@ body.ios .guide .gd-card { width: 100%; }
 .home-head-btns.compact .text-btn { height: 56px; padding: 0 18px; margin-left: 10px; margin-top: 5px; font-size: 19px; gap: 8px; }
 .home-head-btns.compact .text-btn svg { width: 22px; height: 22px; }
 .home-head-btns.compact .text-btn small { font-size: 14px; }
+
+/* ---------- Multi-View (Beta): 4 Fenster ---------- */
+body.mv-mode #app { background: transparent; }
+body.mv-mode #app::before { display: none; }
+.mv-noanim { display: none !important; }
+.mv-grid { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.mv-cell { position: absolute; width: 50%; height: 50%; box-sizing: border-box; border: 3px solid #000; background: transparent; }
+.mv-cell:nth-child(1) { left: 0; top: 0; }
+.mv-cell:nth-child(2) { left: 50%; top: 0; }
+.mv-cell:nth-child(3) { left: 0; top: 50%; }
+.mv-cell:nth-child(4) { left: 50%; top: 50%; }
+.mv-cell.empty { background: #101215; border-color: #1c1e23; }
+.mv-cell.focused { box-shadow: inset 0 0 0 6px #f4dc9e !important; }
+.mv-plus, .mv-empty-t { display: none; position: absolute; left: 0; right: 0; text-align: center; }
+.mv-plus { top: 32%; font-size: 120px; line-height: 120px; color: rgba(244,220,158,.45); }
+.mv-empty-t { top: 60%; font-size: 30px; color: #a7a39a; }
+.mv-cell.empty .mv-plus, .mv-cell.empty .mv-empty-t { display: block; }
+.mv-cell.empty.focused .mv-plus { color: #f4dc9e; }
+.mv-lab { position: absolute; left: 18px; bottom: 16px; max-width: 85%; padding: 8px 16px; border-radius: 10px; background: rgba(0,0,0,.65);
+    font-size: 24px; white-space: nowrap; overflow: hidden; display: flex; align-items: center; }
+.mv-cell.empty .mv-lab { display: none; }
+.mv-snd { display: none; color: #f4dc9e; margin-right: 10px; line-height: 0; flex: none; }
+.mv-cell.mv-audio .mv-snd { display: inline-block; }
+.mv-name { overflow: hidden; text-overflow: ellipsis; }
+.mv-st { position: absolute; left: 0; right: 0; top: 50%; margin-top: -20px; padding: 0 40px; text-align: center; font-size: 28px; text-shadow: 0 2px 6px #000; }
+.mv-cell.mv-err .mv-st { color: #ff8a7a; }
+.mv-hint { position: absolute; left: 50%; top: 24px; -webkit-transform: translateX(-50%); transform: translateX(-50%); padding: 14px 28px; border-radius: 14px;
+    background: rgba(0,0,0,.8); border: 1px solid rgba(217,176,102,.5); font-size: 24px; white-space: nowrap; transition: opacity .6s; z-index: 3; }
+.mv-hint b { color: #f4dc9e; margin-right: 10px; }
+.mv-beta { background: #d9b066; color: #111; font-size: 16px; font-weight: 800; padding: 3px 8px; border-radius: 6px; margin-right: 16px; vertical-align: 2px; }
+.mv-hint.off { opacity: 0; }
+.mv-pick { position: absolute; left: 0; top: 0; bottom: 0; width: 1000px; background: rgba(12,13,16,.97); border-right: 2px solid rgba(217,176,102,.5); z-index: 4; }
+.mv-pick.right { left: auto; right: 0; border-right: 0; border-left: 2px solid rgba(217,176,102,.5); }
+.mv-p-head { position: absolute; left: 40px; top: 30px; font-size: 34px; font-weight: bold; color: #f4dc9e; }
+.mv-p-pls { position: absolute; left: 30px; right: 30px; top: 88px; white-space: nowrap; overflow: hidden; }
+.mv-p-pl { display: inline-block; margin: 6px; padding: 12px 22px; border-radius: 26px; border: 2px solid rgba(255,255,255,.3); font-size: 24px; }
+.mv-p-pl.on { border-color: #d9b066; background: rgba(217,176,102,.22); color: #f4dc9e; }
+.mv-p-body { position: absolute; left: 30px; right: 30px; top: 170px; bottom: 30px; }
+.mv-p-body.nopl { top: 100px; }
+.mv-p-cats { position: absolute; left: 0; top: 0; bottom: 0; width: 330px; }
+.mv-p-chs { position: absolute; left: 350px; right: 0; top: 0; bottom: 0; }
+.mv-p-cat { margin: 6px; padding: 16px 18px; border-radius: 10px; font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: rgba(255,255,255,.04); }
+.mv-p-cat.on { color: #f4dc9e; background: rgba(217,176,102,.18); }
+.mv-p-row { margin: 6px; height: 74px; border-radius: 10px; display: flex; align-items: center; padding: 0 16px; background: rgba(255,255,255,.05); }
+.mv-p-logo { width: 80px; height: 52px; object-fit: contain; margin-right: 18px; flex: none; }
+.mv-p-name { font-size: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mv-p-note { padding: 30px; font-size: 26px; color: #a7a39a; line-height: 1.4; white-space: normal; }
+.mv-p-pl.focused, .mv-p-cat.focused, .mv-p-row.focused { background: rgba(217,176,102,.38); }

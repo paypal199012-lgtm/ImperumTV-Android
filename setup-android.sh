@@ -22,6 +22,7 @@ cp MainActivity.kt "$OUT/app/src/main/java/tv/imperum/app/MainActivity.kt"
 cp Recorder.kt "$OUT/app/src/main/java/tv/imperum/app/Recorder.kt"
 cp ChatPush.kt "$OUT/app/src/main/java/tv/imperum/app/ChatPush.kt"
 cp ListMapper.kt "$OUT/app/src/main/java/tv/imperum/app/ListMapper.kt"
+cp MultiView.kt "$OUT/app/src/main/java/tv/imperum/app/MultiView.kt"
 # Bilder in der richtigen Auflösung, damit sie auf dem Fernseher scharf und mittig sind
 # (Fire TV nimmt je nach Modell eine andere Größe, deshalb liegt das Logo in allen Ordnern)
 RES="$OUT/app/src/main/res"

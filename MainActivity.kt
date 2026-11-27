@@ -93,6 +93,11 @@ class MainActivity : Activity() {
     /** Nur der nächste Sender mit VLC (eingebauter Player konnte ihn nicht lesen) */
     @Volatile private var forceVlcNext = false
     private lateinit var httpFactory: DefaultHttpDataSource.Factory
+    /** Multi-View (Beta): bis zu 4 Sender gleichzeitig – erst beim ersten Öffnen angelegt */
+    private var multi: MultiView? = null
+    private fun mv(): MultiView = multi ?: MultiView(this, root, httpFactory, { webView }) { json ->
+        handler.post { if (uiReady) webView.evaluateJavascript("window.__androidMv && window.__androidMv($json)", null) }
+    }.also { multi = it }
     /** Oberfläche schon aufgebaut? (Während der Fehlerbericht offen ist, noch nicht) */
     private val uiReady: Boolean get() = ::webView.isInitialized && ::player.isInitialized
 
@@ -956,6 +961,7 @@ class MainActivity : Activity() {
         if (!uiReady) return
         webView.onResume()
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('visible')", null)
+        try { multi?.resume() } catch (e: Throwable) { }
     }
 
     /** Das System braucht Speicher: der Oberfläche Bescheid geben, damit sie Zwischenspeicher freigibt */
@@ -971,6 +977,7 @@ class MainActivity : Activity() {
         webView.evaluateJavascript("window.__androidLifecycle && window.__androidLifecycle('hidden')", null)
         player.pause()
         if (useVlc) vlc.pause()
+        try { multi?.pause() } catch (e: Throwable) { }
         webView.onPause()
         super.onStop()
     }
@@ -1317,6 +1324,7 @@ class MainActivity : Activity() {
         try { netCb?.let { (getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).unregisterNetworkCallback(it) } } catch (e: Throwable) { }
         try { if (::player.isInitialized) player.release() } catch (e: Throwable) { }
         try { if (::vlc.isInitialized) vlc.release() } catch (e: Throwable) { }
+        try { multi?.closeAll() } catch (e: Throwable) { }
         try { webView.destroy() } catch (e: Throwable) { }
         super.onDestroy()
     }
@@ -2365,6 +2373,36 @@ class MainActivity : Activity() {
                 updateCache()
             }
         }
+
+        // ---------- Multi-View (Beta): 4 Fenster ----------
+        @JavascriptInterface
+        fun mvAvailable(): Boolean = true
+
+        @JavascriptInterface
+        fun mvOpen(i: Int, url: String, x: Double, y: Double, w: Double, h: Double) {
+            handler.post {
+                try {
+                    // Normaler Player aus: die Fenster brauchen die Decoder
+                    if (currentUrl.isNotEmpty()) {
+                        player.stop(); player.clearMediaItems(); playerView.visibility = View.GONE
+                        vlc.stop(); useVlc = false; currentUrl = ""; updateCache()
+                    }
+                    mv().open(i, url, x, y, w, h)
+                } catch (e: Throwable) { }
+            }
+        }
+
+        @JavascriptInterface
+        fun mvRect(i: Int, x: Double, y: Double, w: Double, h: Double) { handler.post { try { multi?.rect(i, x, y, w, h) } catch (e: Throwable) { } } }
+
+        @JavascriptInterface
+        fun mvClose(i: Int) { handler.post { try { multi?.close(i) } catch (e: Throwable) { } } }
+
+        @JavascriptInterface
+        fun mvAudio(i: Int) { handler.post { try { multi?.setAudio(i) } catch (e: Throwable) { } } }
+
+        @JavascriptInterface
+        fun mvCloseAll() { handler.post { try { multi?.closeAll(); multi = null } catch (e: Throwable) { } } }
 
         @JavascriptInterface
         fun setRect(x: Double, y: Double, w: Double, h: Double) {
