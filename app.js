@@ -11174,6 +11174,15 @@
                 }, 'mvpl'));
             });
             L.appendChild(bar);
+            // Viele Wiedergabelisten: Leiste auch mit Maus (Rad), Finger und Pfeiltasten seitlich verschieben; rechts ausblenden, solange noch mehr kommt
+            var moreHint = function () { bar.classList.toggle('more', bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 4); };
+            bar.addEventListener('wheel', function (e) {
+                var d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+                if (!d || bar.scrollWidth <= bar.clientWidth) return;
+                bar.scrollLeft += d; e.preventDefault(); moreHint();
+            }, { passive: false });
+            bar.addEventListener('scroll', moreHint);
+            setTimeout(function () { var on = bar.querySelector('.mv-p-pl.on'); if (on) ensureVisible(on); moreHint(); }, 0);
         }
         var body = h('div', 'mv-p-body' + (pls.length > 1 ? '' : ' nopl'));
         var cc = h('div', 'mv-p-cats'), cs = h('div', 'scroll'), cl = h('div', 'mv-p-chs'), ls = h('div', 'scroll');

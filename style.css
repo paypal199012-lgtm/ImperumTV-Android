@@ -2169,7 +2169,9 @@ body.mv-mode #app::before { display: none; }
 .mv-pick { position: absolute; left: 0; top: 0; bottom: 0; width: 1000px; background: rgba(12,13,16,.97); border-right: 2px solid rgba(217,176,102,.5); z-index: 4; }
 .mv-pick.right { left: auto; right: 0; border-right: 0; border-left: 2px solid rgba(217,176,102,.5); }
 .mv-p-head { position: absolute; left: 40px; top: 30px; font-size: 34px; font-weight: bold; color: #f4dc9e; }
-.mv-p-pls { position: absolute; left: 30px; right: 30px; top: 88px; white-space: nowrap; overflow: hidden; }
+.mv-p-pls { position: absolute; left: 30px; right: 30px; top: 88px; white-space: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.mv-p-pls::-webkit-scrollbar { display: none; }
+.mv-p-pls.more { -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); }
 .mv-p-pl { display: inline-block; margin: 6px; padding: 12px 22px; border-radius: 26px; border: 2px solid rgba(255,255,255,.3); font-size: 24px; }
 .mv-p-pl.on { border-color: #d9b066; background: rgba(217,176,102,.22); color: #f4dc9e; }
 .mv-p-body { position: absolute; left: 30px; right: 30px; top: 170px; bottom: 30px; }
