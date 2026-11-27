@@ -10834,21 +10834,40 @@
         this.timers = [null, null, null, null];
         this.pick = null;            // offene Senderauswahl: { i, pid, cat }
         this.lastPid = null;
+        this.n = Storage.get('mvLayout', 0) === 2 ? 2 : 4;     // 2 oder 4 Fenster (gemerkt)
         this.focusKey = 'mv-0';
     }
+    /** Ansicht umstellen: 2 Fenster nebeneinander oder 4 Fenster. Belegte Fenster 3 und 4 bleiben gemerkt. */
+    MultiViewScreen.prototype.setLayout = function (n) {
+        n = n === 2 ? 2 : 4;
+        Storage.set('mvLayout', n);
+        if (n === this.n) return;
+        this.n = n;
+        if (this.grid) this.grid.classList.toggle('mv-two', n === 2);
+        for (var k = 0; k < 4; k++) {
+            if (k >= n) { clearTimeout(this.timers[k]); if (AB && AB.mvClose) AB.mvClose(k); this.setState(k, ''); }
+            else if (k >= 2) this.play(k);                       // Fenster 3 und 4 wieder da
+        }
+        this.place();                                            // Fenster 1 und 2 liegen jetzt anders
+        if (this.audio >= n) this.setAudio(0);
+        var fi = this.focusIdx();
+        if (fi < 0 || fi >= n) { if (!Modal.node) Focus.set(this.nodes[this.audio < n ? this.audio : 0]); }
+        toast(n === 2 ? T("2 Fenster") : T("4 Fenster"), 1500);
+    };
     MultiViewScreen.prototype.render = function (root) {
         var self = this;
         Player.stop();
         document.body.classList.add('preview-mode', 'mv-mode');
         // Kein Übergang beim Öffnen: die Bildflächen werden nach der Lage der Fenster gelegt
         root.appendChild(h('div', 'eg-preview mv-noanim'));
-        var grid = h('div', 'mv-grid');
+        var grid = h('div', 'mv-grid' + (this.n === 2 ? ' mv-two' : ''));
+        this.grid = grid;
         this.nodes = [];
         for (var i = 0; i < 4; i++) grid.appendChild(this.cellNode(i));
         root.appendChild(grid);
         var hint = h('div', 'mv-hint');
         hint.innerHTML = '<b>Multi-View</b><span class="mv-beta">BETA</span><span></span>';
-        hint.lastChild.textContent = T("OK: Sender wählen · Pfeile: Fenster & Ton · CH+/CH−: Sender wechseln · Zurück: Beenden");
+        hint.lastChild.textContent = T("OK: Sender wählen · Pfeile: Fenster & Ton · CH+/CH−: Sender · Grün: 2 / 4 Fenster · Zurück: Beenden");
         root.appendChild(hint);
         clearTimeout(this.hintT);
         this.hintT = setTimeout(function () { hint.classList.add('off'); }, 7000);
@@ -10863,7 +10882,15 @@
         setTimeout(function () {
             if (Nav.top() !== self) return;
             for (var k = 0; k < 4; k++) self.play(k);
+            if (self.audio >= self.n) self.audio = 0;
             self.setAudio(self.audio, true);
+            // Beim ersten Mal fragen, wie viele Fenster (danach gemerkt, umstellbar mit OK auf einem Fenster oder Grün)
+            if (!Storage.get('mvLayout', 0) && !Modal.node) {
+                Modal.open(T("Multi-View"), T("Wie viele Fenster möchtest du sehen? Umstellen kannst du das jederzeit mit OK auf einem Fenster oder der grünen Taste."), [
+                    { label: T("4 Fenster"), primary: true, action: function () { self.setLayout(4); } },
+                    { label: T("2 Fenster"), action: function () { self.setLayout(2); } }
+                ]);
+            }
         }, 40);
     };
     MultiViewScreen.prototype.cellNode = function (i) {
@@ -10892,14 +10919,14 @@
     MultiViewScreen.prototype.play = function (i) {
         clearTimeout(this.timers[i]);
         var c = this.cells[i], node = this.nodes[i];
-        if (!c || !node) { if (AB && AB.mvClose) AB.mvClose(i); this.setState(i, ''); return; }
+        if (!c || !node || i >= this.n) { if (AB && AB.mvClose) AB.mvClose(i); this.setState(i, ''); return; }
         var fr = Player.fractions(stageRect(node));
         AB.mvOpen(i, c.url, fr.x, fr.y, fr.w, fr.h);
         this.setState(i, 'load');
     };
     /** Bildflächen neu anlegen (z. B. nach dem Drehen des Handys) */
     MultiViewScreen.prototype.place = function () {
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; i < this.n; i++) {
             if (!this.cells[i] || !this.nodes[i]) continue;
             var fr = Player.fractions(stageRect(this.nodes[i]));
             AB.mvRect(i, fr.x, fr.y, fr.w, fr.h);
@@ -10914,7 +10941,7 @@
     };
     MultiViewScreen.prototype.onEvent = function (o) {
         var i = o.i, self = this;
-        if (!(i >= 0 && i < 4) || !this.cells[i]) return;
+        if (!(i >= 0 && i < this.n) || !this.cells[i]) return;
         if (o.ev === 'frame' || o.ev === 'ready') {
             if (o.ev === 'frame') this.tries[i] = 0;
             if (this.state[i] !== 'err') this.setState(i, 'ok');
@@ -10944,6 +10971,7 @@
             { label: T("Sender wechseln"), primary: true, action: function () { self.openPick(i); } },
             { label: T("Im Vollbild schauen"), action: function () { self.full(i); } },
             { label: T("Fenster leeren"), action: function () { self.clear(i); } },
+            { label: self.n === 4 ? T("Nur 2 Fenster zeigen") : T("4 Fenster zeigen"), action: function () { self.setLayout(self.n === 4 ? 2 : 4); } },
             { label: T("Abbrechen") }
         ]);
     };
@@ -11097,6 +11125,7 @@
             if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { this.closePick(); return true; }
             return false;
         }
+        if (k === KEY.GREEN) { this.setLayout(this.n === 4 ? 2 : 4); return true; }
         if (k === KEY.CH_UP || k === KEY.CH_DOWN) {
             var i = this.focusIdx();
             if (i >= 0) this.zap(i, k === KEY.CH_UP ? -1 : 1);

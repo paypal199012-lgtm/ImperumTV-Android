@@ -2192,3 +2192,10 @@ body.mv-mode #app::before { display: none; }
 .mv-snd { margin-right: 0; }
 .mv-cell.mv-audio .mv-lab { display: flex; }
 .mv-cell.empty .mv-lab { display: none; }
+/* Multi-View: 2 Fenster nebeneinander (in der Mitte, 16:9) */
+.mv-two .mv-cell:nth-child(1) { left: 0; top: 25%; }
+.mv-two .mv-cell:nth-child(2) { left: 50%; top: 25%; }
+.mv-two .mv-cell:nth-child(n+3) { display: none; }
+.mv-two::before, .mv-two::after { content: ""; position: absolute; left: 0; right: 0; height: 25%; background: #000; }
+.mv-two::before { top: 0; }
+.mv-two::after { bottom: 0; }
