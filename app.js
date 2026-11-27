@@ -10783,9 +10783,12 @@
             if (String(pid) === this.curId()) {
                 var raw = LiveScreen.prototype.categories.call(new LiveScreen(0));
                 var list = function (k) { return new LiveScreen(k).filter().filter(sep); };
+                var allCur = null;
                 return {
                     cats: raw.map(function (c, i) { return i === 0 ? T("☰  Alle") : i <= 2 ? c : NameTidy.cat(c); }),
                     list: list,
+                    // für die Suche: alle sichtbaren Sender (ohne Zusammenfassen – geht beim Tippen schneller)
+                    all: function () { return allCur || (allCur = EventOver.apply(Hidden.apply(Parental.visible('live', Data.channels))).filter(sep)); },
                     def: list(1).length ? 1 : 0
                 };
             }
@@ -10794,6 +10797,7 @@
             return {
                 cats: [T("☰  Alle")].concat(d.cats),
                 list: function (k) { if (!k) return d.chans; var c = d.cats[k - 1]; return d.chans.filter(function (x) { return x.cat === c; }); },
+                all: function () { return d.chans; },
                 def: 0
             };
         },
@@ -10991,7 +10995,7 @@
     // ---------- Senderauswahl für ein Fenster: Wiedergabeliste → Kategorie → Sender ----------
     MultiViewScreen.prototype.openPick = function (i) {
         var c = this.cells[i];
-        this.pick = { i: i, pid: c ? c.pid : (this.lastPid || MV.curId()), cat: -1 };
+        this.pick = { i: i, pid: c ? c.pid : (this.lastPid || MV.curId()), cat: -1, query: '' };
         for (var k = 0; k < this.nodes.length; k++) this.nodes[k].classList.remove('focusable');
         this.drawPick();
     };
@@ -11043,12 +11047,17 @@
             return;
         }
         if (pk.cat < 0 || pk.cat >= data.cats.length) pk.cat = data.def;
-        var items = data.list(pk.cat);
+        var items = pk.query ? data.all().filter(searchMatcher(pk.query)) : data.list(pk.cat);
+        // Suchen ganz oben in der Kategorie-Spalte (die Suche gilt für die ganze Wiedergabeliste)
+        var sn = h('div', 'mv-p-cat mv-p-search' + (pk.query ? ' on' : ''));
+        sn.innerHTML = icon('search', 26) + '<span></span>';
+        sn.lastChild.textContent = pk.query ? '„' + pk.query + '“' : T("Suchen");
+        cs.appendChild(focusable(sn, 'mvp-search', function () { self.searchPick(); }, 'mvcats'));
         batchRender(cs, data.cats, function (name, k) {
-            var n = h('div', 'mv-p-cat' + (k === pk.cat ? ' on' : ''), name);
-            return focusable(n, 'mvp-cat-' + k, function () { pk.cat = k; self.drawPick('list'); }, 'mvcats');
+            var n = h('div', 'mv-p-cat' + (k === pk.cat && !pk.query ? ' on' : ''), name);
+            return focusable(n, 'mvp-cat-' + k, function () { pk.cat = k; pk.query = ''; self.drawPick('list'); }, 'mvcats');
         }, 60);
-        if (!items.length) ls.appendChild(h('div', 'mv-p-note', T("Keine Sender in dieser Kategorie.")));
+        if (!items.length) ls.appendChild(h('div', 'mv-p-note', pk.query ? Tf("Keine Treffer für „{0}“ in dieser Wiedergabeliste.", [pk.query]) : T("Keine Sender in dieser Kategorie.")));
         batchRender(ls, items, function (ch, k) {
             var row = h('div', 'mv-p-row');
             var lg = h('img', 'mv-p-logo');
@@ -11064,10 +11073,25 @@
         }, 40);
         var tgt = focusOn === 'pl' ? L.querySelector('.mv-p-pl.on') : null;
         if (!tgt && !items.length) tgt = L.querySelector('.mv-p-cat.on');
+        if (focusOn === 'search' && !items.length) tgt = sn;
         Focus.set(tgt || L.querySelector('.mv-p-row') || L.querySelector('.mv-p-cat.on') || L.querySelector('.focusable'));
+    };
+    MultiViewScreen.prototype.searchPick = function () {
+        var self = this, pk = this.pick;
+        if (!pk) return;
+        openSearchDialog(T("Sender suchen"), pk.query, function (q) {
+            var d = MV.source(pk.pid);
+            return d ? d.all().filter(searchMatcher(q)).length : 0;
+        }, function (q) {
+            if (self.pick !== pk || Nav.top() !== self) return;
+            pk.query = q;
+            self.drawPick(q ? 'search' : 'list');
+        });
     };
     MultiViewScreen.prototype.onKey = function (k) {
         if (this.pick) {
+            // Blaue Taste: Suche öffnen
+            if (k === KEY.BLUE) { this.searchPick(); return true; }
             if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { this.closePick(); return true; }
             return false;
         }

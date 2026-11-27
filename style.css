@@ -2183,3 +2183,6 @@ body.mv-mode #app::before { display: none; }
 .mv-p-name { font-size: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mv-p-note { padding: 30px; font-size: 26px; color: #a7a39a; line-height: 1.4; white-space: normal; }
 .mv-p-pl.focused, .mv-p-cat.focused, .mv-p-row.focused { background: rgba(217,176,102,.38); }
+.mv-p-search { display: flex; align-items: center; }
+.mv-p-search svg { flex: none; margin-right: 12px; }
+.mv-p-search span { overflow: hidden; text-overflow: ellipsis; }
